@@ -141,19 +141,89 @@ For small/constrained devices — the original motivating use case.
   same screen spec, calling the REST/gRPC API a normal harpia project
   already emits for any bound message.
 
+## v1 decisions (settled 2026-08-16)
+
+- **First target: embedded C.** The original ask, and the harder of the two
+  (real widget rendering, transport, font/glyph work are all still unbuilt)
+  — scoped first rather than deferred, per doc step 2. JS/Node stays
+  designed-for (see IR below) but unimplemented until embedded C works
+  end-to-end for a trivial one-screen example.
+- **Toolchain: Python**, matching harpia's own (lexer/parser, generator
+  scripts, `Util.util.write_if_different`/`prune_stale_outputs` patterns
+  port over directly).
+- **Pipeline is target-agnostic through an IR**, so a JS/Node emitter can
+  later plug into the same tree without reworking the front half:
+  `screen.yaml → parse → IR (Screen/Widget/Binding tree) → layout pass
+  (fills in geometry) → emit(harpia Include) / emit(embedded-C)`.
+- **Concrete v1 DSL: YAML**, explicit bindings, container-based layout with
+  geometry computed by Janus at generation time (not authored, not computed
+  on-device). Verified against real harpia syntax in
+  `harpia/HarpiaTest/test.harpia` and `LexicalAnalizer/LexicalAnalyzer.py`
+  (`message name{ type field; ... };`, types `int`/`int64`/`float`/
+  `string`/`map<K,V>`, modifiers `optional`/`required`/`unique`/
+  `repeteable`/`pagination[N]`):
+
+  ```yaml
+  # screen.yaml
+  screen: UserProfile
+  layout: column
+  children:
+    - kind: label
+      id: name_label
+      bind: { message: user, field: name, type: string }
+    - kind: row
+      children:
+        - kind: label
+          id: battery_caption
+          text: "Battery:"
+        - kind: progress
+          id: battery_bar
+          bind: { message: user, field: battery_level, type: int }
+          size: { w: 80, h: 12 }
+  ```
+
+  generates `janus_generated.harpia`:
+
+  ```
+  message user{
+      string name;
+      int battery_level;
+  };
+  ```
+
+  Rules this encodes:
+  - Bindings are **flat and explicit** — every `bind` names `message`,
+    `field`, and `type` directly; Janus never infers a harpia type from
+    widget kind. No sub-messages emitted in v1 (sidesteps process.md
+    §1.3.0.3's FK/naming special-casing entirely).
+  - Multiple widgets binding to the same `message`/different `field`s merge
+    into one `message` block — the one piece of real merge logic in the
+    harpia emitter.
+  - Widget **position** is never authored — containers (`layout: column` /
+    `row`) stack children, and Janus's layout pass computes absolute
+    `{x, y, w, h}` per widget, baking it into the embedded-C output as
+    constants. The device draws precomputed rects; it never runs a layout
+    algorithm at runtime (keeps the no-malloc/~2 KiB budget intact, same
+    "push work to build time" spirit as the doc's pre-rotated 0/90/180/270
+    assets).
+  - Widget **size** is required-explicit on leaf widgets in v1 (see
+    auto-sizing note below for why this isn't permanent).
+
 ## Open questions (Stage 1 scoping — not yet decided)
 
-- **Concrete DSL syntax.** Copilot's prototype used arbitrary YAML
-  (`screen: {widgets: [...]}`), which is a reasonable starting point for
-  velocity but hasn't been reviewed or committed to as Janus's real syntax.
 - **Read access to hand-written harpia files.** Currently out of scope:
   Stage 1 assumes every bound field lives in the Janus-generated Include.
   Binding a widget to a field the human declared themselves (not generated
   by Janus) would need Janus to parse existing harpia files read-only —
   deferred, not required for a first working version.
-- **Which target ships first** — embedded C or JS/Node. Not decided. The
-  two targets are independent enough (different runtime, different
-  transport) that either can go first without blocking the other.
+- **Auto-sizing widgets (deferred, anticipated for i18n).** v1 requires
+  explicit `size: {w, h}` on leaf widgets; Janus computes position only, not
+  size, at its build-time layout pass. No translations exist yet, but when
+  they arrive, fixed pixel widths will break for locales with longer text.
+  The fix should still fit the no-malloc/~2 KiB runtime budget: do
+  auto-sizing at Janus's *generation* time (one geometry table baked per
+  locale, using that locale's glyph atlas metrics), not at device draw time.
+  Not needed until font/glyph packing (already "Stage 2+", unbuilt) exists.
 - **Janus's own toolchain.** Python (for consistency with harpia's own
   toolchain) is the default assumption, not a confirmed decision. Test
   strategy, repo layout, and CI are all unstarted.
