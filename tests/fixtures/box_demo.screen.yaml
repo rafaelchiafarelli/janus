@@ -1,0 +1,14 @@
+screen: BoxDemo
+layout: column
+children:
+  - kind: box
+    id: net_box
+    layout: column
+    collapsible: true
+    default_expanded: true
+    text: "Network"
+    children:
+      - kind: led
+        id: status_led
+        bind: { message: dev, field: status, type: int }
+        size: { w: 10, h: 10 }

@@ -223,8 +223,17 @@ For small/constrained devices — the original motivating use case.
     algorithm at runtime (keeps the no-malloc/~2 KiB budget intact, same
     "push work to build time" spirit as the doc's pre-rotated 0/90/180/270
     assets).
-  - Widget **size** is required-explicit on leaf widgets in v1 (see
-    auto-sizing note below for why this isn't permanent).
+  - Widget **size** is split by whether the dimension is content-driven or
+    an arbitrary drawing choice — a correction made once the layout pass
+    was actually implemented and the rule as first stated ("every leaf
+    needs explicit size") turned out to contradict every worked example in
+    this doc, which never bothered sizing a `label`/`header`/`button`/
+    `checkbox`/`radiobutton` but always sized `progress`/`gauge`/`image`/
+    `led`. `progress`, `gauge`, `image`, `led` **require** explicit `size`
+    — their dimensions are a real design choice Janus can't guess. `label`,
+    `header`, `button`, `checkbox`, `radiobutton` get a fixed v1 placeholder
+    default per kind when `size` is omitted (overridable), standing in
+    until real font-metric auto-sizing exists (see auto-sizing note below).
 
 ## v1 widget catalog
 

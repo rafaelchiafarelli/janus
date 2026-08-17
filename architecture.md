@@ -65,11 +65,15 @@ geometry fields left empty.
 completeness of the pipeline).
 
 **Validates (parse-time errors, not silent defaults):**
-- every leaf widget has `size`
 - `progress`/`gauge` have `range`
 - `radiobutton.value` type matches its parent `radiogroup.bind.type`
 - `button.navigate` (if present) names a screen that exists in `app.yaml`
 - `bind.type` is one of `string`/`int`/`int64`/`float` (harpia's real types)
+
+Note: `size` is *not* validated here — see Stage 2, which is where the
+required-vs-defaulted split actually gets enforced (it needs to know each
+widget's `kind`, and defaulting is a layout-policy decision, not a parse
+one).
 
 ---
 
@@ -142,8 +146,28 @@ non-expanded state).
 same IR, so it's safe to unit-test directly against expected `Rect` output.
 
 **Rule:** a container's direction (`column` stacks vertically, `row`
-stacks horizontally) plus each child's authored `size` determines every
-child's absolute position. No widget ever authors its own position.
+stacks horizontally) plus each child's size determines every child's
+absolute position; a container's own size is derived bottom-up from its
+children (sum along the stack direction, max across it) plus a fixed
+inter-sibling gap — no container is ever explicitly sized by the author.
+No widget ever authors its own position.
+
+**Size resolution per leaf** (implements the split in `Janus.md`'s v1
+widget catalog):
+- `progress`, `gauge`, `image`, `led` — `size` is **required**; the layout
+  pass raises if missing (their dimensions are a real drawing choice, not
+  derivable).
+- `label`, `header`, `button`, `checkbox`, `radiobutton` — `size` is
+  optional; if omitted, a fixed per-kind v1 placeholder default is used
+  (e.g. `label` → 60×12, `button` → 64×20, `checkbox`/`radiobutton` →
+  12×12). Authors can still override with an explicit `size`.
+
+**`box` header:** `box` has no dedicated title field — it reuses the
+generic `Widget.text` field already shared by `label`/`header`/`button`.
+Its content area is offset below a fixed-height header strip
+(`BOX_HEADER_H`, a layout constant, not part of the IR contract); `box`'s
+`geometry_collapsed` covers the header strip only, `geometry` covers
+header + body.
 
 ---
 
