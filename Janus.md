@@ -5,7 +5,9 @@
 > read it whole before writing any code. A visual companion to the
 > "Embedded-C code generation architecture" and "Input / event dispatch"
 > sections lives at [`docs/architecture.drawio`](docs/architecture.drawio)
-> (open in draw.io / diagrams.net).
+> (open in draw.io / diagrams.net). The precise receives/produces contract
+> for every pipeline stage — IR shape, generated C struct layout, ownership
+> rules, build/link graph — lives in [`architecture.md`](architecture.md).
 
 Janus is a screen/widget DSL and generator that runs **before** harpia in a
 project's pipeline. You author a UI (screens, widgets, data bindings); Janus
