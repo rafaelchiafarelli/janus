@@ -253,7 +253,7 @@ typedef enum {
     JANUS_WIDGET_LED, JANUS_WIDGET_BOX, JANUS_WIDGET_COLUMN, JANUS_WIDGET_ROW,
 } janus_widget_kind_t;
 
-typedef enum { JANUS_FIELD_NONE, JANUS_FIELD_INT, JANUS_FIELD_FLOAT, JANUS_FIELD_STRING } janus_field_type_t;
+typedef enum { JANUS_FIELD_NONE, JANUS_FIELD_INT, JANUS_FIELD_INT64, JANUS_FIELD_FLOAT, JANUS_FIELD_STRING } janus_field_type_t;
 
 typedef struct { int16_t x, y, w, h; } janus_rect_t;
 

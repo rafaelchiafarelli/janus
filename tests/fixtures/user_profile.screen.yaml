@@ -12,4 +12,5 @@ children:
       - kind: progress
         id: battery_bar
         bind: { message: user, field: battery_level, type: int }
+        range: { min: 0, max: 100 }
         size: { w: 80, h: 12 }
