@@ -1,0 +1,15 @@
+screen: UserProfile
+layout: column
+children:
+  - kind: label
+    id: name_label
+    bind: { message: user, field: name, type: string }
+  - kind: row
+    children:
+      - kind: label
+        id: battery_caption
+        text: "Battery:"
+      - kind: progress
+        id: battery_bar
+        bind: { message: user, field: battery_level, type: int }
+        size: { w: 80, h: 12 }
