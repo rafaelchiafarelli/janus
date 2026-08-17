@@ -59,5 +59,29 @@ class TestEmitEmbeddedC(unittest.TestCase):
         self.assertIn('.name = "UserProfile",', self.out)
 
 
+class TestEmitEmbeddedCBox(unittest.TestCase):
+    """Closes the gap flagged after the Stage 3b slice: box's dual
+    geometry (expanded vs collapsed) was only ever tested through
+    layout.py, never through the emitter that actually bakes it into C.
+    """
+
+    def setUp(self) -> None:
+        screen = parse_screen(FIXTURES / "box_demo.screen.yaml")
+        self.screen = layout_screen(screen)
+        self.out = emit_screen(self.screen)
+
+    def test_braces_balance(self) -> None:
+        self.assertTrue(_balanced_braces(self.out))
+
+    def test_box_kind_and_both_geometries_present(self) -> None:
+        self.assertIn("JANUS_WIDGET_BOX", self.out)
+        self.assertIn(".geometry = {0, 0, 10, 26}", self.out)            # header + body
+        self.assertIn(".geometry_collapsed = {0, 0, 10, 16}", self.out)  # header only
+
+    def test_led_child_offset_below_header_and_bound(self) -> None:
+        self.assertIn(".geometry = {0, 16, 10, 10}", self.out)  # status_led, below BOX_HEADER_H
+        self.assertIn("offsetof(dev_t, status)", self.out)
+
+
 if __name__ == "__main__":
     unittest.main()
