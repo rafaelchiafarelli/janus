@@ -194,19 +194,33 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
 
 ---
 
-## Stage 3b — embedded-C data emitter (`janus/emit_embedded_c/`)
+## Stage 3b — embedded-C data emitter (`janus/emit_embedded_c.py`)
 
 **Receives:** `App` IR (post-layout; geometry required).
 
 **Produces**, per project:
 - `{screen}_screen.gen.c` / `.gen.h` per screen — the widget descriptor
   array + `janus_screen_desc_t` (see "Runtime library" below for the
-  struct shapes these initialize).
+  struct shapes these initialize). Implemented: `emit_screen(screen,
+  screen_index_by_name)` — the index map (`screen_index_map(app)`) is only
+  required if the screen has a `navigate` button; it resolves
+  `.navigate_target` to the target screen's index and is what actually
+  enforces the "navigate target must exist" rule Stage 1 defers.
 - `janus_actions.gen.h` — one shared file: an enum with one value per
   distinct `on_press` string across *all* screens in the app (deduped).
   `navigate` values do **not** get an enum entry here — see Stage 5.
+  Implemented: `emit_actions_header(app)`.
 - `janus_app.gen.c` — the `janus_app_t` table: an array of pointers to
-  every screen's `janus_screen_desc_t`, plus the nav target list.
+  every screen's `janus_screen_desc_t`, plus `nav_titles` (parallel array,
+  `NULL` if `app.nav` is unset). Implemented: `emit_app_table(app)`;
+  raises if `app.nav` doesn't cover every screen.
+
+**Implementation status:** the three functions above emit correct,
+brace-balanced C text today (36 tests). Still deferred: the `.tmpl`
+wrapper that turns this into complete, standalone files with `#include`s
+and header guards — everything so far is just the declarations/
+initializers themselves, verified via substring assertions, not yet
+written to disk as real `.c`/`.h` files.
 
 **Owner:** Janus-owned, full regen every run, content-diffed before write
 (this is the deliberate improvement over harpia's own unconditional-write
@@ -269,7 +283,8 @@ typedef struct janus_widget_desc {
     janus_rect_t geometry;             /* also the "expanded" rect for box */
     janus_rect_t geometry_collapsed;   /* box only, ignored otherwise */
     janus_bind_t bind;
-    janus_action_t action;             /* button only; JANUS_ACTION_NONE otherwise */
+    janus_action_t action;             /* on_press only; JANUS_ACTION_NONE otherwise */
+    int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
     uint8_t focus_order;               /* input dispatch — reserved, unused until Stage 6 lands */
     const struct janus_widget_desc *children;
     uint16_t child_count;
@@ -284,8 +299,9 @@ typedef struct {
 
 typedef struct {
     const janus_screen_desc_t *const *screens;
+    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset (no tab bar) */
     uint16_t screen_count;
-    uint16_t active_screen;     /* the one piece of app-level runtime state */
+    uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
 
 /* driver contract, carried forward from the deleted Copilot branch's DESIGN.md */
