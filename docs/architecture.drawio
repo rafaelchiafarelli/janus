@@ -1,0 +1,132 @@
+<mxfile host="app.diagrams.net" version="24.0.0" type="device">
+  <diagram name="Janus Architecture" id="janusArch">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Pipeline: author input -->
+        <mxCell id="author" value="screen.yaml + app.yaml&lt;br&gt;&lt;i&gt;(author-written)&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="parser" value="YAML Parser&lt;br&gt;(dsl_yaml.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="260" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ir" value="IR: Screen / Widget /&lt;br&gt;Binding / Nav tree (ir.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="230" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="layout" value="Layout pass (layout.py)&lt;br&gt;computes geometry, incl. box's&lt;br&gt;expanded/collapsed tables" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="330" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="emit_harpia" value="harpia Include emitter&lt;br&gt;(emit_harpia.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="440" width="260" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="emit_c" value="embedded-C data emitter&lt;br&gt;.tmpl + str.format, harpia-style&lt;br&gt;(emit_embedded_c/)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="380" y="440" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out_harpia" value="janus_generated.harpia&lt;br&gt;Janus-owned, full regen every run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out_c" value="screen_table.gen.c/h per screen&lt;br&gt;Janus-owned, write-if-different" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="380" y="550" width="280" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="out_action_enum" value="action ID enum&lt;br&gt;Janus-owned, cheap full regen" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="380" y="660" width="280" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="human_harpia" value="human root .harpia&lt;br&gt;hand-written, imports&lt;br&gt;janus_generated.harpia — NEVER&lt;br&gt;touched by Janus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="660" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="zmq" value="harpia ZmqAdapter (existing)&lt;br&gt;transport + (de)serialization&lt;br&gt;&lt;b&gt;OPEN QUESTION:&lt;/b&gt; emits a plain&lt;br&gt;C struct for embedded targets?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;dashed=1;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="780" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Right column: runtime library + input dispatch -->
+        <mxCell id="runtime_lib" value="runtime/embedded_c/&lt;br&gt;janus_runtime.c/h&lt;br&gt;traversal, tiling, driver contract,&lt;br&gt;draw_&amp;lt;kind&amp;gt;() per widget kind&lt;br&gt;&lt;b&gt;FIXED, shipped, NOT templated&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="760" y="330" width="300" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="input" value="Input modalities (pluggable)&lt;br&gt;touch hit-test / encoder focus-order /&lt;br&gt;physical push buttons&lt;br&gt;&lt;b&gt;NOT YET BUILT&lt;/b&gt; for any modality" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="760" y="500" width="300" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="handler" value="janus_handle_action()&lt;br&gt;human-owned, one case per action,&lt;br&gt;NEVER regenerated by Janus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="760" y="660" width="300" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Firmware build -->
+        <mxCell id="firmware" value="Firmware build&lt;br&gt;generated tables + action enum +&lt;br&gt;runtime library + human handler +&lt;br&gt;harpia transport code" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;strokeWidth=2;fontSize=12;align=center;verticalAlign=middle;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="380" y="900" width="440" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;&lt;span style='background:#dae8fc;border:1px solid #6c8ebf;'&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&lt;/span&gt; Janus-generated, full regen every run&lt;br&gt;&lt;span style='background:#d5e8d4;border:1px solid #82b366;'&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&lt;/span&gt; Human-owned, hand-written, never touched by Janus&lt;br&gt;&lt;span style='background:#f5f5f5;border:1px solid #666666;'&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&lt;/span&gt; Fixed runtime library, shipped, not templated per-project&lt;br&gt;&lt;span style='background:#ffe6cc;border:1px dashed #d79b00;'&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&lt;/span&gt; Existing harpia component / open question&lt;br&gt;&lt;span style='background:#f5f5f5;border:1px dashed #666666;'&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&lt;/span&gt; Not yet built" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#000000;fontSize=11;align=left;verticalAlign=top;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="40" width="320" height="230" as="geometry" />
+        </mxCell>
+
+        <!-- Edges -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="author" target="parser">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="parser" target="ir">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="ir" target="layout">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="layout" target="emit_harpia">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="layout" target="emit_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="emit_harpia" target="out_harpia">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="emit_c" target="out_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="emit_c" target="out_action_enum">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="imports" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="human_harpia" target="out_harpia">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="full schema" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="human_harpia" target="zmq">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="zmq" target="firmware">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="out_c" target="firmware">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="geometry + action ids" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="out_c" target="input">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="runtime_lib" target="firmware">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="resolved action" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="input" target="handler">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="enum values" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="out_action_enum" target="handler">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="handler" target="firmware">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
