@@ -308,7 +308,7 @@ typedef struct janus_widget_desc {
     janus_bind_t bind;
     janus_action_id_t action;          /* on_press only; 0 otherwise (== JANUS_ACTION_NONE by convention) */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
-    uint8_t focus_order;               /* input dispatch — reserved, unused until Stage 6 lands */
+    uint8_t focus_order;               /* encoder/button traversal — reserved, unused; touch doesn't need it */
     const struct janus_widget_desc *children;
     uint16_t child_count;
 } janus_widget_desc_t;
@@ -336,6 +336,7 @@ bool display_busy(void);
 void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
+bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads the state above; Stage 6 hit-testing needs it */
 ```
 
 **Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
@@ -407,21 +408,51 @@ what "reboot" means.
 
 ---
 
-## Stage 6 — Input dispatch (deferred, contract sketched, not built)
+## Stage 6 — Input dispatch (touch implemented; encoder/buttons still deferred)
 
-**Receives:** raw hardware events (touch coordinates / encoder deltas /
-GPIO edges) + read-only access to the active screen's
-`janus_widget_desc_t[]` (for `geometry`, hit-testing) and `focus_order`
-(for encoder/button traversal — the field exists in the struct above but
-nothing populates or reads it yet).
+**Receives:** a touch point (`x, y`) + read-only access to the active
+screen's `janus_widget_desc_t[]` (for `geometry`, hit-testing). Encoder
+deltas / GPIO edges and `focus_order`-based traversal stay deferred —
+the field exists in the struct but nothing populates or reads it yet.
 
-**Produces:** a resolved `(widget, janus_action_t)` pair, handed to the
-same place `on_press`/`navigate` handling already goes (Stage 5).
+**Produces:** a `janus_input_result_t` — `{kind, widget, action,
+navigate_target}` where `kind` is `JANUS_INPUT_NONE` / `_ACTION` /
+`_NAVIGATE` / `_TOGGLE_BOX`. **Not** a `(widget, janus_action_t)` pair as
+first sketched: the fixed library can't type against the generated,
+per-project `janus_action_t` any more than Stage 4's descriptor could
+(same reason — see `janus_action_id_t` there). `action` is a
+`janus_action_id_t`; the caller casts it to `janus_action_t` right
+before calling `janus_handle_action`, same split Stage 5 already
+established between what the fixed library understands autonomously
+(`navigate`, box toggling) and what only the human's file understands
+(`on_press`).
 
-**Owner:** fixed library, one module per modality
-(`janus_input_touch.c` / `janus_input_encoder.c` / `janus_input_buttons.c`)
-— **none exist yet**. Not required before Stage 0–5 work; can land later
-without touching any earlier stage.
+**Hit-testing** (`janus_touch_hit_test`, implemented in
+`janus_input_touch.c`): point-in-rect against the already-baked absolute
+geometry, deepest match wins. `box`'s `geometry_collapsed` doubles as its
+header hit-region — `layout.py` already sets it to exactly the header
+strip's bounds regardless of current expand state, so a point inside it
+is always a header tap (→ `TOGGLE_BOX`), with no separate header-height
+constant needed at runtime. A point elsewhere in `geometry` only recurses
+into a box's children when `janus_box_is_expanded(box)` is true — a
+collapsed box's children are never hit-testable, matching Stage 4's own
+render-time skip. `column`/`row`/`radiogroup` have no rect of their own
+action-wise and just recurse. A leaf hit with neither `navigate_target`
+nor `action` set (a plain label, an unwired checkbox) is a deliberate,
+defined miss (`JANUS_INPUT_NONE`) — nothing to dispatch. If a widget
+somehow has both `navigate` and `on_press` set, `navigate` wins (an
+arbitrary but documented tie-break; nothing currently prevents authoring
+both).
+
+**Touch driver contract** (`janus_input_touch.h`, parallel to the output
+driver contract): `bool janus_touch_poll(int16_t *x, int16_t *y)` —
+vendor/host-provided, non-blocking, mirrors `display_busy()`'s polling
+style. Returns true and fills `x`/`y` once per new touch.
+
+**Owner:** fixed library, one module per modality — `janus_input_touch.h`
+/ `.c` exist; `janus_input_encoder.c` / `janus_input_buttons.c` don't yet.
+Landed without touching any earlier stage except `main.c.tmpl`'s scaffold
+(Stage 8), which now actually calls into this instead of a bare TODO.
 
 ---
 
@@ -460,7 +491,7 @@ This is the "how does it all actually get compiled" question.
 | `build/generated/janus_app.gen.c` | Janus | yes, every build |
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
-| `src/main.c` | human (or Janus-scaffolded once — **OPEN**) | no |
+| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c`) | no |
 | `src/display_driver.c` | human/vendor | no |
 
 **Runtime call flow, boot to first render:**
@@ -474,18 +505,23 @@ This is the "how does it all actually get compiled" question.
    vendor driver's `draw_area_sync`/`draw_area_async` for that widget's
    `geometry` rect.
 
-**Runtime call flow, on interaction (once Stage 6 exists):**
-4. The active input module resolves an event to `(widget, action)`.
-5. If `action` came from `on_press`: `janus_handle_action(action)` — the
-   human's file, Stage 5.
-   If it came from `navigate`: `janus_switch_screen(&app, target_index)`
-   — the fixed library sets `active_screen` and re-renders the *new*
-   screen from *its* geometry table. Only one screen's widgets are ever
-   live, matching the ~2 KiB transient-buffer budget.
-   If the widget is a `box` header: `janus_toggle_box(widget)` — flips
-   that widget's local expand bit and re-renders just that subtree, using
-   `geometry` vs `geometry_collapsed` — a tile-scoped redraw, not a full
-   screen repaint, per DESIGN.md's tiling model.
+**Runtime call flow, on interaction:**
+4. `main()`'s event loop (`main.c.tmpl`, Stage 8) polls
+   `janus_touch_poll(&x, &y)` and, on a new touch, calls
+   `janus_touch_hit_test(screen, x, y)` (Stage 6).
+5. The scaffolded `main.c` switches on the result's `kind` — this is the
+   one place all three outcomes meet, and it's the human's file (editable
+   after scaffolding) that does the switching, not the fixed library:
+   - `JANUS_INPUT_ACTION`: `janus_handle_action((janus_action_t)hit.action)`
+     — the human's file, Stage 5.
+   - `JANUS_INPUT_NAVIGATE`: `janus_switch_screen(&app, hit.navigate_target)`
+     — the fixed library sets `active_screen` and re-renders the *new*
+     screen from *its* geometry table. Only one screen's widgets are ever
+     live, matching the ~2 KiB transient-buffer budget.
+   - `JANUS_INPUT_TOGGLE_BOX`: `janus_toggle_box(hit.widget)` — flips
+     that widget's local expand bit and re-renders just that subtree,
+     using `geometry` vs `geometry_collapsed` — a tile-scoped redraw, not
+     a full screen repaint, per DESIGN.md's tiling model.
 
 ---
 

@@ -47,7 +47,7 @@ typedef struct janus_widget_desc {
     janus_bind_t bind;
     janus_action_id_t action;          /* on_press only; JANUS_ACTION_ID_NONE otherwise */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
-    uint8_t focus_order;               /* input dispatch — reserved, unused until Stage 6 lands */
+    uint8_t focus_order;               /* encoder/button traversal — reserved, unused; touch doesn't need it */
     const struct janus_widget_desc *children;
     uint16_t child_count;
 } janus_widget_desc_t;
@@ -76,5 +76,11 @@ bool display_busy(void);
 void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
+
+/* box's current expand/collapse bit, from the runtime-owned state table
+ * (the descriptor itself is static const — see janus_runtime.c). Exposed
+ * so other modules (Stage 6's janus_input_touch.c) can hit-test against
+ * live state without duplicating this table. */
+bool janus_box_is_expanded(const janus_widget_desc_t *box);
 
 #endif /* JANUS_RUNTIME_H */

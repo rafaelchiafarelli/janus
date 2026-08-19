@@ -83,7 +83,7 @@ static janus_box_state_t *box_state_find_or_register(const janus_widget_desc_t *
     return NULL; /* table full: caller falls back to initial_expanded, never toggles */
 }
 
-static bool box_is_expanded(const janus_widget_desc_t *box) {
+bool janus_box_is_expanded(const janus_widget_desc_t *box) {
     janus_box_state_t *slot = box_state_find_or_register(box);
     return slot != NULL ? slot->expanded : box->initial_expanded;
 }
@@ -176,7 +176,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
 
         case JANUS_WIDGET_BOX:
             draw_box_header(w);
-            if (box_is_expanded(w)) {
+            if (janus_box_is_expanded(w)) {
                 for (uint16_t i = 0; i < w->child_count; i++) {
                     render_widget(&w->children[i], bound_struct);
                 }
@@ -215,7 +215,7 @@ void janus_toggle_box(const janus_widget_desc_t *box) {
 
     const void *bound_struct = g_current_screen != NULL ? g_current_screen->bound_struct : NULL;
     draw_box_header(box);
-    if (box_is_expanded(box)) {
+    if (janus_box_is_expanded(box)) {
         for (uint16_t i = 0; i < box->child_count; i++) {
             render_widget(&box->children[i], bound_struct);
         }

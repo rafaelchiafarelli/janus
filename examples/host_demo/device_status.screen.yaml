@@ -14,7 +14,7 @@ children:
     id: diagnostics_box
     layout: column
     collapsible: true
-    default_expanded: true
+    default_expanded: false
     text: "Diagnostics"
     children:
       - kind: checkbox

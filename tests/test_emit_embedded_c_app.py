@@ -38,6 +38,14 @@ class TestActionsAndAppTable(unittest.TestCase):
         self.assertIn("JANUS_ACTION_REBOOT", out)
         self.assertNotIn("GOTO_TWO", out)  # navigate never becomes an action
 
+    def test_actions_header_declares_janus_handle_action(self) -> None:
+        # Stage 5's janus_handle_action() is defined in src/janus_actions.c
+        # but never declared anywhere a caller could see it — Stage 6's
+        # input dispatch needs to call it, so the generated header
+        # declares it alongside the enum it depends on.
+        out = emit_actions_header(self.app)
+        self.assertIn("void janus_handle_action(janus_action_t action);", out)
+
     def test_navigate_target_resolves_to_screen_index(self) -> None:
         idx = screen_index_map(self.app)
         out = emit_screen(self.app.screens[0], screen_index_by_name=idx)

@@ -27,6 +27,18 @@ class TestRenderMainC(unittest.TestCase):
     def test_braces_balance(self) -> None:
         self.assertTrue(_balanced_braces(render_main_c()))
 
+    def test_dispatches_touch_hits_to_action_navigate_and_toggle_box(self) -> None:
+        out = render_main_c()
+        self.assertIn('#include "janus_input_touch.h"', out)
+        self.assertIn("janus_touch_poll(&x, &y)", out)
+        self.assertIn("janus_touch_hit_test(screen, x, y)", out)
+        self.assertIn("case JANUS_INPUT_ACTION:", out)
+        self.assertIn("janus_handle_action((janus_action_t)hit.action);", out)
+        self.assertIn("case JANUS_INPUT_NAVIGATE:", out)
+        self.assertIn("janus_switch_screen(&janus_app, (uint16_t)hit.navigate_target);", out)
+        self.assertIn("case JANUS_INPUT_TOGGLE_BOX:", out)
+        self.assertIn("janus_toggle_box(hit.widget);", out)
+
 
 class TestScaffoldMainC(unittest.TestCase):
     def setUp(self) -> None:

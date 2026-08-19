@@ -111,7 +111,10 @@ def emit_actions_header(app: App) -> str:
         action_enum_name(a) for a in collect_on_press_actions(app)
     ]
     body = ",\n".join(f"    {v}" for v in values)
-    return f"typedef enum {{\n{body}\n}} janus_action_t;\n"
+    return (
+        f"typedef enum {{\n{body}\n}} janus_action_t;\n\n"
+        f"void janus_handle_action(janus_action_t action);\n"
+    )
 
 
 # ------------------------------------------------------------- per-screen --

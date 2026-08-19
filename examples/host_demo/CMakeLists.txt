@@ -18,6 +18,7 @@ set(COMMON_SOURCES
     src/janus_actions.c
     display_driver_stub.c
     ${RUNTIME_DIR}/host_mock/mock_driver.c
+    ${RUNTIME_DIR}/host_mock/mock_touch.c
 )
 set(COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}
