@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
 
-from janus.dsl_yaml import parse_screen
-from janus.emit_embedded_c import emit_screen
-from janus.layout import layout_screen
+from janus.stage1_parse.dsl_yaml import parse_screen
+from janus.stage3b_embedded_c.emit_embedded_c import emit_screen
+from janus.stage2_layout.layout import layout_screen
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

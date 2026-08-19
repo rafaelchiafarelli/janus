@@ -14,7 +14,7 @@ to be resolved yet; only actually compiling the output does.
 """
 from __future__ import annotations
 
-from .ir import App, Screen, Widget
+from ..ir import App, Screen, Widget
 
 _KIND_ENUM = {
     "label": "JANUS_WIDGET_LABEL",

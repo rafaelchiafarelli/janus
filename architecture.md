@@ -54,7 +54,7 @@ Where a shape isn't nailed down, it's marked **OPEN**.
 
 ---
 
-## Stage 1 — YAML Parser (`janus/dsl_yaml.py`)
+## Stage 1 — YAML Parser (`janus/stage1_parse/dsl_yaml.py`)
 
 **Receives:** `app.yaml` + all `*.screen.yaml` it references, from disk.
 
@@ -133,7 +133,7 @@ class App:
 
 ---
 
-## Stage 2 — Layout pass (`janus/layout.py`)
+## Stage 2 — Layout pass (`janus/stage2_layout/layout.py`)
 
 **Receives:** `App` IR, `geometry`/`geometry_collapsed` all `None`.
 
@@ -171,7 +171,7 @@ header + body.
 
 ---
 
-## Stage 3a — harpia Include emitter (`janus/emit_harpia.py`)
+## Stage 3a — harpia Include emitter (`janus/stage3a_harpia/emit_harpia.py`)
 
 **Receives:** `App` IR (post-layout; only reads `bind`, ignores geometry).
 
@@ -194,7 +194,7 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
 
 ---
 
-## Stage 3b — embedded-C data emitter (`janus/emit_embedded_c.py`)
+## Stage 3b — embedded-C data emitter (`janus/stage3b_embedded_c/emit_embedded_c.py`, `emit_files.py`)
 
 **Receives:** `App` IR (post-layout; geometry required).
 

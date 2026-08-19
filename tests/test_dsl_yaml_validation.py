@@ -1,6 +1,6 @@
 import unittest
 
-from janus.dsl_yaml import screen_from_dict
+from janus.stage1_parse.dsl_yaml import screen_from_dict
 
 
 def _screen(children):

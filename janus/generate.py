@@ -7,15 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .emit_embedded_c import screen_index_map, screen_var
-from .emit_files import (
+from .ir import App
+from .stage3a_harpia.emit_harpia import emit_harpia
+from .stage3b_embedded_c.emit_embedded_c import screen_index_map, screen_var
+from .stage3b_embedded_c.emit_files import (
     render_actions_header,
     render_app_source,
     render_screen_header,
     render_screen_source,
 )
-from .emit_harpia import emit_harpia
-from .ir import App
 from .writer import write_if_changed
 
 

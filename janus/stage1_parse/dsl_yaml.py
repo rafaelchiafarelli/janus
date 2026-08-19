@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from .ir import App, Binding, NavTarget, Screen, Widget
+from ..ir import App, Binding, NavTarget, Screen, Widget
 
 _VALID_BIND_TYPES = {"string", "int", "int64", "float"}
 _REQUIRES_RANGE = {"progress", "gauge"}

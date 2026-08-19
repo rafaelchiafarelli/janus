@@ -1,13 +1,13 @@
 import unittest
 
-from janus.emit_files import (
+from janus.stage3b_embedded_c.emit_files import (
     render_actions_header,
     render_app_source,
     render_screen_header,
     render_screen_source,
 )
 from janus.ir import App, NavTarget, Screen, Widget
-from janus.layout import layout_screen
+from janus.stage2_layout.layout import layout_screen
 
 
 def _balanced_braces(text: str) -> bool:
@@ -54,7 +54,7 @@ class TestEmitFiles(unittest.TestCase):
         self.assertTrue(_balanced_braces(out))
 
     def test_screen_source_includes_own_header_and_has_body(self) -> None:
-        from janus.emit_embedded_c import screen_index_map
+        from janus.stage3b_embedded_c.emit_embedded_c import screen_index_map
 
         out = render_screen_source(self.app.screens[0], screen_index_map(self.app))
         self.assertIn('#include "one_screen.gen.h"', out)

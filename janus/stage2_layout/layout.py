@@ -5,7 +5,7 @@ Pure, deterministic: walks a Screen's widget tree bottom-up, filling in
 """
 from __future__ import annotations
 
-from .ir import Rect, Screen, Widget
+from ..ir import Rect, Screen, Widget
 
 GAP = 4
 BOX_HEADER_H = 16

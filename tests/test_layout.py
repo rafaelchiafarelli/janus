@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
 
-from janus.dsl_yaml import parse_screen
+from janus.stage1_parse.dsl_yaml import parse_screen
 from janus.ir import Rect
-from janus.layout import layout_screen
+from janus.stage2_layout.layout import layout_screen
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

@@ -1,13 +1,13 @@
 import unittest
 
-from janus.emit_embedded_c import (
+from janus.stage3b_embedded_c.emit_embedded_c import (
     emit_actions_header,
     emit_app_table,
     emit_screen,
     screen_index_map,
 )
 from janus.ir import App, NavTarget, Screen, Widget
-from janus.layout import layout_screen
+from janus.stage2_layout.layout import layout_screen
 
 
 class TestActionsAndAppTable(unittest.TestCase):

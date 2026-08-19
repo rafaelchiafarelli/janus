@@ -12,9 +12,9 @@ so it never needs escaping.
 """
 from __future__ import annotations
 
+from ..ir import App, Screen
+from ..templates import load_template
 from .emit_embedded_c import emit_actions_header, emit_app_table, emit_screen, screen_var
-from .ir import App, Screen
-from .templates import load_template
 
 
 def _guard(*parts: str) -> str:

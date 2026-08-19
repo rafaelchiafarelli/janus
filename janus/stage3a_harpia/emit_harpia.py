@@ -6,7 +6,7 @@ name, and emits one `message {name}{ ... };` block per message.
 """
 from __future__ import annotations
 
-from .ir import App, Binding, Widget
+from ..ir import App, Binding, Widget
 
 
 def _collect_bindings(widget: Widget, out: dict[str, dict[str, Binding]]) -> None:

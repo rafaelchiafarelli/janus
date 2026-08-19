@@ -1,8 +1,8 @@
 import unittest
 from pathlib import Path
 
-from janus.dsl_yaml import parse_screen
-from janus.emit_harpia import emit_harpia
+from janus.stage1_parse.dsl_yaml import parse_screen
+from janus.stage3a_harpia.emit_harpia import emit_harpia
 from janus.ir import App, Binding, Screen, Widget
 
 FIXTURES = Path(__file__).parent / "fixtures"

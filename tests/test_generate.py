@@ -2,10 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from janus.dsl_yaml import parse_screen
+from janus.stage1_parse.dsl_yaml import parse_screen
 from janus.generate import write_project
 from janus.ir import App, NavTarget
-from janus.layout import layout_screen
+from janus.stage2_layout.layout import layout_screen
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -41,7 +41,7 @@ class TestWriteProject(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     def test_harpia_include_content_matches_emitter(self) -> None:
-        from janus.emit_harpia import emit_harpia
+        from janus.stage3a_harpia.emit_harpia import emit_harpia
 
         write_project(self.app, self.out_dir)
         content = (self.out_dir / "janus_generated.harpia").read_text()

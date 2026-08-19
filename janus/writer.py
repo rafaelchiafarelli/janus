@@ -20,3 +20,17 @@ def write_if_changed(path: str | Path, content: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return True
+
+
+def write_if_missing(path: str | Path, content: str) -> bool:
+    """Writes `content` to `path` only if nothing is there yet. Used for
+    human-owned scaffolds (Stage 5 `src/janus_actions.c`, Stage 8
+    `src/main.c`): unlike `write_if_changed`, an existing file is left
+    untouched even if its content differs — Janus never regenerates a
+    human file once it exists. Returns True if it scaffolded a new file."""
+    path = Path(path)
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return True

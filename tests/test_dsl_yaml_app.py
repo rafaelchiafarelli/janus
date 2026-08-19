@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from janus.dsl_yaml import app_from_dict, parse_app
+from janus.stage1_parse.dsl_yaml import app_from_dict, parse_app
 from janus.ir import NavTarget, Screen, Widget
 
 FIXTURES = Path(__file__).parent / "fixtures"
