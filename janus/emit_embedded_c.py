@@ -60,7 +60,7 @@ def screen_index_map(app: App) -> dict[str, int]:
 
 # ---------------------------------------------------------------- actions --
 
-def _action_enum_name(action: str) -> str:
+def action_enum_name(action: str) -> str:
     return f"JANUS_ACTION_{action.upper()}"
 
 
@@ -83,7 +83,7 @@ def collect_on_press_actions(app: App) -> list[str]:
 
 def emit_actions_header(app: App) -> str:
     values = ["JANUS_ACTION_NONE"] + [
-        _action_enum_name(a) for a in collect_on_press_actions(app)
+        action_enum_name(a) for a in collect_on_press_actions(app)
     ]
     body = ",\n".join(f"    {v}" for v in values)
     return f"typedef enum {{\n{body}\n}} janus_action_t;\n"
@@ -108,7 +108,7 @@ def _widget_init(
     else:
         bind_c = ".field_type = JANUS_FIELD_NONE"
 
-    action_c = _action_enum_name(widget.on_press) if widget.on_press is not None else "JANUS_ACTION_NONE"
+    action_c = action_enum_name(widget.on_press) if widget.on_press is not None else "JANUS_ACTION_NONE"
 
     if widget.navigate is not None:
         if screen_index_by_name is None or widget.navigate not in screen_index_by_name:
