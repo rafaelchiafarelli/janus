@@ -23,9 +23,17 @@ Janus is the gate between them, not a merger of the two.
 harpia (a separate project — a `.harpia` → C++ code generator: protobuf,
 SOCI-backed SQL/CRUDL, JSON/XML/SOAP/REST/gRPC/ZMQ, generated tests) needed
 a GUI generator for small/constrained devices. GitHub Copilot's first
-attempt lived on harpia's `gui-dsl-prototype` branch (`GuiAdapter/`) — now
-deleted, both locally and on `origin`, after the analysis below. harpia's
-`NEXT_SESSION.md` has a one-line pointer back to this file.
+attempt lived on harpia's `gui-dsl-prototype` branch (`GuiAdapter/`).
+harpia's `NEXT_SESSION.md` has a one-line pointer back to this file.
+
+**Correction (2026-08-19):** earlier drafts of this doc claimed
+`GuiAdapter/` was deleted from harpia, both locally and on `origin`. It
+isn't — confirmed still present in full on harpia's `dev` branch (current
+`HEAD`) during Stage 7's research pass. Doesn't change anything decided
+below (the verdict, the "why not part of harpia" reasoning, and the
+salvage plan all stand on their own merits regardless), but "Salvageable
+from the deleted Copilot branch" further down is stale in the same way —
+treat both as "not deleted, just not reused," not "gone."
 
 ## Verdict on the Copilot prototype (why it wasn't reused as architecture)
 
