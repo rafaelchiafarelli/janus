@@ -1,9 +1,11 @@
 """Stage 1 — YAML parser. See architecture.md for the full contract.
 
-Scope right now: single-screen files only (`parse_screen`). `app.yaml`
-(multi-screen + nav) parsing — and with it, the one Stage 1 validation
-that needs cross-screen knowledge (`button.navigate` naming a screen that
-actually exists) — is a separate, later increment.
+`parse_screen`/`screen_from_dict` handle one `*.screen.yaml` file.
+`parse_app`/`app_from_dict` handle `app.yaml`: resolving the screens it
+references and running the one Stage 1 validation that needs
+cross-screen knowledge (`button.navigate` naming a screen that actually
+exists), deferred until now because it couldn't be enforced without
+seeing every screen at once.
 """
 from __future__ import annotations
 
@@ -12,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from .ir import Binding, Screen, Widget
+from .ir import App, Binding, NavTarget, Screen, Widget
 
 _VALID_BIND_TYPES = {"string", "int", "int64", "float"}
 _REQUIRES_RANGE = {"progress", "gauge"}
@@ -100,3 +102,37 @@ def screen_from_dict(data: dict[str, Any]) -> Screen:
 def parse_screen(path: str | Path) -> Screen:
     data = yaml.safe_load(Path(path).read_text())
     return screen_from_dict(data)
+
+
+def _check_navigate_targets(widget: Widget, screen_names: set[str]) -> None:
+    if widget.navigate is not None and widget.navigate not in screen_names:
+        raise ValueError(
+            f"button {widget.id!r} navigates to {widget.navigate!r}, which isn't "
+            f"one of the screens listed in app.yaml ({sorted(screen_names)})"
+        )
+    for child in widget.children:
+        _check_navigate_targets(child, screen_names)
+
+
+def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
+    """`screens` are already-parsed `Screen` objects, in `app.yaml`'s
+    `screens:` order — `parse_app` is what actually reads each file."""
+    nav_data = data.get("nav")
+    nav = None
+    if nav_data is not None:
+        nav = [
+            NavTarget(screen=t["screen"], title=t["title"]) for t in nav_data["targets"]
+        ]
+
+    screen_names = {s.name for s in screens}
+    for screen in screens:
+        _check_navigate_targets(screen.root, screen_names)
+
+    return App(screens=screens, nav=nav)
+
+
+def parse_app(path: str | Path) -> App:
+    path = Path(path)
+    data = yaml.safe_load(path.read_text())
+    screens = [parse_screen(path.parent / screen_path) for screen_path in data["screens"]]
+    return app_from_dict(data, screens)

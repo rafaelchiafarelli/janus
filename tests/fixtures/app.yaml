@@ -1,0 +1,8 @@
+screens:
+  - user_profile.screen.yaml
+  - box_demo.screen.yaml
+nav:
+  kind: tabs
+  targets:
+    - { screen: UserProfile, title: "Profile" }
+    - { screen: BoxDemo, title: "Boxes" }
