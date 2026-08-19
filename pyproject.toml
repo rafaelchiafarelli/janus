@@ -5,6 +5,9 @@ description = "Pre-harpia GUI schema + code generator"
 requires-python = ">=3.10"
 dependencies = ["PyYAML"]
 
+[project.scripts]
+janus-generate = "janus.cli:main"
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
