@@ -14,7 +14,14 @@ from __future__ import annotations
 
 from ..ir import App, Screen
 from ..templates import load_template
-from .emit_embedded_c import emit_actions_header, emit_app_table, emit_screen, screen_var
+from .emit_embedded_c import (
+    emit_actions_header,
+    emit_app_table,
+    emit_screen,
+    screen_bound_messages,
+    screen_on_press_actions,
+    screen_var,
+)
 
 
 def _guard(*parts: str) -> str:
@@ -31,7 +38,17 @@ def render_screen_source(
 ) -> str:
     sv = screen_var(screen.name)
     body = emit_screen(screen, screen_index_by_name)
-    return load_template("screen.c.tmpl").format(screen_var=sv, body=body)
+
+    includes = []
+    if screen_on_press_actions(screen):
+        includes.append('#include "janus_actions.gen.h"')
+    if screen_bound_messages(screen):
+        includes.append('#include "janus_bindings.h"')
+    extra_includes = "\n".join(includes)
+
+    return load_template("screen.c.tmpl").format(
+        screen_var=sv, extra_includes=extra_includes, body=body
+    )
 
 
 def render_actions_header(app: App) -> str:

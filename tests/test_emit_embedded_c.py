@@ -4,6 +4,7 @@ from pathlib import Path
 from janus.stage1_parse.dsl_yaml import parse_screen
 from janus.stage3b_embedded_c.emit_embedded_c import emit_screen
 from janus.stage2_layout.layout import layout_screen
+from janus.ir import Binding, Screen, Widget
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -58,6 +59,32 @@ class TestEmitEmbeddedC(unittest.TestCase):
     def test_screen_desc_name(self) -> None:
         self.assertIn('.name = "UserProfile",', self.out)
 
+    def test_bound_struct_points_at_the_single_message_instance(self) -> None:
+        self.assertIn(".bound_struct = &user_instance,", self.out)
+
+
+class TestEmitEmbeddedCBoundStruct(unittest.TestCase):
+    def test_no_bindings_means_null_bound_struct(self) -> None:
+        screen = layout_screen(Screen(
+            name="Empty",
+            root=Widget(kind="column", id="r", children=[
+                Widget(kind="label", id="l", text="hi"),
+            ]),
+        ))
+        out = emit_screen(screen)
+        self.assertIn(".bound_struct = NULL,", out)
+
+    def test_more_than_one_bound_message_raises(self) -> None:
+        screen = layout_screen(Screen(
+            name="TwoMessages",
+            root=Widget(kind="column", id="r", children=[
+                Widget(kind="label", id="a", bind=Binding(message="foo", field="x", type="string")),
+                Widget(kind="label", id="b", bind=Binding(message="bar", field="y", type="string")),
+            ]),
+        ))
+        with self.assertRaises(ValueError):
+            emit_screen(screen)
+
 
 class TestEmitEmbeddedCBox(unittest.TestCase):
     """Closes the gap flagged after the Stage 3b slice: box's dual
@@ -81,6 +108,31 @@ class TestEmitEmbeddedCBox(unittest.TestCase):
     def test_led_child_offset_below_header_and_bound(self) -> None:
         self.assertIn(".geometry = {0, 16, 10, 10}", self.out)  # status_led, below BOX_HEADER_H
         self.assertIn("offsetof(dev_t, status)", self.out)
+
+    def test_box_default_expanded_true_is_baked_in(self) -> None:
+        idx = self.out.index('.id = "net_box"')
+        segment = self.out[idx: idx + 300]
+        self.assertIn(".initial_expanded = true", segment)
+
+
+class TestEmitEmbeddedCBoxCollapsedByDefault(unittest.TestCase):
+    def setUp(self) -> None:
+        screen = layout_screen(Screen(
+            name="Collapsed",
+            root=Widget(kind="column", id="r", children=[
+                Widget(
+                    kind="box", id="settings_box", layout="column",
+                    collapsible=True, default_expanded=False,
+                    children=[Widget(kind="label", id="l", text="hi")],
+                ),
+            ]),
+        ))
+        self.out = emit_screen(screen)
+
+    def test_initial_expanded_false_is_baked_in(self) -> None:
+        idx = self.out.index('.id = "settings_box"')
+        segment = self.out[idx: idx + 300]
+        self.assertIn(".initial_expanded = false", segment)
 
 
 if __name__ == "__main__":

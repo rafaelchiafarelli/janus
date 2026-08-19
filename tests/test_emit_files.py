@@ -66,6 +66,32 @@ class TestEmitFiles(unittest.TestCase):
         with self.assertRaises(ValueError):
             render_screen_source(self.app.screens[0])
 
+    def test_screen_source_includes_actions_header_when_screen_has_on_press(self) -> None:
+        from janus.stage3b_embedded_c.emit_embedded_c import screen_index_map
+
+        out = render_screen_source(self.app.screens[0], screen_index_map(self.app))
+        self.assertIn('#include "janus_actions.gen.h"', out)
+
+    def test_screen_source_omits_bindings_header_when_screen_has_no_binds(self) -> None:
+        from janus.stage3b_embedded_c.emit_embedded_c import screen_index_map
+
+        out = render_screen_source(self.app.screens[0], screen_index_map(self.app))
+        self.assertNotIn('#include "janus_bindings.h"', out)
+
+    def test_screen_source_includes_bindings_header_when_screen_has_a_bind(self) -> None:
+        from janus.ir import Binding
+
+        bound_screen = Screen(
+            name="Bound",
+            root=Widget(kind="column", id="r3", children=[
+                Widget(kind="label", id="lbl", bind=Binding(message="dev", field="name", type="string")),
+            ]),
+        )
+        layout_screen(bound_screen)
+        out = render_screen_source(bound_screen)
+        self.assertIn('#include "janus_bindings.h"', out)
+        self.assertNotIn('#include "janus_actions.gen.h"', out)
+
     def test_actions_header_has_guard(self) -> None:
         out = render_actions_header(self.app)
         self.assertIn("#ifndef JANUS_GEN_ACTIONS_H", out)

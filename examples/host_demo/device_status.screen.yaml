@@ -1,0 +1,23 @@
+screen: DeviceStatus
+layout: column
+children:
+  - { kind: header, id: title, text: "Device Status" }
+  - kind: label
+    id: name_label
+    bind: { message: device, field: name, type: string }
+  - kind: progress
+    id: battery_bar
+    bind: { message: device, field: battery_level, type: int }
+    range: { min: 0, max: 100 }
+    size: { w: 80, h: 12 }
+  - kind: box
+    id: diagnostics_box
+    layout: column
+    collapsible: true
+    default_expanded: true
+    text: "Diagnostics"
+    children:
+      - kind: checkbox
+        id: online_checkbox
+        bind: { message: device, field: online, type: int }
+  - { kind: button, id: reboot_button, text: "Reboot", on_press: reboot }

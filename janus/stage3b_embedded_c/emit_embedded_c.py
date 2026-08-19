@@ -81,6 +81,31 @@ def collect_on_press_actions(app: App) -> list[str]:
     return list(seen)
 
 
+def screen_on_press_actions(screen: Screen) -> list[str]:
+    """Same as `collect_on_press_actions`, scoped to one screen — used to
+    decide whether that screen's generated .c file needs to include
+    `janus_actions.gen.h` at all."""
+    seen: dict[str, None] = {}
+    _collect_on_press(screen.root, seen)
+    return list(seen)
+
+
+def _collect_bound_messages(widget: Widget, seen: dict[str, None]) -> None:
+    if widget.bind is not None:
+        seen[widget.bind.message] = None
+    for child in widget.children:
+        _collect_bound_messages(child, seen)
+
+
+def screen_bound_messages(screen: Screen) -> list[str]:
+    """Distinct `Binding.message` names used anywhere in this screen,
+    first-seen order. Stage 3b v1 assumes at most one per screen (see
+    `emit_screen`'s `.bound_struct` resolution)."""
+    seen: dict[str, None] = {}
+    _collect_bound_messages(screen.root, seen)
+    return list(seen)
+
+
 def emit_actions_header(app: App) -> str:
     values = ["JANUS_ACTION_NONE"] + [
         action_enum_name(a) for a in collect_on_press_actions(app)
@@ -120,10 +145,13 @@ def _widget_init(
     else:
         navigate_target_c = "-1"
 
+    initial_expanded_c = "true" if widget.default_expanded else "false"
+
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {_c_string(widget.id)}, "
         f".geometry = {_rect(widget.geometry)}, "
         f".geometry_collapsed = {_rect(widget.geometry_collapsed)}, "
+        f".initial_expanded = {initial_expanded_c}, "
         f".bind = {{ {bind_c} }}, .action = {action_c}, "
         f".navigate_target = {navigate_target_c}, "
         f".children = {children_array_name}, .child_count = {child_count} }}"
@@ -175,11 +203,21 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
     body = ",\n".join(f"    {init}" for init in top_inits)
     lines.append(f"static const janus_widget_desc_t {widgets_array}[] = {{\n{body}\n}};")
 
+    messages = screen_bound_messages(screen)
+    if len(messages) > 1:
+        raise ValueError(
+            f"screen {screen.name!r} binds more than one message "
+            f"({messages!r}) — Stage 3b v1 assumes one bound message per "
+            f"screen (see architecture.md Stage 3b/7)"
+        )
+    bound_struct_c = f"&{messages[0]}_instance" if messages else "NULL"
+
     lines.append(
         f"const janus_screen_desc_t {sv}_screen = {{\n"
         f"    .name = {_c_string(screen.name)},\n"
         f"    .widgets = {widgets_array},\n"
         f"    .widget_count = {len(top_inits)},\n"
+        f"    .bound_struct = {bound_struct_c},\n"
         f"}};"
     )
     return "\n\n".join(lines) + "\n"

@@ -1,0 +1,223 @@
+/* Janus embedded-C runtime — Stage 4. See architecture.md.
+ *
+ * Real traversal + tiling + per-kind dispatch + box state — not the
+ * deleted Copilot branch's stub (which drew an empty tile buffer
+ * regardless of screen contents). Leaf content is still a kind-distinct
+ * solid fill rather than real glyphs: font/glyph rendering is explicitly
+ * out of scope until the asset-packing work lands (Janus.md, "Stage 2+").
+ * progress/gauge/checkbox/led are the honest exception — they read the
+ * live bound value and vary the fill accordingly.
+ */
+#include "janus_runtime.h"
+
+#include <stddef.h>
+#include <string.h>
+
+/* ---------------------------------------------------------- tile buffer --
+ * No malloc anywhere. 32x32x1 byte = 1024 B, well under the ~2 KiB
+ * transient-buffer budget (Janus.md). Only the synchronous driver path
+ * is driven by the traversal so far; draw_area_async/display_busy stay
+ * part of the driver contract but aren't called by anything yet —
+ * polled/non-blocking scheduling is real future work.
+ */
+#define JANUS_TILE_W 32
+#define JANUS_TILE_H 32
+static uint8_t g_tile_buffer[JANUS_TILE_W * JANUS_TILE_H];
+
+static void fill_rect(janus_rect_t rect, uint8_t value) {
+    if (rect.w <= 0 || rect.h <= 0) return;
+    memset(g_tile_buffer, value, sizeof(g_tile_buffer));
+
+    for (int16_t ty = 0; ty < rect.h; ty += JANUS_TILE_H) {
+        int16_t th = (int16_t)(rect.h - ty);
+        if (th > JANUS_TILE_H) th = JANUS_TILE_H;
+        for (int16_t tx = 0; tx < rect.w; tx += JANUS_TILE_W) {
+            int16_t tw = (int16_t)(rect.w - tx);
+            if (tw > JANUS_TILE_W) tw = JANUS_TILE_W;
+            draw_area_sync((uint16_t)(rect.x + tx), (uint16_t)(rect.y + ty),
+                            (uint16_t)tw, (uint16_t)th, g_tile_buffer);
+        }
+    }
+}
+
+/* Splits `rect` into a filled left portion and an empty right portion by
+ * `fraction` (clamped to [0, 1]) — used by progress/gauge. */
+static void fill_rect_fraction(janus_rect_t rect, double fraction,
+                                uint8_t fill_value, uint8_t empty_value) {
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+    int16_t filled_w = (int16_t)((double)rect.w * fraction);
+
+    janus_rect_t filled = { rect.x, rect.y, filled_w, rect.h };
+    janus_rect_t empty = {
+        (int16_t)(rect.x + filled_w), rect.y, (int16_t)(rect.w - filled_w), rect.h
+    };
+    fill_rect(filled, fill_value);
+    fill_rect(empty, empty_value);
+}
+
+/* ------------------------------------------------------------ box state --
+ * janus_widget_desc_t instances are static const arrays baked at
+ * generation time — nowhere in them to hold a *mutable* expand/collapse
+ * bit. This small fixed-capacity table holds it instead, keyed by
+ * descriptor pointer identity (stable for the program's lifetime).
+ */
+#define JANUS_MAX_BOXES 16
+typedef struct {
+    const janus_widget_desc_t *box;
+    bool expanded;
+} janus_box_state_t;
+static janus_box_state_t g_box_state[JANUS_MAX_BOXES];
+static uint8_t g_box_state_count = 0;
+
+static janus_box_state_t *box_state_find_or_register(const janus_widget_desc_t *box) {
+    for (uint8_t i = 0; i < g_box_state_count; i++) {
+        if (g_box_state[i].box == box) return &g_box_state[i];
+    }
+    if (g_box_state_count < JANUS_MAX_BOXES) {
+        janus_box_state_t *slot = &g_box_state[g_box_state_count++];
+        slot->box = box;
+        slot->expanded = box->initial_expanded;
+        return slot;
+    }
+    return NULL; /* table full: caller falls back to initial_expanded, never toggles */
+}
+
+static bool box_is_expanded(const janus_widget_desc_t *box) {
+    janus_box_state_t *slot = box_state_find_or_register(box);
+    return slot != NULL ? slot->expanded : box->initial_expanded;
+}
+
+/* Only one screen's widgets are ever live at once (Janus.md) — this is
+ * how janus_toggle_box, whose spec'd signature takes only the box
+ * pointer, still finds the right bound_struct for re-rendering any
+ * bound children inside it. */
+static const janus_screen_desc_t *g_current_screen = NULL;
+
+/* --------------------------------------------------------- bound reads --
+ */
+static double read_bound_value(const janus_bind_t *bind, const void *bound_struct) {
+    if (bound_struct == NULL || bind->field_type == JANUS_FIELD_NONE) return 0.0;
+    const uint8_t *field = (const uint8_t *)bound_struct + bind->field_offset;
+    switch (bind->field_type) {
+        case JANUS_FIELD_INT: {
+            int v;
+            memcpy(&v, field, sizeof(v));
+            return (double)v;
+        }
+        case JANUS_FIELD_INT64: {
+            int64_t v;
+            memcpy(&v, field, sizeof(v));
+            return (double)v;
+        }
+        case JANUS_FIELD_FLOAT: {
+            float v;
+            memcpy(&v, field, sizeof(v));
+            return (double)v;
+        }
+        default:
+            return 0.0; /* string has no numeric value; no glyph rendering yet anyway */
+    }
+}
+
+/* ------------------------------------------------- per-kind draw_<kind> --
+ * Kind-distinct placeholder fill bytes — no font/glyph engine exists yet.
+ */
+enum {
+    FILL_LABEL = 0x10, FILL_HEADER = 0x20, FILL_BUTTON = 0x30, FILL_IMAGE = 0x40,
+    FILL_RADIOBUTTON = 0x50, FILL_BOX_HEADER = 0x60,
+    FILL_ON = 0x70, FILL_OFF = 0x18,
+    FILL_LED_OFF = 0x08, FILL_LED_ON = 0x80, FILL_LED_WARN = 0xC0,
+};
+
+static void draw_label(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_LABEL); }
+static void draw_header(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_HEADER); }
+static void draw_button(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_BUTTON); }
+static void draw_image(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_IMAGE); }
+static void draw_radiobutton(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_RADIOBUTTON); }
+
+static void draw_progress_or_gauge(const janus_widget_desc_t *w, const void *bound_struct) {
+    double value = read_bound_value(&w->bind, bound_struct);
+    double span = (double)w->bind.range_max - (double)w->bind.range_min;
+    double fraction = span != 0.0 ? (value - w->bind.range_min) / span : 0.0;
+    fill_rect_fraction(w->geometry, fraction, FILL_ON, FILL_OFF);
+}
+
+static void draw_checkbox(const janus_widget_desc_t *w, const void *bound_struct) {
+    double value = read_bound_value(&w->bind, bound_struct);
+    fill_rect(w->geometry, value != 0.0 ? FILL_ON : FILL_OFF);
+}
+
+static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
+    int state = (int)read_bound_value(&w->bind, bound_struct);
+    uint8_t value = state <= 0 ? FILL_LED_OFF : (state == 1 ? FILL_LED_ON : FILL_LED_WARN);
+    fill_rect(w->geometry, value);
+}
+
+/* box's own content is just its header strip; children are separate
+ * descriptors, drawn (or not) by the traversal below. */
+static void draw_box_header(const janus_widget_desc_t *box) {
+    fill_rect(box->geometry_collapsed, FILL_BOX_HEADER);
+}
+
+/* ---------------------------------------------------------- traversal --
+ */
+static void render_widget(const janus_widget_desc_t *w, const void *bound_struct) {
+    switch (w->kind) {
+        case JANUS_WIDGET_LABEL: draw_label(w); return;
+        case JANUS_WIDGET_HEADER: draw_header(w); return;
+        case JANUS_WIDGET_BUTTON: draw_button(w); return;
+        case JANUS_WIDGET_IMAGE: draw_image(w); return;
+        case JANUS_WIDGET_RADIOBUTTON: draw_radiobutton(w); return;
+        case JANUS_WIDGET_PROGRESS:
+        case JANUS_WIDGET_GAUGE: draw_progress_or_gauge(w, bound_struct); return;
+        case JANUS_WIDGET_CHECKBOX: draw_checkbox(w, bound_struct); return;
+        case JANUS_WIDGET_LED: draw_led(w, bound_struct); return;
+
+        case JANUS_WIDGET_BOX:
+            draw_box_header(w);
+            if (box_is_expanded(w)) {
+                for (uint16_t i = 0; i < w->child_count; i++) {
+                    render_widget(&w->children[i], bound_struct);
+                }
+            }
+            return;
+
+        /* structural containers — no pixels of their own (Janus.md widget catalog) */
+        case JANUS_WIDGET_COLUMN:
+        case JANUS_WIDGET_ROW:
+        case JANUS_WIDGET_RADIOGROUP:
+            for (uint16_t i = 0; i < w->child_count; i++) {
+                render_widget(&w->children[i], bound_struct);
+            }
+            return;
+    }
+}
+
+void janus_render_screen(const janus_screen_desc_t *screen) {
+    g_current_screen = screen;
+    for (uint16_t i = 0; i < screen->widget_count; i++) {
+        render_widget(&screen->widgets[i], screen->bound_struct);
+    }
+}
+
+void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
+    if (screen_index >= app->screen_count) return;
+    app->active_screen = screen_index;
+    janus_render_screen(app->screens[screen_index]);
+}
+
+void janus_toggle_box(const janus_widget_desc_t *box) {
+    janus_box_state_t *slot = box_state_find_or_register(box);
+    if (slot != NULL) {
+        slot->expanded = !slot->expanded;
+    }
+
+    const void *bound_struct = g_current_screen != NULL ? g_current_screen->bound_struct : NULL;
+    draw_box_header(box);
+    if (box_is_expanded(box)) {
+        for (uint16_t i = 0; i < box->child_count; i++) {
+            render_widget(&box->children[i], bound_struct);
+        }
+    }
+}

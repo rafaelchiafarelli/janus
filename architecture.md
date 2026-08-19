@@ -215,12 +215,34 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   `NULL` if `app.nav` is unset). Implemented: `emit_app_table(app)`;
   raises if `app.nav` doesn't cover every screen.
 
-**Implementation status:** the three functions above emit correct,
-brace-balanced C text today (36 tests). Still deferred: the `.tmpl`
-wrapper that turns this into complete, standalone files with `#include`s
-and header guards — everything so far is just the declarations/
-initializers themselves, verified via substring assertions, not yet
-written to disk as real `.c`/`.h` files.
+**`.bound_struct` resolution (v1: one message per screen).** Each
+widget's `.bind.field_offset = offsetof({message}_t, {field})` already
+assumes `{message}_t` is a real, visible C struct type — that's Stage 7's
+long-standing open question (does harpia's `ZmqAdapter` emit anything
+usable as a plain C struct?), still unresolved. `.bound_struct` needs an
+*instance* of that type, though, and something has to give for Stage 4 to
+read live values at all: `emit_screen()` collects the distinct
+`Binding.message` names used by that screen's widgets
+(`screen_bound_messages`) and requires there be at most one. With one,
+it emits `.bound_struct = &{message}_instance` and
+`render_screen_source` adds a conditional `#include "janus_bindings.h"`
+(built in Python, same pattern as `emit_app_table`'s `titles_ref`, no new
+templating logic) — a new fixed-name convention, human/vendor-owned
+(never regenerated), analogous to `src/display_driver.c`. With zero
+bindings, `.bound_struct = NULL` and the include is omitted. With more
+than one distinct message, `emit_screen()` raises `ValueError` — matches
+Stage 1's "validate, don't silently default" philosophy. This resolves
+enough of Stage 7's question for a single-message screen to compile and
+read live values; it does **not** resolve whether harpia's `ZmqAdapter`
+can actually produce a `janus_bindings.h`-shaped output, or what happens
+past one message per screen — both stay open.
+
+**Implementation status:** implemented and tested (75 tests): the raw
+declarations (`emit_screen`/`emit_actions_header`/`emit_app_table`), the
+`.tmpl` wrapper turning them into complete standalone files with
+`#include`s and header guards (`emit_files.py`, `janus/templates/*.tmpl`),
+and `generate.write_project` writing them to disk with
+content-diff-before-write.
 
 **Owner:** Janus-owned, full regen every run, content-diffed before write
 (this is the deliberate improvement over harpia's own unconditional-write
@@ -230,23 +252,18 @@ untouched-content rewrite would still force a recompile via mtime).
 **Mechanism:** harpia-style `.tmpl` + `str.format()`, e.g.:
 
 ```c
-// screen_table.c.tmpl
-#include "janus_runtime.h"
-
-static const janus_widget_desc_t {screen_var}_widgets[] = {{
-{widget_entries}
-}};
-
-const janus_screen_desc_t {screen_var}_screen = {{
-    .name = "{screen_name}",
-    .widgets = {screen_var}_widgets,
-    .widget_count = {widget_count},
-    .bound_struct = &{bound_struct_instance},
-}};
+// screen.c.tmpl
+#include "{screen_var}_screen.gen.h"
+{extra_includes}
+{body}
 ```
 
-`{widget_entries}` is a Python-built string, one initializer line per
-widget, exactly like `harpia/Database/CrudlAdapter.py`'s `_create_locals`.
+where `{extra_includes}` is a Python-built, possibly-empty string —
+`#include "janus_actions.gen.h"` when the screen has any `on_press`
+widget, `#include "janus_bindings.h"` when it has any `bind` — and
+`{body}` is the widget-array + `janus_screen_desc_t` initializer text
+built by `emit_screen`, one initializer line per widget, exactly like
+`harpia/Database/CrudlAdapter.py`'s `_create_locals`.
 
 ---
 
@@ -257,7 +274,10 @@ vendored into every generated project (copy or build-system dependency —
 **OPEN**, not yet decided which).
 
 **Produces — the stable C API every generated file and every human file
-compiles against** (`runtime/embedded_c/include/janus_runtime.h`):
+compiles against** (`runtime/embedded_c/include/janus_runtime.h`, which
+pulls in `<stddef.h>` itself since every generated widget initializer
+uses `offsetof()`/`NULL` — found compiling the first real generated
+project against this header):
 
 ```c
 typedef enum {
@@ -277,13 +297,16 @@ typedef struct {
     float range_min, range_max;    /* progress/gauge only */
 } janus_bind_t;
 
+typedef int16_t janus_action_id_t;   /* see note below — not janus_action_t */
+
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;
     janus_rect_t geometry;             /* also the "expanded" rect for box */
     janus_rect_t geometry_collapsed;   /* box only, ignored otherwise */
+    bool initial_expanded;             /* box only, ignored otherwise — baked from Widget.default_expanded */
     janus_bind_t bind;
-    janus_action_t action;             /* on_press only; JANUS_ACTION_NONE otherwise */
+    janus_action_id_t action;          /* on_press only; 0 otherwise (== JANUS_ACTION_NONE by convention) */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
     uint8_t focus_order;               /* input dispatch — reserved, unused until Stage 6 lands */
     const struct janus_widget_desc *children;
@@ -315,10 +338,37 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by 
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 ```
 
+**Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
+`janus_action_t` is defined by the *generated*, per-project
+`janus_actions.gen.h` (Stage 3b) — but `janus_widget_desc_t` is defined
+once, in this fixed header, with no guarantee any per-project file has
+been `#include`d first. Typing the field as a generic `int16_t` id
+(enum constants convert to it implicitly, no cast needed at the
+generation site) keeps the fixed library fully independent of any
+generated enum. Stage 6, when it lands, casts back to `janus_action_t`
+right before calling `janus_handle_action`.
+
+**Box collapse state.** `janus_widget_desc_t` instances are
+`static const` arrays baked at generation time — there's nowhere in them
+to store a *mutable* "currently expanded" bit. `janus_runtime.c` keeps a
+small fixed-capacity table mapping descriptor pointer → current expanded
+bit (descriptors have program-lifetime-stable addresses, so pointer
+identity is a safe key), seeded from `.initial_expanded` the first time
+a box is rendered and flipped by `janus_toggle_box`.
+
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
 DESIGN.md's actual rendering logic lives, finally for real (not the
-deleted Copilot stub).
+deleted Copilot stub). Scope note: only the synchronous path
+(`draw_area_sync`) is driven by the traversal so far — `draw_area_async`/
+`display_busy` are declared (any driver must still provide them) but not
+yet called by anything; polled/non-blocking scheduling is real future
+work. Leaf rendering is a kind-distinct solid fill of `geometry` (no
+font/glyph engine exists yet — still "Stage 2+" in `Janus.md`), except
+`progress`/`gauge` (fraction of range) and `checkbox` (checked/unchecked)
+which read the *live* bound value and vary the fill accordingly — the
+concrete difference from the deleted Copilot stub's "empty buffer
+regardless of screen contents."
 
 **Owner:** fixed library. **Adding a widget kind = adding one
 `draw_<kind>()` function here + one enum value + one entry in the Python
