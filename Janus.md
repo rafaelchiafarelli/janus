@@ -359,7 +359,7 @@ message settings{
 
 Verified against the actual harpia generator (not guessed): harpia uses **no templating engine** (no Jinja2/Mako anywhere in the repo). Its real mechanism is `.tmpl` files with `str.format()`-style `{placeholder}` markers (literal C++ braces doubled as `{{`/`}}`), loaded once via `Util/util.py`'s `loadTemplate`. Repeated sections (field lists, FK includes) are built as Python string fragments in adapter helper methods (e.g. `Database/CrudlAdapter.py`'s `_create_locals`/`_extract_set`/`_map_write`) and fed into a single `.format()` call per file. One `.tmpl` + one adapter module per output kind (`Database/`, `JsonAdapter/`, `XmlAdapter/`, `ZmqAdapter/`, each independent, `.tmpl` files living alongside their adapter). Files are written unconditionally (`open(path, "w").write(...)`), and the whole output directory is `shutil.rmtree()`'d before regeneration (`main.py`) — full wipe-and-regenerate, not a smart diff/prune step.
 
-Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new templating dependency) but **splits embedded-C output into two things generated very differently**, because Janus's generation surface is lumpier than harpia's (13 widget kinds, `box`'s dual geometry tables, tab/nav switching, driver dispatch — vs. harpia's fairly uniform "one CRUDL class per table"). Templating *all* of that per-project would mean regenerating drawing logic on every build: a rendering bug fix would only land in projects that happen to regenerate, and every generated project would duplicate the same traversal/tiling code. That's exactly the failure mode the deleted Copilot stub never got past.
+Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new templating dependency) but **splits embedded-C output into two things generated very differently**, because Janus's generation surface is lumpier than harpia's (13 widget kinds, `box`'s dual geometry tables, tab/nav switching, driver dispatch — vs. harpia's fairly uniform "one CRUDL class per table"). Templating *all* of that per-project would mean regenerating drawing logic on every build: a rendering bug fix would only land in projects that happen to regenerate, and every generated project would duplicate the same traversal/tiling code. That's exactly the failure mode the Copilot stub never got past.
 
 1. **A fixed runtime library, hand-written once, shipped with Janus, never templated per-project** — `runtime/embedded_c/{include/janus_runtime.h, src/janus_runtime.c}`. This is where DESIGN.md's traversal, tiling, driver contract (`draw_area_sync`/`draw_area_async`/`display_busy`), and one `draw_<kind>()` function per widget kind actually live. Every generated project links the same library; a rendering fix ships by rebuilding, not regenerating. **Adding a new widget kind (e.g. a "bolt-button") means adding one `draw_bolt_button()` function here plus one entry in the Python kind catalog — not touching layout, harpia emission, or any other widget's code.** (Caveat: a kind that needs a *new bind shape* — like `radiogroup`'s group-level bind — or *new runtime state* — like `box`'s collapse bit — touches a few more places: the shared descriptor/state struct and the layout pass if it affects geometry. Still additive, never a rewrite.)
 
@@ -408,15 +408,18 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   auto-sizing at Janus's *generation* time (one geometry table baked per
   locale, using that locale's glyph atlas metrics), not at device draw time.
   Not needed until font/glyph packing (already "Stage 2+", unbuilt) exists.
-- **Janus's own toolchain.** Python (for consistency with harpia's own
-  toolchain) is the default assumption, not a confirmed decision. Test
-  strategy, repo layout, and CI are all unstarted.
+- **Janus's own toolchain — no longer open.** Python, confirmed in use
+  throughout. Test strategy: `unittest` for the Python pipeline (Stages
+  1–3b, 5, 8; 83+ tests), CMake/`ctest` for the C runtime (Stage 4/6).
+  Repo layout: `janus/stage{N}_*/` subpackages matching architecture.md's
+  own stage numbering.
 
-## Salvageable from the deleted Copilot branch
+## Salvageable from the Copilot GuiAdapter branch
 
-The branch itself is gone (deleted from harpia both locally and on
-`origin`), so treat this as a memory of what was in it, not a pointer to
-live code.
+Still present, in full, on harpia's `dev` branch (`GuiAdapter/` — see the
+correction above) — this section was written under the earlier, wrong
+assumption that it was gone. Worth reading directly rather than relying
+on the summary below if `DESIGN.md`'s exact wording ever matters.
 
 - `GuiAdapter/DESIGN.md`'s runtime contract, memory model, and tiling
   design — reusable close to as-is as the starting spec for Janus's

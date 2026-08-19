@@ -395,9 +395,9 @@ void janus_handle_action(janus_action_t action) {
 ```
 
 **Owner:** human-owned, one `case` added per new `on_press` value, never
-regenerated. **OPEN:** does Janus scaffold this file with `TODO` cases the
-*first* time it's needed, or does the human create it from scratch? Either
-way, once it exists, Janus never touches it again.
+regenerated. Resolved: Janus scaffolds this file with `TODO` cases the
+*first* time it's needed (`janus/stage5_actions/scaffold_actions.py`,
+`scaffold_actions_c`) — once it exists, Janus never touches it again.
 
 **Rule — the two button verbs are not the same path:** `on_press` values
 route here, through the human's own switch. `navigate` values never reach

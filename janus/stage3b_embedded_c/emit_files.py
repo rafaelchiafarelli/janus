@@ -1,7 +1,5 @@
 """Wraps Stage 3b's raw declarations (emit_embedded_c.py) into complete,
-standalone .c/.h files — header guards, #includes. This is exactly the
-piece the Stage 3b slice commit deliberately deferred: "no .tmpl
-wrapper/#includes ... those are separate later increments."
+standalone .c/.h files — header guards, #includes.
 
 Mechanism matches Janus.md's stated approach for this project:
 harpia-style `.tmpl` + `str.format()`, no templating engine. Each

@@ -2,15 +2,16 @@
 
 In scope: per-screen widget descriptor arrays + janus_screen_desc_t
 (`emit_screen`), the action-ID enum (`emit_actions_header`), and the
-app-level screen/nav table (`emit_app_table`). Still deferred to a later
-increment: the .tmpl wrapper that adds #includes and turns these into
-complete, standalone files.
+app-level screen/nav table (`emit_app_table`). The .tmpl wrapper that
+turns these into complete, standalone files lives in `emit_files.py`.
 
 Struct-binding convention used below (`offsetof({message}_t, {field})`,
-one struct type per harpia message) is PROVISIONAL — it depends on
-architecture.md Stage 7's open question (does harpia's ZmqAdapter emit a
-plain C struct at all?). Emitting the text doesn't require that question
-to be resolved yet; only actually compiling the output does.
+one struct type per harpia message) is Janus's own — confirmed by Stage
+7's research pass that harpia's ZmqAdapter emits C++ only (protobuf
+classes, never a plain C struct), so this struct is never harpia's
+output to consume. `janus_bindings.h` is hand-written for now
+(`examples/host_demo`); generating it directly from these same Bindings
+is the natural next increment here.
 """
 from __future__ import annotations
 
