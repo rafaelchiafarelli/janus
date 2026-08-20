@@ -3,10 +3,12 @@ import unittest
 from janus.stage3b_embedded_c.emit_files import (
     render_actions_header,
     render_app_source,
+    render_bindings_header,
+    render_bindings_source,
     render_screen_header,
     render_screen_source,
 )
-from janus.ir import App, NavTarget, Screen, Widget
+from janus.ir import App, Binding, NavTarget, Screen, Widget
 from janus.stage2_layout.layout import layout_screen
 
 
@@ -76,7 +78,7 @@ class TestEmitFiles(unittest.TestCase):
         from janus.stage3b_embedded_c.emit_embedded_c import screen_index_map
 
         out = render_screen_source(self.app.screens[0], screen_index_map(self.app))
-        self.assertNotIn('#include "janus_bindings.h"', out)
+        self.assertNotIn('#include "janus_bindings.gen.h"', out)
 
     def test_screen_source_includes_bindings_header_when_screen_has_a_bind(self) -> None:
         from janus.ir import Binding
@@ -89,7 +91,7 @@ class TestEmitFiles(unittest.TestCase):
         )
         layout_screen(bound_screen)
         out = render_screen_source(bound_screen)
-        self.assertIn('#include "janus_bindings.h"', out)
+        self.assertIn('#include "janus_bindings.gen.h"', out)
         self.assertNotIn('#include "janus_actions.gen.h"', out)
 
     def test_actions_header_has_guard(self) -> None:
@@ -106,6 +108,35 @@ class TestEmitFiles(unittest.TestCase):
         self.assertIn("janus_app_t janus_app = {", out)
         self.assertIn('"Status"', out)
         self.assertTrue(_balanced_braces(out))
+
+    def test_bindings_header_has_guard_and_struct(self) -> None:
+        bound_screen = Screen(
+            name="Bound",
+            root=Widget(kind="column", id="r3", children=[
+                Widget(kind="label", id="lbl", bind=Binding(message="dev", field="name", type="string")),
+            ]),
+        )
+        layout_screen(bound_screen)
+        out = render_bindings_header(App(screens=[bound_screen]))
+        self.assertIn("#ifndef JANUS_GEN_BINDINGS_H", out)
+        self.assertIn("#define JANUS_GEN_BINDINGS_H", out)
+        self.assertIn("typedef struct {", out)
+        self.assertIn("} dev_t;", out)
+        self.assertIn("extern dev_t dev_instance;", out)
+        self.assertIn("#endif", out)
+        self.assertTrue(_balanced_braces(out))
+
+    def test_bindings_source_includes_own_header_and_zero_inits(self) -> None:
+        bound_screen = Screen(
+            name="Bound",
+            root=Widget(kind="column", id="r3", children=[
+                Widget(kind="label", id="lbl", bind=Binding(message="dev", field="name", type="string")),
+            ]),
+        )
+        layout_screen(bound_screen)
+        out = render_bindings_source(App(screens=[bound_screen]))
+        self.assertIn('#include "janus_bindings.gen.h"', out)
+        self.assertIn("dev_t dev_instance = {0};", out)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from ..ir import App, Screen
 from ..templates import load_template
+from .emit_bindings_struct import emit_bindings_header, emit_bindings_source
 from .emit_embedded_c import (
     emit_actions_header,
     emit_app_table,
@@ -41,7 +42,7 @@ def render_screen_source(
     if screen_on_press_actions(screen):
         includes.append('#include "janus_actions.gen.h"')
     if screen_bound_messages(screen):
-        includes.append('#include "janus_bindings.h"')
+        includes.append('#include "janus_bindings.gen.h"')
     extra_includes = "\n".join(includes)
 
     return load_template("screen.c.tmpl").format(
@@ -57,3 +58,13 @@ def render_actions_header(app: App) -> str:
 def render_app_source(app: App) -> str:
     body = emit_app_table(app)
     return load_template("app.c.tmpl").format(body=body)
+
+
+def render_bindings_header(app: App) -> str:
+    body = emit_bindings_header(app)
+    return load_template("bindings.h.tmpl").format(guard=_guard("bindings"), body=body)
+
+
+def render_bindings_source(app: App) -> str:
+    body = emit_bindings_source(app)
+    return load_template("bindings.c.tmpl").format(body=body)

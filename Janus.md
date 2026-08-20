@@ -1,7 +1,10 @@
 # Janus — a pre-harpia GUI schema + code generator
 
-> **Status: design only.** Nothing in this doc is implemented yet. This file
-> is meant to let a fresh session pick this project up and move quickly —
+> **Status (updated 2026-08-19): the embedded-C target is implemented and
+> working end-to-end**, not "design only" anymore — see `architecture.md`'s
+> per-stage "Implementation status." Still open: encoder/button input,
+> the glyph/font engine ("Stage 2+" below), and the JS/Node target. This
+> file is still meant to let a fresh session pick this project up quickly —
 > read it whole before writing any code. A visual companion to the
 > "Embedded-C code generation architecture" and "Input / event dispatch"
 > sections lives at [`docs/architecture.drawio`](docs/architecture.drawio)
@@ -389,7 +392,9 @@ Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new tem
 
 3. **Deliberate improvement over harpia, not a borrowed one:** since generated `.c` files get compiled, an unconditional overwrite touches mtime and forces recompilation even when content is byte-identical — wasteful for embedded incremental builds. Janus's own file-writer should do a real diff-before-write (compare content, skip the write if unchanged).
 
-**Open question, not yet resolved:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout — and *what generates that struct* is unchecked. harpia's own C++ backend (protobuf/SOCI) is explicitly too heavy for this target (see "Why this isn't part of the harpia repo" above); the plan is harpia's `ZmqAdapter` for transport, but whether `ZmqAdapter` emits anything usable as a plain C struct (vs. C++-only protobuf classes) hasn't been checked. This is a real dependency for the doc's own step 2 ("DSL → harpia Include + working UI code for a trivial one-screen example") — needs a research pass into `harpia/ZmqAdapter/` before real generator code gets written, not something to guess at.
+**RESOLVED (2026-08-19), corrects the "Open question" below:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout. Two research passes the same day confirmed harpia can never be the source of it — `ZmqAdapter` only emits header-only C++ wrapping protobuf's own C++ classes, and one level deeper, `protoFile/ProtoCompiler.py` hardcodes `protoc --cpp_out` with no `--c_out`/nanopb/protobuf-c path anywhere in harpia. Structurally, no plain C struct exists in that pipeline for any message. So Janus generates its own: `emit_bindings_struct.py` (Stage 3b) walks the same `Binding`s `emit_harpia.py` already collects and emits `{message}_t` + a zero-initialized `{message}_instance` — `janus_bindings.gen.h`/`.gen.c`, replacing the hand-written `examples/host_demo/janus_bindings.h`/`.c` this doc originally described. See `architecture.md`'s Stage 3b/7 for the exact contract; the paragraph below is kept for the record of what was actually unresolved before this pass, not because it's still accurate.
+
+**Open question as it stood before the above:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout — and *what generates that struct* was unchecked. harpia's own C++ backend (protobuf/SOCI) is explicitly too heavy for this target (see "Why this isn't part of the harpia repo" above); the plan was harpia's `ZmqAdapter` for transport, but whether `ZmqAdapter` emits anything usable as a plain C struct (vs. C++-only protobuf classes) hadn't been checked. This was a real dependency for the doc's own step 2 ("DSL → harpia Include + working UI code for a trivial one-screen example") — needed a research pass into `harpia/ZmqAdapter/` before real generator code got written, not something to guess at.
 
 ## Input / event dispatch (deferred, sketched — not yet designed in detail or implemented)
 

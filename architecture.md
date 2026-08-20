@@ -6,8 +6,13 @@ exactly what it receives, what it produces, who owns the output, and whether
 it gets regenerated. Read `Janus.md` first for *why*; this file is *what*,
 precisely enough to implement against.
 
-Status: design only, same as `Janus.md` — nothing below is implemented yet.
-Where a shape isn't nailed down, it's marked **OPEN**.
+Status (updated 2026-08-19): Stages 1–8 are implemented and tested for the
+embedded-C target (see each stage's "Implementation status" / "Owner" —
+`examples/host_demo` builds and runs end-to-end, including Janus-generated
+bindings as of today). Still genuinely open: encoder/button input dispatch
+(Stage 6), the glyph/font engine (Stage 4's solid-fill placeholders, see
+`Janus.md` "Stage 2+"), and the JS/Node target (never started). Where a
+shape isn't nailed down, it's marked **OPEN**.
 
 ## Ownership vocabulary (used throughout)
 
@@ -216,32 +221,36 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   raises if `app.nav` doesn't cover every screen.
 
 **`.bound_struct` resolution (v1: one message per screen).** Each
-widget's `.bind.field_offset = offsetof({message}_t, {field})` already
-assumes `{message}_t` is a real, visible C struct type — that's Stage 7's
-long-standing open question (does harpia's `ZmqAdapter` emit anything
-usable as a plain C struct?), still unresolved. `.bound_struct` needs an
+widget's `.bind.field_offset = offsetof({message}_t, {field})` assumes
+`{message}_t` is a real, visible C struct type. `.bound_struct` needs an
 *instance* of that type, though, and something has to give for Stage 4 to
 read live values at all: `emit_screen()` collects the distinct
 `Binding.message` names used by that screen's widgets
 (`screen_bound_messages`) and requires there be at most one. With one,
 it emits `.bound_struct = &{message}_instance` and
-`render_screen_source` adds a conditional `#include "janus_bindings.h"`
+`render_screen_source` adds a conditional `#include "janus_bindings.gen.h"`
 (built in Python, same pattern as `emit_app_table`'s `titles_ref`, no new
-templating logic) — a new fixed-name convention, human/vendor-owned
-(never regenerated), analogous to `src/display_driver.c`. With zero
-bindings, `.bound_struct = NULL` and the include is omitted. With more
-than one distinct message, `emit_screen()` raises `ValueError` — matches
-Stage 1's "validate, don't silently default" philosophy. This resolves
-enough of Stage 7's question for a single-message screen to compile and
-read live values; it does **not** resolve whether harpia's `ZmqAdapter`
-can actually produce a `janus_bindings.h`-shaped output, or what happens
-past one message per screen — both stay open.
+templating logic). With zero bindings, `.bound_struct = NULL` and the
+include is omitted. With more than one distinct message, `emit_screen()`
+raises `ValueError` — matches Stage 1's "validate, don't silently
+default" philosophy.
 
-**Implementation status:** implemented and tested (75 tests): the raw
-declarations (`emit_screen`/`emit_actions_header`/`emit_app_table`), the
-`.tmpl` wrapper turning them into complete standalone files with
-`#include`s and header guards (`emit_files.py`, `janus/templates/*.tmpl`),
-and `generate.write_project` writing them to disk with
+**`{message}_t` / `{message}_instance` themselves are now Janus-owned,
+not human-written** (`emit_bindings_struct.py`, implemented per Stage 7's
+follow-up research pass below): the type/field-offset side of Stage 7's
+old open question is resolved — harpia's `ZmqAdapter` was confirmed to be
+structurally incapable of producing a plain C struct (protobuf's C++
+classes only), so Janus generates its own from the same `Binding`s
+`emit_harpia.py` already walks. What's still human-owned is *populating*
+the generated instance with real values at runtime — the struct itself
+only zero-inits (see Stage 7 below for why, and where the split falls).
+
+**Implementation status:** implemented and tested: the raw declarations
+(`emit_screen`/`emit_actions_header`/`emit_app_table`/
+`emit_bindings_header`/`emit_bindings_source`), the `.tmpl` wrapper
+turning them into complete standalone files with `#include`s and header
+guards (`emit_files.py`, `janus/templates/*.tmpl`), and
+`generate.write_project` writing them to disk with
 content-diff-before-write.
 
 **Owner:** Janus-owned, full regen every run, content-diffed before write
@@ -260,7 +269,7 @@ untouched-content rewrite would still force a recompile via mtime).
 
 where `{extra_includes}` is a Python-built, possibly-empty string —
 `#include "janus_actions.gen.h"` when the screen has any `on_press`
-widget, `#include "janus_bindings.h"` when it has any `bind` — and
+widget, `#include "janus_bindings.gen.h"` when it has any `bind` — and
 `{body}` is the widget-array + `janus_screen_desc_t` initializer text
 built by `emit_screen`, one initializer line per widget, exactly like
 `harpia/Database/CrudlAdapter.py`'s `_create_locals`.
@@ -489,18 +498,18 @@ argued in the abstract.
 
 **Consequence for Stage 3b/4/6:** Janus can never point
 `.bound_struct`/`.field_offset = offsetof(...)` at anything harpia emits.
-The `janus_bindings.h` convention `examples/host_demo` hand-writes today
+The `janus_bindings.h` convention `examples/host_demo` used to hand-write
 (Stage 3b's `.bound_struct` resolution) was pointing the right direction
 but for the wrong reason — it shouldn't be a permanent human/vendor
 hand-write standing in for a harpia output that will never arrive; it
-should become **another Janus-generated artifact**, alongside
+became **another Janus-generated artifact**, alongside
 `janus_generated.harpia`: a plain C struct per bound message, generated
 directly from the same `Binding`s `emit_harpia.py` already walks (same
 field names/types, independently emitted in two languages for two
 targets — harpia's C++/protobuf schema for desktop/server, Janus's own
 plain C struct for embedded — not one consuming the other's output).
-Not yet implemented; this is the natural next Stage 3b increment once
-picked up.
+**Implemented** the same day this was scoped — see the follow-up
+research pass and Stage 3b's `.bound_struct` resolution above.
 
 **Bonus finding, corrects `Janus.md`:** that doc's "Origin"/"Salvageable"
 sections state the Copilot `GuiAdapter/` branch was "deleted, both
@@ -513,6 +522,53 @@ of harpia" reasoning all stand on their own merits either way), but
 `Janus.md`'s deletion claim itself is factually wrong and worth fixing
 next time that file's touched, so a future session doesn't rely on
 "memory of what was in it" when the actual code is one `cd` away.
+
+**Follow-up research pass (2026-08-19), scoping the Stage 3b increment
+above — IMPLEMENTED same day, see Stage 3b's `.bound_struct` resolution
+above.** Confirmed the "no plain C struct" finding one level deeper than
+`ZmqAdapter` — `harpia/protoFile/ProtoCompiler.py:63` invokes
+`protoc -I <root> --cpp_out <scratch>` unconditionally; there is no
+`--c_out`/nanopb/protobuf-c path anywhere in harpia (checked every `.py`
+in the repo). This isn't an adapter-level choice that a different backend
+could route around — it's the one protoc invocation every message goes
+through, full stop.
+
+The generated-struct increment turns out to need no new design decisions,
+only new code, because Stage 3b already commits to its shape without
+defining it:
+- `emit_embedded_c.py`'s `_widget_init` (line 134) already emits
+  `offsetof({message}_t, {field})`, and `emit_screen` (line 221) already
+  emits `&{message}_instance` — both reference a type/symbol that doesn't
+  exist yet anywhere Janus generates.
+- The field walk already exists too: `emit_harpia.py`'s
+  `_collect_bindings` builds exactly `{message: {field: Binding}}`,
+  currently used only for the `.harpia` Include. A new
+  `emit_bindings_struct.py` would call the same walk and map
+  `Binding.type` to a C type — a closed 4-entry table (`string` →
+  `const char *`, `int` → `int`, `int64` → `int64_t`, `float` → `float`),
+  already validated at Stage 1 (`_VALID_BIND_TYPES` in `dsl_yaml.py`) and
+  already mirrored in the runtime's `janus_field_type_t` enum, so there's
+  no new type system to invent.
+- Output would be `janus_bindings.gen.h`/`.gen.c`, matching every other
+  Stage 3b output's `.gen.` convention, replacing today's hand-written
+  `examples/host_demo/janus_bindings.h`/`.c`. `emit_files.py:44`'s
+  hardcoded `#include "janus_bindings.h"` moves to the `.gen.h` name at
+  the same time.
+- New open question this pass surfaces, not answered by architecture.md
+  before now: **initial values.** `janus_bindings.c` today hand-inits
+  demo data (`.battery_level = 42`, ...). A Janus-generated struct can
+  only zero-init (`= {0}`) — real values become firmware's job to
+  populate at runtime (e.g. a ZMQ receive callback), the same
+  Janus-generates-shape/human-owns-behavior split Stage 5 and Stage 8
+  already use elsewhere. Doesn't block the increment, just means
+  `device_instance`'s current demo values move from `janus_bindings.c`
+  into `src/janus_actions.c` or `src/main.c` (human-owned) once this
+  lands.
+- **Does not unblock string rendering.** `read_bound_value` in
+  `janus_runtime.c` returns `0.0` for `JANUS_FIELD_STRING` regardless of
+  where the struct comes from — that's the Stage 4 glyph-engine gap
+  (`Janus.md`, "Stage 2+"), a separate unbuilt piece. Generating the
+  struct makes `label`/`header` bindings *compile*, not *render*.
 
 ---
 
@@ -528,6 +584,7 @@ This is the "how does it all actually get compiled" question.
 | `build/generated/{screen}_screen.gen.c` | Janus | yes, every build |
 | `build/generated/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
 | `build/generated/janus_app.gen.c` | Janus | yes, every build |
+| `build/generated/janus_bindings.gen.h/.c` | Janus | yes, every build (struct shape only — instance zero-inits; a human file populates real values at runtime) |
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
 | `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c`) | no |
@@ -574,6 +631,7 @@ This is the "how does it all actually get compiled" question.
 | `{screen}_screen.gen.c/.h` | Janus | every run |
 | `janus_actions.gen.h` | Janus | every run |
 | `janus_app.gen.c` | Janus | every run |
+| `janus_bindings.gen.h/.c` | Janus | every run (zero-init only — see Stage 8) |
 | `runtime/embedded_c/*` | Janus (fixed library) | on Janus upgrade only |
 | `src/janus_actions.c` | human | never |
 | `src/main.c` | human | never |

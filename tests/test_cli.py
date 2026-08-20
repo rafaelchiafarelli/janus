@@ -22,6 +22,8 @@ class TestGenerate(unittest.TestCase):
             "boxdemo_screen.gen.c",
             "janus_actions.gen.h",
             "janus_app.gen.c",
+            "janus_bindings.gen.h",
+            "janus_bindings.gen.c",
             "janus_generated.harpia",
         }
         actual = {p.name for p in self.target_dir.iterdir()}

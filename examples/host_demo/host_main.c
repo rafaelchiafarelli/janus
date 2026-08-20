@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include "janus_actions.gen.h"
+#include "janus_bindings.gen.h"
 #include "janus_input_touch.h"
 #include "janus_runtime.h"
 #include "mock_driver.h"
@@ -64,6 +65,14 @@ static void simulate_tap(int16_t x, int16_t y) {
 
 int main(void) {
     display_driver_init();
+
+    /* janus_bindings.gen.c only zero-inits device_instance (Janus
+     * generates the struct's shape, not its data — see architecture.md
+     * Stage 7); real firmware would populate this from a sensor read or
+     * a ZMQ receive callback, this demo just fakes that step. */
+    device_instance.name = "demo-unit";
+    device_instance.battery_level = 42;
+    device_instance.online = 1;
 
     render_and_summarize("initial render (diagnostics box starts collapsed)");
 

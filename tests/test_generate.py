@@ -35,6 +35,8 @@ class TestWriteProject(unittest.TestCase):
             "boxdemo_screen.gen.c",
             "janus_actions.gen.h",
             "janus_app.gen.c",
+            "janus_bindings.gen.h",
+            "janus_bindings.gen.c",
             "janus_generated.harpia",
         }
         actual = {p.name for p in self.out_dir.iterdir()}
@@ -67,7 +69,7 @@ class TestWriteProject(unittest.TestCase):
 
     def test_returns_only_paths_actually_written_first_run(self) -> None:
         written = write_project(self.app, self.out_dir)
-        self.assertEqual(len(written), 7)
+        self.assertEqual(len(written), 9)
 
 
 if __name__ == "__main__":

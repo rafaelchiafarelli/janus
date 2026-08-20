@@ -11,10 +11,10 @@ add_subdirectory(${RUNTIME_DIR} janus_runtime_build)
 set(GENERATED_SOURCES
     build/generated/devicestatus_screen.gen.c
     build/generated/janus_app.gen.c
+    build/generated/janus_bindings.gen.c
 )
 set(COMMON_SOURCES
     ${GENERATED_SOURCES}
-    janus_bindings.c
     src/janus_actions.c
     display_driver_stub.c
     ${RUNTIME_DIR}/host_mock/mock_driver.c
