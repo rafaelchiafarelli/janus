@@ -68,11 +68,11 @@ int main(void) {
     render_and_summarize("initial render (diagnostics box starts collapsed)");
 
     printf("\n");
-    simulate_tap(5, 55);   /* inside diagnostics_box's header: {0,52,12,16} */
+    simulate_tap(10, 80);   /* inside diagnostics_box's header: {0,72,24,16} */
     render_and_summarize("re-render after the tap (box now expanded)");
 
     printf("\n");
-    simulate_tap(10, 90);  /* inside reboot_button: {0,84,64,20} */
+    simulate_tap(10, 140);  /* inside reboot_button: {0,132,64,20} */
 
     return 0;
 }

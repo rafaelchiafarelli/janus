@@ -47,6 +47,21 @@ class TestRangeValidation(unittest.TestCase):
         ])
         screen_from_dict(data)  # must not raise
 
+    def test_slider_without_range_rejected(self) -> None:
+        data = _screen([
+            {"kind": "slider", "id": "s", "bind": {"message": "m", "field": "f", "type": "int"},
+             "size": {"w": 10, "h": 10}},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_slider_with_range_accepted(self) -> None:
+        data = _screen([
+            {"kind": "slider", "id": "s", "bind": {"message": "m", "field": "f", "type": "int"},
+             "range": {"min": 0, "max": 100}, "size": {"w": 10, "h": 10}},
+        ])
+        screen_from_dict(data)  # must not raise
+
 
 class TestRadiobuttonValueValidation(unittest.TestCase):
     def test_mismatched_value_type_rejected(self) -> None:

@@ -13,14 +13,17 @@ BOX_HEADER_H = 16
 _LEAF_KINDS = {
     "label", "header", "button", "image", "progress", "gauge",
     "checkbox", "radiobutton", "led",
+    "divider", "toggle", "badge", "slider",
 }
-_REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led"}
+_REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led", "badge", "slider"}
 _DEFAULT_SIZE = {
     "label": (60, 12),
     "header": (80, 16),
     "button": (64, 20),
     "checkbox": (12, 12),
     "radiobutton": (12, 12),
+    "divider": (60, 2),
+    "toggle": (24, 12),
 }
 
 

@@ -237,11 +237,12 @@ For small/constrained devices — the original motivating use case.
     needs explicit size") turned out to contradict every worked example in
     this doc, which never bothered sizing a `label`/`header`/`button`/
     `checkbox`/`radiobutton` but always sized `progress`/`gauge`/`image`/
-    `led`. `progress`, `gauge`, `image`, `led` **require** explicit `size`
-    — their dimensions are a real design choice Janus can't guess. `label`,
-    `header`, `button`, `checkbox`, `radiobutton` get a fixed v1 placeholder
-    default per kind when `size` is omitted (overridable), standing in
-    until real font-metric auto-sizing exists (see auto-sizing note below).
+    `led`. `progress`, `gauge`, `image`, `led`, `badge`, `slider`
+    **require** explicit `size` — their dimensions are a real design
+    choice Janus can't guess. `label`, `header`, `button`, `checkbox`,
+    `radiobutton`, `divider`, `toggle` get a fixed v1 placeholder default
+    per kind when `size` is omitted (overridable), standing in until real
+    font-metric auto-sizing exists (see auto-sizing note below).
 
 ## v1 widget catalog
 
@@ -267,6 +268,10 @@ Leaves:
 | `checkbox` | `int` (0/nonzero convention) | bound per-widget. **harpia has no `bool` type** (confirmed against `LexicalAnalizer/LexicalAnalyzer.py` — only `int`/`int64`/`float`/`string`/`map`), so this is a deliberate mapping, not an oversight |
 | `radiobutton` | static `value` only | bind lives on the parent `radiogroup` |
 | `led` | `int` (state index) | display-only, not interactive; optional static `states: [off, on, warn, ...]` maps int→color, same spirit as `progress`'s `range` |
+| `divider` | unbound | purely decorative — a thin rule/spacer; no runtime state, no draw content beyond a fixed fill |
+| `toggle` | `int` (0/nonzero convention) | identical bind shape to `checkbox` — a switch-styled render of the same on/off value |
+| `badge` | `int` (0/nonzero convention) | a small on/off status dot — same bind shape as `checkbox`/`toggle`, distinct fill so it reads as its own kind |
+| `slider` | numeric + `range: {min, max}` | identical bind shape to `progress`/`gauge` — display-only in v1 (shows a live value; doesn't write back). An interactive, write-back slider is a separate, larger future increment, not this kind |
 
 Project-level nav (not an in-screen widget kind):
 

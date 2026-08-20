@@ -33,6 +33,10 @@ _KIND_ENUM = {
     "row": "JANUS_WIDGET_ROW",
     # navlist is styling sugar over column (Janus.md catalog) — no distinct enum value
     "navlist": "JANUS_WIDGET_COLUMN",
+    "divider": "JANUS_WIDGET_DIVIDER",
+    "toggle": "JANUS_WIDGET_TOGGLE",
+    "badge": "JANUS_WIDGET_BADGE",
+    "slider": "JANUS_WIDGET_SLIDER",
 }
 
 _FIELD_TYPE_ENUM = {

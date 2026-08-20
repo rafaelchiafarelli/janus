@@ -135,5 +135,45 @@ class TestEmitEmbeddedCBoxCollapsedByDefault(unittest.TestCase):
         self.assertIn(".initial_expanded = false", segment)
 
 
+class TestEmitEmbeddedCLowEffortKinds(unittest.TestCase):
+    """divider/toggle/badge/slider — added on top of Stage 4/6, each
+    reusing an existing bind shape (no new IR fields, no new runtime
+    state)."""
+
+    def setUp(self) -> None:
+        screen = layout_screen(Screen(
+            name="Kinds",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="divider", id="d"),
+                Widget(kind="toggle", id="t", bind=Binding(message="dev", field="on", type="int")),
+                Widget(
+                    kind="badge", id="b", size=(8, 8),
+                    bind=Binding(message="dev", field="flag", type="int"),
+                ),
+                Widget(
+                    kind="slider", id="s", size=(60, 10), range=(0, 100),
+                    bind=Binding(message="dev", field="level", type="int"),
+                ),
+            ]),
+        ))
+        self.out = emit_screen(screen)
+
+    def test_each_kind_maps_to_its_own_enum_value(self) -> None:
+        self.assertIn("JANUS_WIDGET_DIVIDER", self.out)
+        self.assertIn("JANUS_WIDGET_TOGGLE", self.out)
+        self.assertIn("JANUS_WIDGET_BADGE", self.out)
+        self.assertIn("JANUS_WIDGET_SLIDER", self.out)
+
+    def test_toggle_and_badge_reuse_checkbox_style_int_bind(self) -> None:
+        self.assertIn("offsetof(dev_t, on)", self.out)
+        self.assertIn("offsetof(dev_t, flag)", self.out)
+
+    def test_slider_reuses_progress_style_bind_with_range(self) -> None:
+        self.assertIn("offsetof(dev_t, level)", self.out)
+        idx = self.out.index('.id = "s"')
+        segment = self.out[idx: idx + 300]
+        self.assertIn(".range_min = 0, .range_max = 100", segment)
+
+
 if __name__ == "__main__":
     unittest.main()

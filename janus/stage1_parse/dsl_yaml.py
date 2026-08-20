@@ -17,7 +17,7 @@ import yaml
 from ..ir import App, Binding, NavTarget, Screen, Widget
 
 _VALID_BIND_TYPES = {"string", "int", "int64", "float"}
-_REQUIRES_RANGE = {"progress", "gauge"}
+_REQUIRES_RANGE = {"progress", "gauge", "slider"}
 _PY_TYPE_FOR_BIND_TYPE: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "int": int,

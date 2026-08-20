@@ -58,6 +58,45 @@ class TestLayoutSizeEnforcement(unittest.TestCase):
         with self.assertRaises(ValueError):
             layout_screen(screen)
 
+    def test_badge_and_slider_require_explicit_size(self) -> None:
+        from janus.ir import Screen, Widget
+
+        for kind, kwargs in (("badge", {}), ("slider", {"range": (0, 100)})):
+            screen = Screen(
+                name="Bad",
+                root=Widget(kind="column", id="root", children=[
+                    Widget(kind=kind, id="w", **kwargs),
+                ]),
+            )
+            with self.assertRaises(ValueError):
+                layout_screen(screen)
+
+
+class TestLayoutNewLowEffortKinds(unittest.TestCase):
+    def test_divider_gets_a_default_size(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Divider",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="divider", id="d"),
+            ]),
+        )
+        layout_screen(screen)
+        self.assertEqual(screen.root.children[0].geometry, Rect(x=0, y=0, w=60, h=2))
+
+    def test_toggle_gets_a_default_size(self) -> None:
+        from janus.ir import Binding, Screen, Widget
+
+        screen = Screen(
+            name="Toggle",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="toggle", id="t", bind=Binding(message="m", field="f", type="int")),
+            ]),
+        )
+        layout_screen(screen)
+        self.assertEqual(screen.root.children[0].geometry, Rect(x=0, y=0, w=24, h=12))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,6 +2,7 @@ screen: DeviceStatus
 layout: column
 children:
   - { kind: header, id: title, text: "Device Status" }
+  - { kind: divider, id: title_rule }
   - kind: label
     id: name_label
     bind: { message: device, field: name, type: string }
@@ -10,6 +11,11 @@ children:
     bind: { message: device, field: battery_level, type: int }
     range: { min: 0, max: 100 }
     size: { w: 80, h: 12 }
+  - kind: slider
+    id: battery_slider
+    bind: { message: device, field: battery_level, type: int }
+    range: { min: 0, max: 100 }
+    size: { w: 80, h: 10 }
   - kind: box
     id: diagnostics_box
     layout: column
@@ -20,4 +26,11 @@ children:
       - kind: checkbox
         id: online_checkbox
         bind: { message: device, field: online, type: int }
+      - kind: toggle
+        id: online_toggle
+        bind: { message: device, field: online, type: int }
+      - kind: badge
+        id: online_badge
+        bind: { message: device, field: online, type: int }
+        size: { w: 8, h: 8 }
   - { kind: button, id: reboot_button, text: "Reboot", on_press: reboot }

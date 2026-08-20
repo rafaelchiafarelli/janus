@@ -128,6 +128,10 @@ enum {
     FILL_RADIOBUTTON = 0x50, FILL_BOX_HEADER = 0x60,
     FILL_ON = 0x70, FILL_OFF = 0x18,
     FILL_LED_OFF = 0x08, FILL_LED_ON = 0x80, FILL_LED_WARN = 0xC0,
+    FILL_DIVIDER = 0x90,
+    FILL_TOGGLE_ON = 0xA0, FILL_TOGGLE_OFF = 0xA8,
+    FILL_BADGE_ON = 0xB0, FILL_BADGE_OFF = 0xB8,
+    FILL_SLIDER_ON = 0xC8, FILL_SLIDER_OFF = 0xD0,
 };
 
 static void draw_label(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_LABEL); }
@@ -135,6 +139,7 @@ static void draw_header(const janus_widget_desc_t *w) { fill_rect(w->geometry, F
 static void draw_button(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_BUTTON); }
 static void draw_image(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_IMAGE); }
 static void draw_radiobutton(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_RADIOBUTTON); }
+static void draw_divider(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_DIVIDER); }
 
 static void draw_progress_or_gauge(const janus_widget_desc_t *w, const void *bound_struct) {
     double value = read_bound_value(&w->bind, bound_struct);
@@ -152,6 +157,26 @@ static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
     int state = (int)read_bound_value(&w->bind, bound_struct);
     uint8_t value = state <= 0 ? FILL_LED_OFF : (state == 1 ? FILL_LED_ON : FILL_LED_WARN);
     fill_rect(w->geometry, value);
+}
+
+/* toggle/badge/slider intentionally reuse checkbox's and progress/gauge's
+ * bind logic exactly (same shape: int on/off, numeric+range) — only the
+ * fill bytes differ, so each reads as its own kind in a render. */
+static void draw_toggle(const janus_widget_desc_t *w, const void *bound_struct) {
+    double value = read_bound_value(&w->bind, bound_struct);
+    fill_rect(w->geometry, value != 0.0 ? FILL_TOGGLE_ON : FILL_TOGGLE_OFF);
+}
+
+static void draw_badge(const janus_widget_desc_t *w, const void *bound_struct) {
+    double value = read_bound_value(&w->bind, bound_struct);
+    fill_rect(w->geometry, value != 0.0 ? FILL_BADGE_ON : FILL_BADGE_OFF);
+}
+
+static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) {
+    double value = read_bound_value(&w->bind, bound_struct);
+    double span = (double)w->bind.range_max - (double)w->bind.range_min;
+    double fraction = span != 0.0 ? (value - w->bind.range_min) / span : 0.0;
+    fill_rect_fraction(w->geometry, fraction, FILL_SLIDER_ON, FILL_SLIDER_OFF);
 }
 
 /* box's own content is just its header strip; children are separate
@@ -173,6 +198,10 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_GAUGE: draw_progress_or_gauge(w, bound_struct); return;
         case JANUS_WIDGET_CHECKBOX: draw_checkbox(w, bound_struct); return;
         case JANUS_WIDGET_LED: draw_led(w, bound_struct); return;
+        case JANUS_WIDGET_DIVIDER: draw_divider(w); return;
+        case JANUS_WIDGET_TOGGLE: draw_toggle(w, bound_struct); return;
+        case JANUS_WIDGET_BADGE: draw_badge(w, bound_struct); return;
+        case JANUS_WIDGET_SLIDER: draw_slider(w, bound_struct); return;
 
         case JANUS_WIDGET_BOX:
             draw_box_header(w);

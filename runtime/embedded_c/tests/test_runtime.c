@@ -113,11 +113,99 @@ static void test_switch_screen_draws_only_the_new_screen(void) {
     CHECK(mock_driver_log_count == 1);     /* only s2's one widget, not s1's */
 }
 
+/* ---- fixture 5: divider/toggle/badge/slider — the four "low effort"
+ * kinds added on top of Stage 4/6, each reusing an existing bind shape. */
+static void test_divider_always_draws_unconditionally(void) {
+    static const janus_widget_desc_t divider = {
+        .kind = JANUS_WIDGET_DIVIDER, .id = "d", .geometry = { 0, 0, 60, 2 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Divider", .widgets = &divider, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 2); /* 60px wide spans two 32px tiles */
+}
+
+static void test_toggle_fill_tracks_live_value(void) {
+    static const janus_widget_desc_t toggle = {
+        .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 24, 12 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Toggle", .widgets = &toggle, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint8_t sample_off = mock_driver_log[0].sample_byte;
+
+    g_demo.level = 1;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint8_t sample_on = mock_driver_log[0].sample_byte;
+
+    CHECK(sample_off != sample_on);
+}
+
+static void test_badge_fill_tracks_live_value(void) {
+    static const janus_widget_desc_t badge = {
+        .kind = JANUS_WIDGET_BADGE, .id = "b", .geometry = { 0, 0, 8, 8 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Badge", .widgets = &badge, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint8_t sample_off = mock_driver_log[0].sample_byte;
+
+    g_demo.level = 1;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint8_t sample_on = mock_driver_log[0].sample_byte;
+
+    CHECK(sample_off != sample_on);
+}
+
+static void test_slider_fill_tracks_live_value(void) {
+    static const janus_widget_desc_t slider = {
+        .kind = JANUS_WIDGET_SLIDER, .id = "s", .geometry = { 0, 0, 100, 10 },
+        .bind = {
+            .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
+            .range_min = 0, .range_max = 100,
+        },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Slider", .widgets = &slider, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint8_t sample_at_0 = mock_driver_log[0].sample_byte;
+
+    g_demo.level = 100;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint8_t sample_at_100 = mock_driver_log[0].sample_byte;
+
+    CHECK(sample_at_0 != sample_at_100);
+}
+
 int main(void) {
     test_traversal_reaches_every_widget();
     test_progress_fill_tracks_live_value();
     test_box_collapse_and_toggle();
     test_switch_screen_draws_only_the_new_screen();
+    test_divider_always_draws_unconditionally();
+    test_toggle_fill_tracks_live_value();
+    test_badge_fill_tracks_live_value();
+    test_slider_fill_tracks_live_value();
 
     if (g_failures == 0) {
         printf("all tests passed\n");
