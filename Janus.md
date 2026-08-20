@@ -2,8 +2,11 @@
 
 > **Status (updated 2026-08-19): the embedded-C target is implemented and
 > working end-to-end**, not "design only" anymore — see `architecture.md`'s
-> per-stage "Implementation status." Still open: encoder/button input,
-> the glyph/font engine ("Stage 2+" below), and the JS/Node target. This
+> per-stage "Implementation status." A first glyph-rendering slice landed
+> the same day: static `text:` (space + `A`-`Z` only, see `janus_font.h`) —
+> the "Stage 2+" line below is partially stale as a result, kept for the
+> record. Still open: encoder/button input, bound-string glyph rendering
+> (slice 2), and the JS/Node target. This
 > file is still meant to let a fresh session pick this project up quickly —
 > read it whole before writing any code. A visual companion to the
 > "Embedded-C code generation architecture" and "Input / event dispatch"

@@ -62,6 +62,16 @@ class TestEmitEmbeddedC(unittest.TestCase):
     def test_bound_struct_points_at_the_single_message_instance(self) -> None:
         self.assertIn(".bound_struct = &user_instance,", self.out)
 
+    def test_static_text_widget_gets_its_text_baked_in(self) -> None:
+        idx = self.out.index('.id = "battery_caption"')
+        segment = self.out[idx: idx + 200]
+        self.assertIn('.static_text = "Battery:",', segment)
+
+    def test_bound_widget_has_null_static_text(self) -> None:
+        idx = self.out.index('.id = "name_label"')
+        segment = self.out[idx: idx + 200]
+        self.assertIn(".static_text = NULL,", segment)
+
 
 class TestEmitEmbeddedCBoundStruct(unittest.TestCase):
     def test_no_bindings_means_null_bound_struct(self) -> None:

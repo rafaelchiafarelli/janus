@@ -2,13 +2,17 @@
  *
  * Real traversal + tiling + per-kind dispatch + box state — not the
  * deleted Copilot branch's stub (which drew an empty tile buffer
- * regardless of screen contents). Leaf content is still a kind-distinct
- * solid fill rather than real glyphs: font/glyph rendering is explicitly
- * out of scope until the asset-packing work lands (Janus.md, "Stage 2+").
- * progress/gauge/checkbox/led are the honest exception — they read the
- * live bound value and vary the fill accordingly.
+ * regardless of screen contents). Leaf content used to be a kind-distinct
+ * solid fill only; now label/header/button/box-header draw real glyphs
+ * over that same fill when a widget has authored `text:` (janus_font.h,
+ * slice 1 of 2 — bound string fields still render as a solid fill only,
+ * that's slice 2). progress/gauge/checkbox/led remain the pre-existing
+ * exception for non-text content — they read the live bound value and
+ * vary the fill accordingly.
  */
 #include "janus_runtime.h"
+
+#include "janus_font.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -54,6 +58,48 @@ static void fill_rect_fraction(janus_rect_t rect, double fraction,
     };
     fill_rect(filled, fill_value);
     fill_rect(empty, empty_value);
+}
+
+/* -------------------------------------------------------------- glyphs --
+ * Reuses g_tile_buffer for the 5x7 = 35 bytes a glyph needs (well inside
+ * the 1024-byte tile, same "one shared static scratch buffer, no malloc"
+ * discipline as fill_rect above — not a second buffer).
+ */
+#define JANUS_TEXT_FG 0xff  /* lit pixel; ink color is a driver/asset concern, not this runtime's */
+
+static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph, uint8_t bg) {
+    for (int16_t row = 0; row < JANUS_FONT_GLYPH_H; row++) {
+        for (int16_t col = 0; col < JANUS_FONT_GLYPH_W; col++) {
+            g_tile_buffer[row * JANUS_FONT_GLYPH_W + col] =
+                (glyph[col] & (1 << row)) ? JANUS_TEXT_FG : bg;
+        }
+    }
+    draw_area_sync((uint16_t)x, (uint16_t)y, JANUS_FONT_GLYPH_W, JANUS_FONT_GLYPH_H, g_tile_buffer);
+}
+
+/* Draws `text` left-aligned, vertically centered in `rect`, over a `bg`
+ * that must match whatever solid fill the caller already painted `rect`
+ * with (unlit glyph pixels reuse it, so the glyph blends into that
+ * backdrop instead of punching a mismatched hole in it). No-op if `text`
+ * is NULL (unbound widgets keep rendering as a plain solid fill).
+ * Clips, never wraps or shrinks the font, once a character would run
+ * past `rect`'s right edge — Janus never auto-sizes text at generation
+ * time (Janus.md's deferred auto-sizing note), so overflow here is a
+ * real, expected v1 case, not a bug to fix in this runtime. */
+static void draw_string(janus_rect_t rect, const char *text, uint8_t bg) {
+    if (text == NULL) return;
+
+    int16_t y = (int16_t)(rect.y + (rect.h - JANUS_FONT_GLYPH_H) / 2);
+    if (y < rect.y) y = rect.y;
+    int16_t x = (int16_t)(rect.x + 1);
+    int16_t right = (int16_t)(rect.x + rect.w);
+
+    for (const char *p = text; *p != '\0'; p++) {
+        if ((int16_t)(x + JANUS_FONT_GLYPH_W) > right) break;
+        const uint8_t *glyph = janus_font_glyph(*p);
+        if (glyph != NULL) draw_glyph(x, y, glyph, bg);
+        x = (int16_t)(x + JANUS_FONT_GLYPH_W + 1);
+    }
 }
 
 /* ------------------------------------------------------------ box state --
@@ -121,7 +167,9 @@ static double read_bound_value(const janus_bind_t *bind, const void *bound_struc
 }
 
 /* ------------------------------------------------- per-kind draw_<kind> --
- * Kind-distinct placeholder fill bytes — no font/glyph engine exists yet.
+ * Kind-distinct placeholder fill bytes, still the *only* content for any
+ * widget with no authored `text:` (unbound or bound-string leaves) — see
+ * janus_font.h for what draws over this backdrop when text is present.
  */
 enum {
     FILL_LABEL = 0x10, FILL_HEADER = 0x20, FILL_BUTTON = 0x30, FILL_IMAGE = 0x40,
@@ -134,9 +182,18 @@ enum {
     FILL_SLIDER_ON = 0xC8, FILL_SLIDER_OFF = 0xD0,
 };
 
-static void draw_label(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_LABEL); }
-static void draw_header(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_HEADER); }
-static void draw_button(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_BUTTON); }
+static void draw_label(const janus_widget_desc_t *w) {
+    fill_rect(w->geometry, FILL_LABEL);
+    draw_string(w->geometry, w->static_text, FILL_LABEL);
+}
+static void draw_header(const janus_widget_desc_t *w) {
+    fill_rect(w->geometry, FILL_HEADER);
+    draw_string(w->geometry, w->static_text, FILL_HEADER);
+}
+static void draw_button(const janus_widget_desc_t *w) {
+    fill_rect(w->geometry, FILL_BUTTON);
+    draw_string(w->geometry, w->static_text, FILL_BUTTON);
+}
 static void draw_image(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_IMAGE); }
 static void draw_radiobutton(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_RADIOBUTTON); }
 static void draw_divider(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_DIVIDER); }
@@ -180,9 +237,13 @@ static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) 
 }
 
 /* box's own content is just its header strip; children are separate
- * descriptors, drawn (or not) by the traversal below. */
+ * descriptors, drawn (or not) by the traversal below. Its title text is
+ * `box.static_text` — box has no dedicated title field, it reuses the
+ * generic Widget.text (Janus.md's widget catalog / architecture.md
+ * Stage 2). */
 static void draw_box_header(const janus_widget_desc_t *box) {
     fill_rect(box->geometry_collapsed, FILL_BOX_HEADER);
+    draw_string(box->geometry_collapsed, box->static_text, FILL_BOX_HEADER);
 }
 
 /* ---------------------------------------------------------- traversal --

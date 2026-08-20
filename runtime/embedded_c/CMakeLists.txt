@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_library(janus_runtime STATIC
     src/janus_runtime.c
     src/janus_input_touch.c
+    src/janus_font.c
 )
 target_include_directories(janus_runtime PUBLIC include)
 target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
@@ -33,7 +34,12 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_input_touch_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_input_touch_tests PRIVATE -Wall -Wextra)
 
+    add_executable(janus_font_tests tests/test_font.c)
+    target_link_libraries(janus_font_tests PRIVATE janus_runtime)
+    target_compile_options(janus_font_tests PRIVATE -Wall -Wextra)
+
     enable_testing()
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
     add_test(NAME janus_input_touch_tests COMMAND janus_input_touch_tests)
+    add_test(NAME janus_font_tests COMMAND janus_font_tests)
 endif()

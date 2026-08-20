@@ -9,10 +9,11 @@ precisely enough to implement against.
 Status (updated 2026-08-19): Stages 1–8 are implemented and tested for the
 embedded-C target (see each stage's "Implementation status" / "Owner" —
 `examples/host_demo` builds and runs end-to-end, including Janus-generated
-bindings as of today). Still genuinely open: encoder/button input dispatch
-(Stage 6), the glyph/font engine (Stage 4's solid-fill placeholders, see
-`Janus.md` "Stage 2+"), and the JS/Node target (never started). Where a
-shape isn't nailed down, it's marked **OPEN**.
+bindings and static-text glyph rendering as of today). Still genuinely
+open: encoder/button input dispatch (Stage 6), bound-string glyph
+rendering (Stage 4's glyph engine, slice 2 — see Stage 4 below), and the
+JS/Node target (never started). Where a shape isn't nailed down, it's
+marked **OPEN**.
 
 ## Ownership vocabulary (used throughout)
 
@@ -312,6 +313,7 @@ typedef int16_t janus_action_id_t;   /* see note below — not janus_action_t */
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;
+    const char *static_text;           /* authored Widget.text, baked in; NULL if none or bound */
     janus_rect_t geometry;             /* also the "expanded" rect for box */
     janus_rect_t geometry_collapsed;   /* box only, ignored otherwise */
     bool initial_expanded;             /* box only, ignored otherwise — baked from Widget.default_expanded */
@@ -374,12 +376,39 @@ deleted Copilot stub). Scope note: only the synchronous path
 (`draw_area_sync`) is driven by the traversal so far — `draw_area_async`/
 `display_busy` are declared (any driver must still provide them) but not
 yet called by anything; polled/non-blocking scheduling is real future
-work. Leaf rendering is a kind-distinct solid fill of `geometry` (no
-font/glyph engine exists yet — still "Stage 2+" in `Janus.md`), except
+work. Leaf rendering is a kind-distinct solid fill of `geometry`, except
 `progress`/`gauge` (fraction of range) and `checkbox` (checked/unchecked)
 which read the *live* bound value and vary the fill accordingly — the
 concrete difference from the deleted Copilot stub's "empty buffer
 regardless of screen contents."
+
+**Glyph rendering (2026-08-19), slice 1 of 2 — static text only.**
+`label`/`header`/`button`/box-header now draw real characters over that
+same solid fill when `.static_text` is non-`NULL`, via a new fixed-library
+module (`janus_font.h`/`.c`, alongside `janus_input_touch.c` as another
+pluggable piece — same "one file per concern" pattern): a 5×7 bitmap font
+covering space + `A`-`Z` only (27 glyphs; lowercase case-folds onto the
+uppercase glyph, digits/punctuation have no glyph yet — a real coverage
+gap, not a bug, widened by adding rows to `janus_font.c`'s table, nothing
+else). `draw_string()` blits left-aligned, vertically centered, and clips
+(never wraps or shrinks the font) once a character would run past the
+widget's `geometry` — Janus never auto-sizes text at generation time
+(`Janus.md`'s deferred auto-sizing note), so overflow is an expected v1
+case: `examples/host_demo`'s own `diagnostics_box` (24px wide) clips
+"Diagnostics" down to "Diag" for exactly this reason, verified against
+the real generated output, not just unit tests.
+
+Stage 3b now bakes `.static_text` from `Widget.text` for every widget
+(`emit_embedded_c.py`'s `_widget_init`) — previously `Widget.text` was
+parsed at Stage 1 and never read again by anything downstream, a gap this
+pass closed as a prerequisite for glyph rendering to have anything to
+draw. **Slice 2, not done yet:** bound string fields (`name_label`'s
+`device.name`) still render as a plain solid fill only — `read_bound_value`
+in `janus_runtime.c` still returns `0.0` and never dereferences the bound
+struct's `const char *` for `JANUS_FIELD_STRING`. That's a separate
+follow-up: it needs a truncation/lifetime story for a string whose length
+isn't known until runtime, unlike static text where the widget's author
+controls both the string and the geometry it has to fit in.
 
 **Owner:** fixed library. **Adding a widget kind = adding one
 `draw_<kind>()` function here + one enum value + one entry in the Python

@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "janus_font.h"
 #include "janus_runtime.h"
 #include "mock_driver.h"
 
@@ -197,6 +198,93 @@ static void test_slider_fill_tracks_live_value(void) {
     CHECK(sample_at_0 != sample_at_100);
 }
 
+/* ---- fixture 6: glyph rendering (Stage 4 slice 1 — static text only) --- */
+
+static int count_glyph_sized_calls(void) {
+    int n = 0;
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        if (mock_driver_log[i].w == JANUS_FONT_GLYPH_W && mock_driver_log[i].h == JANUS_FONT_GLYPH_H) {
+            n++;
+        }
+    }
+    return n;
+}
+
+static void test_label_without_text_draws_only_the_background_fill(void) {
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 10, 10 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "NoText", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);  /* the fill_rect only — no glyph calls */
+    CHECK(count_glyph_sized_calls() == 0);
+}
+
+static void test_label_with_text_draws_one_glyph_call_per_character(void) {
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 20, 10 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Text", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 3);      /* 1 background fill + 2 glyphs */
+    CHECK(count_glyph_sized_calls() == 2);
+}
+
+static void test_text_wider_than_widget_clips_without_wrapping(void) {
+    /* Rect only fits one glyph column (w=6): 'A' draws, 'B' would start
+     * past the right edge and must be dropped, not wrapped or squeezed. */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 6, 10 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Clipped", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 1);
+}
+
+static void test_bound_string_field_still_renders_as_fill_only(void) {
+    /* Slice 1 is static text only — a widget with a `bind` instead of
+     * authored `text:` has static_text == NULL and must fall back to the
+     * plain fill, exactly like before this feature existed. */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 60, 12 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_STRING },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "BoundString", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 0);
+}
+
+static void test_box_header_draws_its_title_text(void) {
+    static const janus_widget_desc_t box_widget = {
+        .kind = JANUS_WIDGET_BOX, .id = "box1", .static_text = "AB",
+        .geometry = { 0, 0, 30, 26 }, .geometry_collapsed = { 0, 0, 30, 16 },
+        .initial_expanded = false,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "BoxTitle", .widgets = &box_widget, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 2);
+}
+
 int main(void) {
     test_traversal_reaches_every_widget();
     test_progress_fill_tracks_live_value();
@@ -206,6 +294,11 @@ int main(void) {
     test_toggle_fill_tracks_live_value();
     test_badge_fill_tracks_live_value();
     test_slider_fill_tracks_live_value();
+    test_label_without_text_draws_only_the_background_fill();
+    test_label_with_text_draws_one_glyph_call_per_character();
+    test_text_wider_than_widget_clips_without_wrapping();
+    test_bound_string_field_still_renders_as_fill_only();
+    test_box_header_draws_its_title_text();
 
     if (g_failures == 0) {
         printf("all tests passed\n");

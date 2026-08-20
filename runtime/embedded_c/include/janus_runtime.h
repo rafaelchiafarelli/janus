@@ -42,6 +42,10 @@ typedef int16_t janus_action_id_t;
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;
+    const char *static_text;           /* authored Widget.text, baked in at generation time; NULL
+                                         * if this widget has none, or its text comes from a `bind`
+                                         * instead (bound strings don't render yet — janus_font.h's
+                                         * v1 slice is static text only, see janus_runtime.c) */
     janus_rect_t geometry;             /* also the "expanded" rect for box */
     janus_rect_t geometry_collapsed;   /* box only, ignored otherwise */
     bool initial_expanded;             /* box only — baked from Widget.default_expanded */
@@ -68,7 +72,11 @@ typedef struct {
 } janus_app_t;
 
 /* driver contract, carried forward from the deleted Copilot branch's DESIGN.md.
- * Implemented by vendor/host code, never by the fixed library itself. */
+ * Implemented by vendor/host code, never by the fixed library itself.
+ * `pixels` is `w * h` bytes, row-major (row 0 first, left-to-right within
+ * a row) — never stated explicitly before janus_font.c became the first
+ * caller to draw non-uniform content; every existing fill_rect() call is
+ * a uniform memset, so it never depended on an orientation either way. */
 void draw_area_sync(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *pixels);
 bool draw_area_async(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *pixels);
 bool display_busy(void);

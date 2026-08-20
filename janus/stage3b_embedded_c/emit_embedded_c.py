@@ -154,9 +154,11 @@ def _widget_init(
         navigate_target_c = "-1"
 
     initial_expanded_c = "true" if widget.default_expanded else "false"
+    static_text_c = _c_string(widget.text) if widget.text is not None else "NULL"
 
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {_c_string(widget.id)}, "
+        f".static_text = {static_text_c}, "
         f".geometry = {_rect(widget.geometry)}, "
         f".geometry_collapsed = {_rect(widget.geometry_collapsed)}, "
         f".initial_expanded = {initial_expanded_c}, "
