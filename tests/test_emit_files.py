@@ -5,10 +5,11 @@ from janus.stage3b_embedded_c.emit_files import (
     render_app_source,
     render_bindings_header,
     render_bindings_source,
+    render_display_config_header,
     render_screen_header,
     render_screen_source,
 )
-from janus.ir import App, Binding, NavTarget, Screen, Widget
+from janus.ir import App, Binding, DisplayConfig, NavTarget, Screen, Widget
 from janus.stage2_layout.layout import layout_screen
 
 
@@ -137,6 +138,30 @@ class TestEmitFiles(unittest.TestCase):
         out = render_bindings_source(App(screens=[bound_screen]))
         self.assertIn('#include "janus_bindings.gen.h"', out)
         self.assertIn("dev_t dev_instance = {0};", out)
+
+    def test_display_config_header_has_guard_and_constants(self) -> None:
+        out = render_display_config_header(DisplayConfig(width=240, height=320, color="rgb565"))
+        self.assertIn("#ifndef JANUS_GEN_DISPLAY_CONFIG_H", out)
+        self.assertIn("#define JANUS_GEN_DISPLAY_CONFIG_H", out)
+        self.assertIn("#define JANUS_DISPLAY_WIDTH 240", out)
+        self.assertIn("#define JANUS_DISPLAY_HEIGHT 320", out)
+        self.assertIn("#define JANUS_DISPLAY_COLOR JANUS_DISPLAY_COLOR_RGB565", out)
+        self.assertIn("#endif", out)
+        self.assertTrue(_balanced_braces(out))
+
+    def test_display_config_header_omits_bus_and_controller_selection_when_unset(self) -> None:
+        out = render_display_config_header(DisplayConfig(width=240, height=320, color="mono"))
+        self.assertIn("#define JANUS_DISPLAY_BUS_SPI 0", out)  # enumeration always present
+        self.assertNotIn("#define JANUS_DISPLAY_BUS ", out)  # selection macro absent
+        self.assertIn("#define JANUS_DISPLAY_CONTROLLER_ST7789 0", out)
+        self.assertNotIn("#define JANUS_DISPLAY_CONTROLLER ", out)
+
+    def test_display_config_header_selects_bus_and_controller_when_set(self) -> None:
+        out = render_display_config_header(
+            DisplayConfig(width=240, height=320, color="rgb565", bus="spi", controller="st7789v")
+        )
+        self.assertIn("#define JANUS_DISPLAY_BUS JANUS_DISPLAY_BUS_SPI", out)
+        self.assertIn("#define JANUS_DISPLAY_CONTROLLER JANUS_DISPLAY_CONTROLLER_ST7789V", out)
 
 
 if __name__ == "__main__":

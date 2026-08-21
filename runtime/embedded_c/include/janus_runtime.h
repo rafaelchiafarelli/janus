@@ -39,6 +39,35 @@ typedef struct {
 typedef int16_t janus_action_id_t;
 #define JANUS_ACTION_ID_NONE ((janus_action_id_t)0)
 
+/* Stage 6: shared across every input modality (touch, encoder, buttons)
+ * — each one's job is just to decide *which* widget, in whatever shape
+ * fits its own input (a point vs. a focus index); all three resolve to
+ * this same result and get dispatched identically by the caller (the
+ * scaffolded main.c's event loop). Originally declared only in
+ * janus_input_touch.h (Stage 6's first modality); moved here once
+ * encoder/buttons needed the identical shape, so no modality module
+ * depends on another. */
+typedef enum {
+    JANUS_INPUT_NONE,          /* no widget resolved, or nothing to dispatch */
+    JANUS_INPUT_ACTION,        /* widget->action is meaningful; caller casts to janus_action_t */
+    JANUS_INPUT_NAVIGATE,      /* navigate_target is meaningful; caller calls janus_switch_screen */
+    JANUS_INPUT_TOGGLE_BOX,    /* widget is the box that was hit/activated; caller calls janus_toggle_box */
+} janus_input_kind_t;
+
+typedef struct {
+    janus_input_kind_t kind;
+    const struct janus_widget_desc *widget;   /* the resolved widget; NULL when kind == JANUS_INPUT_NONE */
+    janus_action_id_t action;          /* valid when kind == JANUS_INPUT_ACTION */
+    int16_t navigate_target;           /* valid when kind == JANUS_INPUT_NAVIGATE */
+} janus_input_result_t;
+
+/* Stage 6: sentinel for janus_widget_desc_t.focus_order — "not
+ * focusable" (touch doesn't need this at all; encoder/button navigation
+ * does). Baked at generation time by emit_embedded_c.py's
+ * _assign_focus_order, same set of widgets touch already dispatches on
+ * (box headers + any leaf with on_press/navigate). */
+#define JANUS_FOCUS_NONE ((uint8_t)255)
+
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;
@@ -52,7 +81,7 @@ typedef struct janus_widget_desc {
     janus_bind_t bind;
     janus_action_id_t action;          /* on_press only; JANUS_ACTION_ID_NONE otherwise */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
-    uint8_t focus_order;               /* encoder/button traversal — reserved, unused; touch doesn't need it */
+    uint8_t focus_order;               /* encoder/button traversal order, or JANUS_FOCUS_NONE; touch ignores this */
     const struct janus_widget_desc *children;
     uint16_t child_count;
 } janus_widget_desc_t;
@@ -91,5 +120,19 @@ void janus_toggle_box(const janus_widget_desc_t *box);               /* re-rende
  * so other modules (Stage 6's janus_input_touch.c) can hit-test against
  * live state without duplicating this table. */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);
+
+/* Stage 6: encoder/button focus. `janus_set_focus` draws `widget` in its
+ * focused visual state and, if a different widget was previously
+ * focused, redraws it unfocused — tile-scoped, same spirit as
+ * janus_toggle_box, not a full repaint. `widget` may be NULL to just
+ * clear the current highlight (e.g. nothing focusable on this screen).
+ * `janus_get_focus` reads it back — used by janus_input_focus.c to find
+ * "where am I now" without this module owning any tree-walking logic
+ * itself (that stays out of the fixed drawing library, same "runtime
+ * draws, input resolves" split janus_input_touch.c already established).
+ * janus_switch_screen clears focus before rendering the new screen, so a
+ * stale pointer from the old screen's tree is never redrawn. */
+void janus_set_focus(const janus_widget_desc_t *widget);
+const janus_widget_desc_t *janus_get_focus(void);
 
 #endif /* JANUS_RUNTIME_H */

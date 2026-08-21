@@ -2,8 +2,8 @@ import unittest
 from pathlib import Path
 
 from janus.stage1_parse.dsl_yaml import parse_screen
-from janus.ir import Rect
-from janus.stage2_layout.layout import layout_screen
+from janus.ir import DisplayConfig, Rect
+from janus.stage2_layout.layout import check_fits_display, layout_screen
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -96,6 +96,25 @@ class TestLayoutNewLowEffortKinds(unittest.TestCase):
         )
         layout_screen(screen)
         self.assertEqual(screen.root.children[0].geometry, Rect(x=0, y=0, w=24, h=12))
+
+
+class TestCheckFitsDisplay(unittest.TestCase):
+    def setUp(self) -> None:
+        self.screen = layout_screen(parse_screen(FIXTURES / "user_profile.screen.yaml"))
+
+    def test_screen_within_display_bounds_accepted(self) -> None:
+        display = DisplayConfig(width=240, height=320, color="mono")
+        check_fits_display(self.screen, display)  # must not raise
+
+    def test_screen_too_wide_for_display_rejected(self) -> None:
+        display = DisplayConfig(width=100, height=320, color="mono")
+        with self.assertRaises(ValueError):
+            check_fits_display(self.screen, display)
+
+    def test_screen_too_tall_for_display_rejected(self) -> None:
+        display = DisplayConfig(width=240, height=20, color="mono")
+        with self.assertRaises(ValueError):
+            check_fits_display(self.screen, display)
 
 
 if __name__ == "__main__":

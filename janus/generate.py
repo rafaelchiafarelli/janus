@@ -15,6 +15,7 @@ from .stage3b_embedded_c.emit_files import (
     render_app_source,
     render_bindings_header,
     render_bindings_source,
+    render_display_config_header,
     render_screen_header,
     render_screen_source,
 )
@@ -24,7 +25,8 @@ from .writer import write_if_changed
 def write_project(app: App, out_dir: str | Path) -> list[Path]:
     """Writes, under `out_dir`: `{screen}_screen.gen.{h,c}` per screen,
     `janus_actions.gen.h`, `janus_app.gen.c`, `janus_bindings.gen.{h,c}`,
-    and `janus_generated.harpia`. Returns the paths actually written —
+    `janus_generated.harpia`, and — only if `app.display` is set —
+    `janus_display_config.gen.h`. Returns the paths actually written —
     content-diff-before-write means a no-op regeneration returns an
     empty list."""
     out_dir = Path(out_dir)
@@ -45,5 +47,8 @@ def write_project(app: App, out_dir: str | Path) -> list[Path]:
     _write(out_dir / "janus_bindings.gen.h", render_bindings_header(app))
     _write(out_dir / "janus_bindings.gen.c", render_bindings_source(app))
     _write(out_dir / "janus_generated.harpia", emit_harpia(app))
+
+    if app.display is not None:
+        _write(out_dir / "janus_display_config.gen.h", render_display_config_header(app.display))
 
     return written

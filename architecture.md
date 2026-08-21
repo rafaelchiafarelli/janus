@@ -6,14 +6,21 @@ exactly what it receives, what it produces, who owns the output, and whether
 it gets regenerated. Read `Janus.md` first for *why*; this file is *what*,
 precisely enough to implement against.
 
-Status (updated 2026-08-19): Stages 1–8 are implemented and tested for the
+Status (updated 2026-08-20): Stages 1–8 are implemented and tested for the
 embedded-C target (see each stage's "Implementation status" / "Owner" —
 `examples/host_demo` builds and runs end-to-end, including Janus-generated
-bindings and static-text glyph rendering as of today). Still genuinely
-open: encoder/button input dispatch (Stage 6), bound-string glyph
-rendering (Stage 4's glyph engine, slice 2 — see Stage 4 below), and the
-JS/Node target (never started). Where a shape isn't nailed down, it's
-marked **OPEN**.
+bindings and glyph rendering for both static text and live bound string
+values, verified against the real generated output today). **Embedded C
+is now Janus's only target** — the JS/Node target (Janus.md's "2. JS/Node
+web frontend") was dropped the same day: harpia's own generated REST/gRPC
+already gives direct backend access, so a generated frontend on top of it
+wasn't needed. **Stage 6 (encoder/button input dispatch) is now also
+implemented** — touch, encoder, and next/prev/select push buttons all
+work, sharing one focus core (`janus_input_focus.c`); see Stage 6 below.
+Still genuinely open: the pixel-format rework for non-mono display
+controllers (RGB565/e-paper) and per-controller driver bodies, both
+blocked on real hardware to build against — see Janus.md's Open
+Questions. Where a shape isn't nailed down, it's marked **OPEN**.
 
 ## Ownership vocabulary (used throughout)
 
@@ -42,6 +49,8 @@ marked **OPEN**.
   ```yaml
   screens: [device_status.screen.yaml, settings.screen.yaml]
   nav: { kind: tabs, targets: [{screen: DeviceStatus, title: "Status"}, ...] }
+  display: { size: {w: 240, h: 320}, color: mono }   # optional — see Stage 1/2
+  input: { modality: touch }   # optional, default touch — see Stage 1/6/8
   ```
 - `*.screen.yaml` — one per screen:
   ```yaml
@@ -81,13 +90,37 @@ required-vs-defaulted split actually gets enforced (it needs to know each
 widget's `kind`, and defaulting is a layout-policy decision, not a parse
 one).
 
+**`display:` (optional, added 2026-08-20; `bus`/`controller` added same
+day)** — `app.yaml`'s `size: {w, h}` + `color: mono|gray|rgb565` (default
+`mono`) + optional `bus: spi|i2c|parallel` + optional `controller:` one of
+`st7789`/`st7789v`/`ili9341`/`ili9341v`/`hx8357`/`gc9a01`/`ssd1306`/
+`sh1106`/`il3820`/`il0373`, parsed into `App.display: DisplayConfig |
+None`. `color`/`bus`/`controller` are each validated against their own
+closed set here (parse-time, same as `bind.type`); `bus` and `controller`
+are independent of each other and of the rest of `display:` (either, both,
+or neither may be omitted). `size` bounds-checking against actual screen
+content happens at Stage 2 (`check_fits_display`), not here — same split
+as widget `size` above. `bus`/`controller` are a hardware **selection**
+only — no driver body is generated from them; see Stage 3b below and
+Janus.md's Open Questions for the human-owned/"boltable" decision.
+
+**`input:` (optional, added 2026-08-20)** — `app.yaml`'s
+`modality: touch|encoder|buttons` (default `touch`), validated against
+this closed set, parsed into `App.input_modality`. Picks which of Stage
+8's three `main_*.c.tmpl` scaffolds gets written (see Stage 8 below) —
+unlike `display:`, this has no nested config object (just the one field),
+so it's a plain `App` field, not a separate dataclass.
+
 ---
 
 ## IR data contract
 
 The shared interchange format every later stage reads or writes. Nothing
-downstream touches YAML directly — this is the seam that makes JS/Node a
-addable third emitter later without reworking the front half.
+downstream touches YAML directly — originally kept target-agnostic so a
+JS/Node emitter could plug in as a third target later without reworking
+the front half; that target was dropped (2026-08-20, see status above),
+but the split is still the right shape for the two emitters that exist
+(Stage 3a harpia, Stage 3b embedded-C).
 
 ```python
 @dataclass
@@ -132,9 +165,24 @@ class NavTarget:
     title: str
 
 @dataclass
+class DisplayConfig:
+    width: int
+    height: int
+    color: Literal["mono", "gray", "rgb565"] = "mono"
+    bus: Literal["spi", "i2c", "parallel"] | None = None
+    controller: Literal[
+        "st7789", "st7789v", "ili9341", "ili9341v", "hx8357",
+        "gc9a01", "ssd1306", "sh1106", "il3820", "il0373",
+    ] | None = None
+    # bus/controller are a selection only — no driver body is generated
+    # from them (human-owned, see Stage 3b + Janus.md Open Questions)
+
+@dataclass
 class App:
     screens: list[Screen]
     nav: list[NavTarget] | None    # kind is always "tabs" in v1
+    display: DisplayConfig | None  # None if app.yaml omits `display:`
+    input_modality: Literal["touch", "encoder", "buttons"] = "touch"
 ```
 
 ---
@@ -175,6 +223,16 @@ Its content area is offset below a fixed-height header strip
 `geometry_collapsed` covers the header strip only, `geometry` covers
 header + body.
 
+**Display bounds check (`check_fits_display`, added 2026-08-20):** a
+separate function from `layout_screen` — `layout_screen` itself stays a
+pure per-`Screen` function with no `App`/display access, unchanged. Called
+by `janus/cli.py` once per screen, after `layout_screen`, only when
+`app.display is not None`. Compares that screen's now-computed
+`root.geometry` against `display.width`/`height` and raises `ValueError`
+on overflow — same "validate, don't silently clip" rule as Stage 1. Skipped
+entirely (no check, no error) when `app.yaml` has no `display:` block —
+today's behavior, unchanged.
+
 ---
 
 ## Stage 3a — harpia Include emitter (`janus/stage3a_harpia/emit_harpia.py`)
@@ -212,6 +270,16 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   required if the screen has a `navigate` button; it resolves
   `.navigate_target` to the target screen's index and is what actually
   enforces the "navigate target must exist" rule Stage 1 defers.
+  **`.focus_order` (Stage 6, added 2026-08-20):** `_assign_focus_order`
+  walks each screen's root in pre-order — the same order
+  `janus_runtime.c`'s `render_widget`/`janus_input_touch.c`'s
+  `hit_test_widget` traverse at runtime, *not* `_emit_widget`'s own
+  emission order (that one's post-order, so a container's children array
+  is declared before the container references it — an unrelated C
+  forward-declaration concern). "Focusable" is exactly the set touch
+  already dispatches on (`box`, or a leaf with `on_press`/`navigate` set)
+  — no new YAML field needed. Non-focusable widgets get
+  `JANUS_FOCUS_NONE` (255).
 - `janus_actions.gen.h` — one shared file: an enum with one value per
   distinct `on_press` string across *all* screens in the app (deduped).
   `navigate` values do **not** get an enum entry here — see Stage 5.
@@ -220,6 +288,18 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   every screen's `janus_screen_desc_t`, plus `nav_titles` (parallel array,
   `NULL` if `app.nav` is unset). Implemented: `emit_app_table(app)`;
   raises if `app.nav` doesn't cover every screen.
+- `janus_display_config.gen.h` — only written when `app.display` is set:
+  `JANUS_DISPLAY_WIDTH`/`HEIGHT` + `JANUS_DISPLAY_COLOR*`/`BUS*`/
+  `CONTROLLER*` `#define`s (see Stage 2's display bounds check and
+  Janus.md's "Display config" section). Implemented:
+  `emit_display_config(display)`. Every known `color`/`bus`/`controller`
+  value is always defined (so driver code can compare against any of
+  them); the *selection* macro (`JANUS_DISPLAY_BUS`/`_CONTROLLER`) is only
+  emitted when that field is set on `DisplayConfig` — `color` always picks
+  one (defaults `mono`), `bus`/`controller` may stay unselected. Plain
+  data for hand-written vendor driver code to consume — the fixed runtime
+  library never reads it, and no driver body is generated from the
+  selection (human-owned, see Janus.md Open Questions).
 
 **`.bound_struct` resolution (v1: one message per screen).** Each
 widget's `.bind.field_offset = offsetof({message}_t, {field})` assumes
@@ -302,13 +382,29 @@ typedef enum { JANUS_FIELD_NONE, JANUS_FIELD_INT, JANUS_FIELD_INT64, JANUS_FIELD
 
 typedef struct { int16_t x, y, w, h; } janus_rect_t;
 
+typedef int16_t janus_action_id_t;   /* see note below — not janus_action_t */
+
+/* Stage 6: shared across every input modality — originally declared only
+ * in janus_input_touch.h, moved here once encoder/buttons needed the
+ * identical shape, so no modality module depends on another. */
+typedef enum {
+    JANUS_INPUT_NONE, JANUS_INPUT_ACTION, JANUS_INPUT_NAVIGATE, JANUS_INPUT_TOGGLE_BOX,
+} janus_input_kind_t;
+
+typedef struct {
+    janus_input_kind_t kind;
+    const struct janus_widget_desc *widget;
+    janus_action_id_t action;
+    int16_t navigate_target;
+} janus_input_result_t;
+
+#define JANUS_FOCUS_NONE ((uint8_t)255)   /* .focus_order sentinel: "not focusable" */
+
 typedef struct {
     uint16_t field_offset;         /* offsetof() into bound_struct; 0 if unbound */
     janus_field_type_t field_type;
     float range_min, range_max;    /* progress/gauge only */
 } janus_bind_t;
-
-typedef int16_t janus_action_id_t;   /* see note below — not janus_action_t */
 
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
@@ -320,7 +416,7 @@ typedef struct janus_widget_desc {
     janus_bind_t bind;
     janus_action_id_t action;          /* on_press only; 0 otherwise (== JANUS_ACTION_NONE by convention) */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
-    uint8_t focus_order;               /* encoder/button traversal — reserved, unused; touch doesn't need it */
+    uint8_t focus_order;               /* encoder/button traversal order, or JANUS_FOCUS_NONE; touch ignores this */
     const struct janus_widget_desc *children;
     uint16_t child_count;
 } janus_widget_desc_t;
@@ -346,9 +442,13 @@ bool display_busy(void);
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
-void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
+void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus first */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads the state above; Stage 6 hit-testing needs it */
+
+/* Stage 6: encoder/button focus highlight — see Stage 6 below. */
+void janus_set_focus(const janus_widget_desc_t *widget);   /* NULL clears it */
+const janus_widget_desc_t *janus_get_focus(void);
 ```
 
 **Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
@@ -358,8 +458,8 @@ once, in this fixed header, with no guarantee any per-project file has
 been `#include`d first. Typing the field as a generic `int16_t` id
 (enum constants convert to it implicitly, no cast needed at the
 generation site) keeps the fixed library fully independent of any
-generated enum. Stage 6, when it lands, casts back to `janus_action_t`
-right before calling `janus_handle_action`.
+generated enum. Stage 6 casts back to `janus_action_t` right before
+calling `janus_handle_action`.
 
 **Box collapse state.** `janus_widget_desc_t` instances are
 `static const` arrays baked at generation time — there's nowhere in them
@@ -368,6 +468,23 @@ small fixed-capacity table mapping descriptor pointer → current expanded
 bit (descriptors have program-lifetime-stable addresses, so pointer
 identity is a safe key), seeded from `.initial_expanded` the first time
 a box is rendered and flipped by `janus_toggle_box`.
+
+**Focus state (Stage 6, added 2026-08-20).** Same shape as box state, but
+simpler: `janus_widget_desc_t` still has nowhere to hold a mutable "am I
+focused" bit, but only one widget is ever focused at a time (across the
+whole app, not per-screen), so `janus_runtime.c` needs just one static
+pointer (`g_focused_widget`), not a table. `janus_set_focus(w)` compares
+`w` against it, redraws the previous widget unfocused and `w` focused
+(each via the normal `render_widget` for that one widget — no dedicated
+"focused" draw path; `draw_button`/`draw_box_header` just check `w ==
+g_focused_widget` internally and add a thin border via `draw_focus_ring`
+when true), and updates the pointer. `janus_switch_screen` calls
+`janus_set_focus(NULL)` before rendering the new screen — without this, a
+focus pointer from the outgoing screen's static widget array would get
+redrawn on top of the incoming screen's freshly rendered content. Only
+`button` (unbound in v1, per Janus.md's catalog) and `box` are ever
+focusable, so the redraw never needs `bind` data — `read_bound_value`/
+`read_bound_string` are never called from this path.
 
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
@@ -382,33 +499,49 @@ which read the *live* bound value and vary the fill accordingly — the
 concrete difference from the deleted Copilot stub's "empty buffer
 regardless of screen contents."
 
-**Glyph rendering (2026-08-19), slice 1 of 2 — static text only.**
-`label`/`header`/`button`/box-header now draw real characters over that
-same solid fill when `.static_text` is non-`NULL`, via a new fixed-library
-module (`janus_font.h`/`.c`, alongside `janus_input_touch.c` as another
-pluggable piece — same "one file per concern" pattern): a 5×7 bitmap font
-covering space + `A`-`Z` only (27 glyphs; lowercase case-folds onto the
-uppercase glyph, digits/punctuation have no glyph yet — a real coverage
-gap, not a bug, widened by adding rows to `janus_font.c`'s table, nothing
-else). `draw_string()` blits left-aligned, vertically centered, and clips
-(never wraps or shrinks the font) once a character would run past the
-widget's `geometry` — Janus never auto-sizes text at generation time
-(`Janus.md`'s deferred auto-sizing note), so overflow is an expected v1
-case: `examples/host_demo`'s own `diagnostics_box` (24px wide) clips
+**Glyph rendering (2026-08-19, slice 1; slice 2 completed 2026-08-20) —
+both static text and live bound strings.** `label`/`header`/`button`/
+box-header draw real characters over that same solid fill when
+`.static_text` is non-`NULL`, via a fixed-library module (`janus_font.h`/
+`.c`, alongside `janus_input_touch.c` as another pluggable piece — same
+"one file per concern" pattern): a 5×7 bitmap font covering space +
+`A`-`Z` only (27 glyphs; lowercase case-folds onto the uppercase glyph,
+digits/punctuation have no glyph yet — a real coverage gap, not a bug,
+widened by adding rows to `janus_font.c`'s table, nothing else).
+`draw_string()` blits left-aligned, vertically centered, and clips (never
+wraps or shrinks the font) once a character would run past the widget's
+`geometry` — Janus never auto-sizes text at generation time (`Janus.md`'s
+deferred auto-sizing note), so overflow is an expected v1 case:
+`examples/host_demo`'s own `diagnostics_box` (24px wide) clips
 "Diagnostics" down to "Diag" for exactly this reason, verified against
 the real generated output, not just unit tests.
 
-Stage 3b now bakes `.static_text` from `Widget.text` for every widget
+Stage 3b bakes `.static_text` from `Widget.text` for every widget
 (`emit_embedded_c.py`'s `_widget_init`) — previously `Widget.text` was
-parsed at Stage 1 and never read again by anything downstream, a gap this
-pass closed as a prerequisite for glyph rendering to have anything to
-draw. **Slice 2, not done yet:** bound string fields (`name_label`'s
-`device.name`) still render as a plain solid fill only — `read_bound_value`
-in `janus_runtime.c` still returns `0.0` and never dereferences the bound
-struct's `const char *` for `JANUS_FIELD_STRING`. That's a separate
-follow-up: it needs a truncation/lifetime story for a string whose length
-isn't known until runtime, unlike static text where the widget's author
-controls both the string and the geometry it has to fit in.
+parsed at Stage 1 and never read again by anything downstream, a gap
+closed as a prerequisite for glyph rendering to have anything to draw.
+
+**Slice 2 (2026-08-20): `label`/`header` now also draw a live bound
+string when there's no authored `text:`.** `janus_runtime.c` gained
+`read_bound_string()` — dereferences the bound struct's `const char *`
+field directly (the field itself *is* a pointer, per
+`emit_bindings_struct.py`'s `_C_TYPE["string"] = "const char *"`, unlike
+`read_bound_value`'s numeric types which reinterpret inline bytes) and
+returns it to `draw_string()` unchanged. **The "truncation/lifetime
+story" earlier flagged as this slice's open risk turned out to be a
+non-issue**: `draw_string()` already blits and clips character-by-character
+straight from the source pointer (see above), so an arbitrary
+runtime-length string never needs a length known upfront or a copy into a
+fixed buffer — no new machinery was needed beyond wiring the read.
+Lifetime is a firmware concern like any other bound value: the pointer
+must stay valid at render time, same as `device_instance.name` being set
+once in `examples/host_demo/host_main.c` before the first render.
+Zero-initialized bindings instances (Stage 7) hold `NULL` here until
+firmware populates them, and `draw_string()` already no-ops on `NULL`, so
+an unpopulated bound string renders as the plain fill — unchanged
+behavior from before this slice, not a special case. `static_text` wins
+if a widget somehow has both (nothing at parse time forbids it) — a
+deterministic tie-break, not new validation.
 
 **Owner:** fixed library. **Adding a widget kind = adding one
 `draw_<kind>()` function here + one enum value + one entry in the Python
@@ -447,12 +580,13 @@ what "reboot" means.
 
 ---
 
-## Stage 6 — Input dispatch (touch implemented; encoder/buttons still deferred)
+## Stage 6 — Input dispatch (touch, encoder, buttons — all implemented 2026-08-20)
 
-**Receives:** a touch point (`x, y`) + read-only access to the active
-screen's `janus_widget_desc_t[]` (for `geometry`, hit-testing). Encoder
-deltas / GPIO edges and `focus_order`-based traversal stay deferred —
-the field exists in the struct but nothing populates or reads it yet.
+**Receives:** depends on modality — a touch point (`x, y`) for touch; a
+rotate delta or click for encoder; a NEXT/PREV/SELECT edge for buttons.
+Every modality gets read-only access to the active screen's
+`janus_widget_desc_t[]` (`geometry` for touch's hit-test, `focus_order`
+for encoder/buttons' walk).
 
 **Produces:** a `janus_input_result_t` — `{kind, widget, action,
 navigate_target}` where `kind` is `JANUS_INPUT_NONE` / `_ACTION` /
@@ -464,34 +598,79 @@ per-project `janus_action_t` any more than Stage 4's descriptor could
 before calling `janus_handle_action`, same split Stage 5 already
 established between what the fixed library understands autonomously
 (`navigate`, box toggling) and what only the human's file understands
-(`on_press`).
+(`on_press`). All three modalities produce this identical shape and get
+dispatched identically by the caller (`main.c`'s event loop) — confirming
+the original sketch's core claim that only the "which widget" front-end
+differs per modality.
 
-**Hit-testing** (`janus_touch_hit_test`, implemented in
-`janus_input_touch.c`): point-in-rect against the already-baked absolute
-geometry, deepest match wins. `box`'s `geometry_collapsed` doubles as its
-header hit-region — `layout.py` already sets it to exactly the header
-strip's bounds regardless of current expand state, so a point inside it
-is always a header tap (→ `TOGGLE_BOX`), with no separate header-height
-constant needed at runtime. A point elsewhere in `geometry` only recurses
-into a box's children when `janus_box_is_expanded(box)` is true — a
-collapsed box's children are never hit-testable, matching Stage 4's own
-render-time skip. `column`/`row`/`radiogroup` have no rect of their own
-action-wise and just recurse. A leaf hit with neither `navigate_target`
-nor `action` set (a plain label, an unwired checkbox) is a deliberate,
-defined miss (`JANUS_INPUT_NONE`) — nothing to dispatch. If a widget
-somehow has both `navigate` and `on_press` set, `navigate` wins (an
-arbitrary but documented tie-break; nothing currently prevents authoring
-both).
+**Touch — hit-testing** (`janus_touch_hit_test`, `janus_input_touch.c`):
+point-in-rect against the already-baked absolute geometry, deepest match
+wins. `box`'s `geometry_collapsed` doubles as its header hit-region —
+`layout.py` already sets it to exactly the header strip's bounds
+regardless of current expand state, so a point inside it is always a
+header tap (→ `TOGGLE_BOX`), with no separate header-height constant
+needed at runtime. A point elsewhere in `geometry` only recurses into a
+box's children when `janus_box_is_expanded(box)` is true — a collapsed
+box's children are never hit-testable, matching Stage 4's own render-time
+skip. `column`/`row`/`radiogroup` have no rect of their own action-wise
+and just recurse. A leaf hit with neither `navigate_target` nor `action`
+set (a plain label, an unwired checkbox) is a deliberate, defined miss
+(`JANUS_INPUT_NONE`) — nothing to dispatch. If a widget somehow has both
+`navigate` and `on_press` set, `navigate` wins (an arbitrary but
+documented tie-break; nothing currently prevents authoring both — same
+tie-break `janus_focus_activate` below uses).
 
 **Touch driver contract** (`janus_input_touch.h`, parallel to the output
 driver contract): `bool janus_touch_poll(int16_t *x, int16_t *y)` —
 vendor/host-provided, non-blocking, mirrors `display_busy()`'s polling
 style. Returns true and fills `x`/`y` once per new touch.
 
+**Encoder/buttons — shared focus core** (`janus_input_focus.h`/`.c`, new):
+`janus_focus_move(screen, delta)` and `janus_focus_activate(screen)`,
+used identically by both modalities — encoder rotation and button
+NEXT/PREV both call `janus_focus_move` (`+1`/`-1`), encoder click and
+button SELECT both call `janus_focus_activate`. Internally, a
+depth-first, left-to-right walk (`walk_focusable`) mirrors
+`hit_test_widget`'s own traversal and its collapsed-box skip rule exactly
+— `focus_order` was baked assuming every box is reachable, so the walk
+has to apply the same runtime skip touch does, or a collapsed box's
+children would be silently focusable while invisible. `janus_focus_move`
+computes the currently-focused widget's position by walking once
+(`focus_position`), steps by `delta` with wraparound at either end, and
+resolves the target position with a second walk (`widget_at`) — two
+small bounded recursions per input event (human-paced, not per-frame),
+no arrays, no malloc. `delta == 0` is the documented idiom for
+"(re-)establish focus on this screen" (nothing focused yet always resolves
+to index 0 regardless of delta) — `main_encoder.c.tmpl`/
+`main_buttons.c.tmpl` call it once right after the first
+`janus_render_screen`, and again after every `JANUS_INPUT_NAVIGATE`
+dispatch. `janus_focus_activate` resolves whatever `janus_get_focus()`
+currently returns using the identical box/navigate/action rules touch's
+leaf case uses, but returns `JANUS_INPUT_NONE` if that widget isn't
+actually reachable on `screen` right now (stale — e.g. its box was
+collapsed since it was focused, or focus belongs to a screen that's since
+been switched away from).
+
+**Encoder/buttons driver contracts** (`janus_input_encoder.h` /
+`janus_input_buttons.h`): header-only, no `.c` — same shape as
+`draw_area_sync`/`janus_touch_poll`, vendor/host-implemented, not fixed-
+library logic. `bool janus_encoder_poll(janus_encoder_event_t *event,
+int16_t *delta)` (`JANUS_ENCODER_ROTATE`/`_CLICK`); `bool
+janus_buttons_poll(janus_button_event_t *event)`
+(`JANUS_BUTTON_NEXT`/`_PREV`/`_SELECT`). Push buttons were scoped as
+next/prev/select specifically because that's what lets them reuse
+`janus_focus_move`/`janus_focus_activate` almost for free — a
+direct-mapped GPIO→action scheme (bypassing focus, one button hardwired
+to one action) was considered and rejected as a separate, larger,
+human-authored feature (closer to `janus_handle_action` territory than
+anything Stage 3b would derive from the screen spec).
+
 **Owner:** fixed library, one module per modality — `janus_input_touch.h`
-/ `.c` exist; `janus_input_encoder.c` / `janus_input_buttons.c` don't yet.
-Landed without touching any earlier stage except `main.c.tmpl`'s scaffold
-(Stage 8), which now actually calls into this instead of a bare TODO.
+/ `.c`, `janus_input_focus.h`/`.c` (shared core), `janus_input_encoder.h`,
+`janus_input_buttons.h` (driver contracts, header-only) all exist. Which
+one a project scaffolds into `main.c` is `app.input_modality` (Stage 1's
+`input:`), read at Stage 8, not here — this stage's own code is identical
+regardless of which modality ends up calling it.
 
 ---
 
@@ -610,13 +789,15 @@ This is the "how does it all actually get compiled" question.
 | file | owner | regenerated? |
 |---|---|---|
 | `runtime/embedded_c/src/janus_runtime.c` | Janus (fixed library) | no — only on Janus version upgrade |
+| `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `build/generated/{screen}_screen.gen.c` | Janus | yes, every build |
 | `build/generated/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
 | `build/generated/janus_app.gen.c` | Janus | yes, every build |
 | `build/generated/janus_bindings.gen.h/.c` | Janus | yes, every build (struct shape only — instance zero-inits; a human file populates real values at runtime) |
+| `build/generated/janus_display_config.gen.h` | Janus | yes, every build (only if `app.display` set) |
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
-| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c`) | no |
+| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`, picked by `app.input_modality`) | no |
 | `src/display_driver.c` | human/vendor | no |
 
 **Runtime call flow, boot to first render:**
@@ -631,18 +812,26 @@ This is the "how does it all actually get compiled" question.
    `geometry` rect.
 
 **Runtime call flow, on interaction:**
-4. `main()`'s event loop (`main.c.tmpl`, Stage 8) polls
-   `janus_touch_poll(&x, &y)` and, on a new touch, calls
-   `janus_touch_hit_test(screen, x, y)` (Stage 6).
+4. `main()`'s event loop polls whichever modality `app.input_modality`
+   scaffolded (`main_touch.c.tmpl` polls `janus_touch_poll(&x, &y)` then
+   calls `janus_touch_hit_test`; `main_encoder.c.tmpl`/
+   `main_buttons.c.tmpl` poll `janus_encoder_poll`/`janus_buttons_poll`,
+   route rotate/NEXT/PREV to `janus_focus_move` directly — no
+   `janus_input_result_t` for those, nothing to dispatch yet — and route
+   click/SELECT to `janus_focus_activate`) (Stage 6).
 5. The scaffolded `main.c` switches on the result's `kind` — this is the
-   one place all three outcomes meet, and it's the human's file (editable
-   after scaffolding) that does the switching, not the fixed library:
+   one place all three modalities' outcomes meet, and it's the human's
+   file (editable after scaffolding) that does the switching, not the
+   fixed library:
    - `JANUS_INPUT_ACTION`: `janus_handle_action((janus_action_t)hit.action)`
      — the human's file, Stage 5.
    - `JANUS_INPUT_NAVIGATE`: `janus_switch_screen(&app, hit.navigate_target)`
-     — the fixed library sets `active_screen` and re-renders the *new*
-     screen from *its* geometry table. Only one screen's widgets are ever
-     live, matching the ~2 KiB transient-buffer budget.
+     — the fixed library sets `active_screen`, clears focus, and
+     re-renders the *new* screen from *its* geometry table. Only one
+     screen's widgets are ever live, matching the ~2 KiB transient-buffer
+     budget. Encoder/button scaffolds follow this with one more call —
+     `janus_focus_move(new_screen, 0)` — to establish focus on the screen
+     that's now active; touch doesn't need this step.
    - `JANUS_INPUT_TOGGLE_BOX`: `janus_toggle_box(hit.widget)` — flips
      that widget's local expand bit and re-renders just that subtree,
      using `geometry` vs `geometry_collapsed` — a tile-scoped redraw, not
@@ -661,6 +850,7 @@ This is the "how does it all actually get compiled" question.
 | `janus_actions.gen.h` | Janus | every run |
 | `janus_app.gen.c` | Janus | every run |
 | `janus_bindings.gen.h/.c` | Janus | every run (zero-init only — see Stage 8) |
+| `janus_display_config.gen.h` | Janus | every run (only if `app.display` set) |
 | `runtime/embedded_c/*` | Janus (fixed library) | on Janus upgrade only |
 | `src/janus_actions.c` | human | never |
 | `src/main.c` | human | never |

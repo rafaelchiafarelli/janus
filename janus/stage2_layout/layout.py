@@ -5,7 +5,7 @@ Pure, deterministic: walks a Screen's widget tree bottom-up, filling in
 """
 from __future__ import annotations
 
-from ..ir import Rect, Screen, Widget
+from ..ir import DisplayConfig, Rect, Screen, Widget
 
 GAP = 4
 BOX_HEADER_H = 16
@@ -30,6 +30,21 @@ _DEFAULT_SIZE = {
 def layout_screen(screen: Screen) -> Screen:
     _layout_widget(screen.root, x=0, y=0)
     return screen
+
+
+def check_fits_display(screen: Screen, display: DisplayConfig) -> None:
+    """Call after `layout_screen`. `app.display` is optional (see Stage
+    1) — this check only runs where a project has actually declared a
+    real panel size to validate against; there's nothing to check
+    otherwise. Raises rather than silently clipping — matches the
+    parse-time "validate, don't default" rule this pipeline uses
+    elsewhere (architecture.md Stage 1)."""
+    root = screen.root.geometry
+    if root.w > display.width or root.h > display.height:
+        raise ValueError(
+            f"screen {screen.name!r} needs {root.w}x{root.h}, which doesn't fit "
+            f"the declared display size {display.width}x{display.height}"
+        )
 
 
 def _resolve_leaf_size(widget: Widget) -> tuple[int, int]:

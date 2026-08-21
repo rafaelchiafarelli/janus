@@ -4,7 +4,7 @@ from pathlib import Path
 
 from janus.stage1_parse.dsl_yaml import parse_screen
 from janus.generate import write_project
-from janus.ir import App, NavTarget
+from janus.ir import App, DisplayConfig, NavTarget
 from janus.stage2_layout.layout import layout_screen
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -70,6 +70,17 @@ class TestWriteProject(unittest.TestCase):
     def test_returns_only_paths_actually_written_first_run(self) -> None:
         written = write_project(self.app, self.out_dir)
         self.assertEqual(len(written), 9)
+
+    def test_display_config_omitted_when_app_display_unset(self) -> None:
+        write_project(self.app, self.out_dir)
+        self.assertFalse((self.out_dir / "janus_display_config.gen.h").exists())
+
+    def test_display_config_written_when_app_display_set(self) -> None:
+        self.app.display = DisplayConfig(width=240, height=320, color="mono")
+        write_project(self.app, self.out_dir)
+        content = (self.out_dir / "janus_display_config.gen.h").read_text()
+        self.assertIn("#define JANUS_DISPLAY_WIDTH 240", content)
+        self.assertIn("#define JANUS_DISPLAY_HEIGHT 320", content)
 
 
 if __name__ == "__main__":

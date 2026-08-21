@@ -1,0 +1,5 @@
+screens:
+  - user_profile.screen.yaml
+display:
+  size: { w: 50, h: 320 }
+  color: mono

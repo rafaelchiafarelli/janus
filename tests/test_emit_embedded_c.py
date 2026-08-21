@@ -185,5 +185,73 @@ class TestEmitEmbeddedCLowEffortKinds(unittest.TestCase):
         self.assertIn(".range_min = 0, .range_max = 100", segment)
 
 
+class TestEmitEmbeddedCFocusOrder(unittest.TestCase):
+    """Stage 6: .focus_order is baked at generation time, in the same
+    pre-order traversal janus_runtime.c/janus_input_touch.c walk at
+    runtime — not the post-order _emit_widget uses to emit C (that one's
+    for forward declarations only, see emit_embedded_c.py)."""
+
+    def _segment(self, out: str, widget_id: str) -> str:
+        idx = out.index(f'.id = "{widget_id}"')
+        return out[idx: idx + 400]
+
+    def test_button_with_on_press_is_focusable(self) -> None:
+        screen = Screen(
+            name="Focus",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="label", id="lbl", text="Hi"),
+                Widget(kind="button", id="btn", text="Go", on_press="reboot"),
+            ]),
+        )
+        out = emit_screen(layout_screen(screen))
+        self.assertIn(".focus_order = 255", self._segment(out, "lbl"))
+        self.assertIn(".focus_order = 0", self._segment(out, "btn"))
+
+    def test_button_with_navigate_is_focusable(self) -> None:
+        screen = Screen(
+            name="Focus",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="button", id="btn", text="Go", navigate="Other"),
+            ]),
+        )
+        idx = {"Focus": 0, "Other": 1}
+        out = emit_screen(layout_screen(screen), idx)
+        self.assertIn(".focus_order = 0", self._segment(out, "btn"))
+
+    def test_box_is_focusable_but_its_children_are_not(self) -> None:
+        screen = Screen(
+            name="Focus",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="box1", layout="column", children=[
+                    Widget(kind="checkbox", id="chk",
+                           bind=Binding(message="dev", field="on", type="int")),
+                ]),
+            ]),
+        )
+        out = emit_screen(layout_screen(screen))
+        self.assertIn(".focus_order = 0", self._segment(out, "box1"))
+        self.assertIn(".focus_order = 255", self._segment(out, "chk"))
+
+    def test_order_follows_traversal_order_not_c_emission_order(self) -> None:
+        """box1 has a focusable child array emitted *before* box1's own
+        initializer in the generated C (post-order, for forward
+        declarations) — but box1 itself must still get a lower
+        focus_order than the button that comes after it in the YAML,
+        since focus order follows the screen's visual/traversal order."""
+        screen = Screen(
+            name="Focus",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="box1", layout="column", children=[
+                    Widget(kind="button", id="inner_btn", text="X", on_press="a"),
+                ]),
+                Widget(kind="button", id="after_btn", text="Y", on_press="b"),
+            ]),
+        )
+        out = emit_screen(layout_screen(screen))
+        self.assertIn(".focus_order = 0", self._segment(out, "box1"))
+        self.assertIn(".focus_order = 1", self._segment(out, "inner_btn"))
+        self.assertIn(".focus_order = 2", self._segment(out, "after_btn"))
+
+
 if __name__ == "__main__":
     unittest.main()

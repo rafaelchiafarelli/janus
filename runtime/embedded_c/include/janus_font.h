@@ -1,6 +1,7 @@
-/* Janus embedded-C runtime — 5x7 bitmap font. Stage 4 glyph-rendering
- * slice 1 of 2 (see architecture.md): static `text:` only. Bound string
- * fields still don't render — that's slice 2, a separate follow-up.
+/* Janus embedded-C runtime — 5x7 bitmap font. Stage 4 glyph rendering
+ * (see architecture.md): used for both authored `text:` and live bound
+ * string values (janus_runtime.c's draw_label/draw_header) — this module
+ * only supplies glyph lookup, agnostic to where the string came from.
  *
  * Deliberately minimal coverage: space + 'A'-'Z' (27 glyphs) — enough
  * for this project's own authored strings ("Device Status", "Reboot",

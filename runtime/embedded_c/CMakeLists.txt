@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_library(janus_runtime STATIC
     src/janus_runtime.c
     src/janus_input_touch.c
+    src/janus_input_focus.c
     src/janus_font.c
 )
 target_include_directories(janus_runtime PUBLIC include)
@@ -17,6 +18,8 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_library(janus_host_mock STATIC
         host_mock/mock_driver.c
         host_mock/mock_touch.c
+        host_mock/mock_encoder.c
+        host_mock/mock_buttons.c
     )
     target_include_directories(janus_host_mock PUBLIC host_mock)
     target_link_libraries(janus_host_mock PUBLIC janus_runtime)
@@ -34,6 +37,18 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_input_touch_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_input_touch_tests PRIVATE -Wall -Wextra)
 
+    add_executable(janus_input_focus_tests tests/test_input_focus.c)
+    target_link_libraries(janus_input_focus_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_input_focus_tests PRIVATE -Wall -Wextra)
+
+    add_executable(janus_input_encoder_tests tests/test_input_encoder.c)
+    target_link_libraries(janus_input_encoder_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_input_encoder_tests PRIVATE -Wall -Wextra)
+
+    add_executable(janus_input_buttons_tests tests/test_input_buttons.c)
+    target_link_libraries(janus_input_buttons_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_input_buttons_tests PRIVATE -Wall -Wextra)
+
     add_executable(janus_font_tests tests/test_font.c)
     target_link_libraries(janus_font_tests PRIVATE janus_runtime)
     target_compile_options(janus_font_tests PRIVATE -Wall -Wextra)
@@ -41,5 +56,8 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     enable_testing()
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
     add_test(NAME janus_input_touch_tests COMMAND janus_input_touch_tests)
+    add_test(NAME janus_input_focus_tests COMMAND janus_input_focus_tests)
+    add_test(NAME janus_input_encoder_tests COMMAND janus_input_encoder_tests)
+    add_test(NAME janus_input_buttons_tests COMMAND janus_input_buttons_tests)
     add_test(NAME janus_font_tests COMMAND janus_font_tests)
 endif()

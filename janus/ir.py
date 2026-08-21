@@ -7,6 +7,13 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
 BindType = Literal["string", "int", "int64", "float"]
+DisplayColor = Literal["mono", "gray", "rgb565"]
+DisplayBus = Literal["spi", "i2c", "parallel"]
+DisplayController = Literal[
+    "st7789", "st7789v", "ili9341", "ili9341v", "hx8357",
+    "gc9a01", "ssd1306", "sh1106", "il3820", "il0373",
+]
+InputModality = Literal["touch", "encoder", "buttons"]
 
 
 @dataclass
@@ -59,6 +66,26 @@ class NavTarget:
 
 
 @dataclass
+class DisplayConfig:
+    width: int
+    height: int
+    color: DisplayColor
+    # bus/controller are a hardware *selection*, not a driver — Janus
+    # emits them as data (see emit_display_config), the same seam
+    # size/color already use. The actual driver body stays human-owned
+    # (settled 2026-08-20, see Janus.md's Open Questions) — keeping the
+    # selection as plain data here is what makes swapping in a
+    # Janus-provided driver library later "boltable" rather than a
+    # schema change: a future library would switch on this same value.
+    bus: Optional[DisplayBus] = None
+    controller: Optional[DisplayController] = None
+
+
+@dataclass
 class App:
     screens: list[Screen]
     nav: Optional[list[NavTarget]] = None
+    display: Optional[DisplayConfig] = None
+    # which physical input a generated project's main.c polls (Stage 6/8)
+    # — one modality per project, default touch (today's only behavior).
+    input_modality: InputModality = "touch"

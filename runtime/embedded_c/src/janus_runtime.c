@@ -4,11 +4,12 @@
  * deleted Copilot branch's stub (which drew an empty tile buffer
  * regardless of screen contents). Leaf content used to be a kind-distinct
  * solid fill only; now label/header/button/box-header draw real glyphs
- * over that same fill when a widget has authored `text:` (janus_font.h,
- * slice 1 of 2 — bound string fields still render as a solid fill only,
- * that's slice 2). progress/gauge/checkbox/led remain the pre-existing
- * exception for non-text content — they read the live bound value and
- * vary the fill accordingly.
+ * over that same fill when a widget has authored `text:` (janus_font.h),
+ * and label/header additionally draw a live bound string value when
+ * there's no authored `text:` (slice 2 — see read_bound_string below).
+ * progress/gauge/checkbox/led remain the pre-existing exception for
+ * non-text content — they read the live bound value and vary the fill
+ * accordingly.
  */
 #include "janus_runtime.h"
 
@@ -102,6 +103,31 @@ static void draw_string(janus_rect_t rect, const char *text, uint8_t bg) {
     }
 }
 
+/* ---------------------------------------------------------- focus ring --
+ * Stage 6: the visual marker for "this is the currently focused widget"
+ * (encoder/button navigation — touch never sets this). A thin outline
+ * drawn over whatever the widget's own draw_<kind>() already painted,
+ * reusing fill_rect/g_tile_buffer, no new buffer.
+ */
+#define FILL_FOCUS_RING 0xF0
+
+/* Only button and box are ever focusable (Stage 3b's _assign_focus_order
+ * — everything else keeps JANUS_FOCUS_NONE), so this is the one piece of
+ * mutable focus state the whole module needs; draw_button/draw_box_header
+ * below just compare their own pointer against it. */
+static const janus_widget_desc_t *g_focused_widget = NULL;
+
+static void draw_focus_ring(janus_rect_t r) {
+    janus_rect_t top    = { r.x, r.y, r.w, 1 };
+    janus_rect_t bottom = { r.x, (int16_t)(r.y + r.h - 1), r.w, 1 };
+    janus_rect_t left   = { r.x, r.y, 1, r.h };
+    janus_rect_t right  = { (int16_t)(r.x + r.w - 1), r.y, 1, r.h };
+    fill_rect(top, FILL_FOCUS_RING);
+    fill_rect(bottom, FILL_FOCUS_RING);
+    fill_rect(left, FILL_FOCUS_RING);
+    fill_rect(right, FILL_FOCUS_RING);
+}
+
 /* ------------------------------------------------------------ box state --
  * janus_widget_desc_t instances are static const arrays baked at
  * generation time — nowhere in them to hold a *mutable* expand/collapse
@@ -162,8 +188,26 @@ static double read_bound_value(const janus_bind_t *bind, const void *bound_struc
             return (double)v;
         }
         default:
-            return 0.0; /* string has no numeric value; no glyph rendering yet anyway */
+            return 0.0; /* string has no numeric value — see read_bound_string below */
     }
+}
+
+/* Slice 2: label/header's bound-string case. The struct field is
+ * `const char *` (emit_bindings_struct.py) — a pointer, not inline bytes,
+ * so this reads the pointer itself rather than reinterpreting field bytes
+ * as a number like read_bound_value does. Zero-initialized instances
+ * (Stage 7 — Janus generates shape, not data) hold NULL here until
+ * firmware populates them, and draw_string already no-ops on NULL, so an
+ * unpopulated bound string renders as the plain fill, same as before this
+ * existed. No truncation/copy needed: draw_string blits and clips
+ * character-by-character straight from this pointer, so an arbitrary
+ * runtime-length string never needs its length known upfront. */
+static const char *read_bound_string(const janus_bind_t *bind, const void *bound_struct) {
+    if (bound_struct == NULL || bind->field_type != JANUS_FIELD_STRING) return NULL;
+    const uint8_t *field = (const uint8_t *)bound_struct + bind->field_offset;
+    const char *value;
+    memcpy(&value, field, sizeof(value));
+    return value;
 }
 
 /* ------------------------------------------------- per-kind draw_<kind> --
@@ -182,17 +226,25 @@ enum {
     FILL_SLIDER_ON = 0xC8, FILL_SLIDER_OFF = 0xD0,
 };
 
-static void draw_label(const janus_widget_desc_t *w) {
+/* label/header: authored `text:` wins if present (unbound widgets, or a
+ * widget authored with both — Janus.md's catalog documents `bind`/`text`
+ * as one-or-the-other, but nothing at parse time forbids both, so this is
+ * the deterministic tie-break); otherwise fall back to the live bound
+ * string, if any. */
+static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
     fill_rect(w->geometry, FILL_LABEL);
-    draw_string(w->geometry, w->static_text, FILL_LABEL);
+    const char *text = w->static_text != NULL ? w->static_text : read_bound_string(&w->bind, bound_struct);
+    draw_string(w->geometry, text, FILL_LABEL);
 }
-static void draw_header(const janus_widget_desc_t *w) {
+static void draw_header(const janus_widget_desc_t *w, const void *bound_struct) {
     fill_rect(w->geometry, FILL_HEADER);
-    draw_string(w->geometry, w->static_text, FILL_HEADER);
+    const char *text = w->static_text != NULL ? w->static_text : read_bound_string(&w->bind, bound_struct);
+    draw_string(w->geometry, text, FILL_HEADER);
 }
 static void draw_button(const janus_widget_desc_t *w) {
     fill_rect(w->geometry, FILL_BUTTON);
     draw_string(w->geometry, w->static_text, FILL_BUTTON);
+    if (w == g_focused_widget) draw_focus_ring(w->geometry);
 }
 static void draw_image(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_IMAGE); }
 static void draw_radiobutton(const janus_widget_desc_t *w) { fill_rect(w->geometry, FILL_RADIOBUTTON); }
@@ -244,14 +296,15 @@ static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) 
 static void draw_box_header(const janus_widget_desc_t *box) {
     fill_rect(box->geometry_collapsed, FILL_BOX_HEADER);
     draw_string(box->geometry_collapsed, box->static_text, FILL_BOX_HEADER);
+    if (box == g_focused_widget) draw_focus_ring(box->geometry_collapsed);
 }
 
 /* ---------------------------------------------------------- traversal --
  */
 static void render_widget(const janus_widget_desc_t *w, const void *bound_struct) {
     switch (w->kind) {
-        case JANUS_WIDGET_LABEL: draw_label(w); return;
-        case JANUS_WIDGET_HEADER: draw_header(w); return;
+        case JANUS_WIDGET_LABEL: draw_label(w, bound_struct); return;
+        case JANUS_WIDGET_HEADER: draw_header(w, bound_struct); return;
         case JANUS_WIDGET_BUTTON: draw_button(w); return;
         case JANUS_WIDGET_IMAGE: draw_image(w); return;
         case JANUS_WIDGET_RADIOBUTTON: draw_radiobutton(w); return;
@@ -293,8 +346,29 @@ void janus_render_screen(const janus_screen_desc_t *screen) {
 
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     if (screen_index >= app->screen_count) return;
+    /* Clear focus *before* switching — g_focused_widget would otherwise
+     * point into the outgoing screen's static widget array; if left set,
+     * the next janus_set_focus call would try to redraw that stale
+     * widget on top of the freshly rendered new screen. Callers using
+     * encoder/button navigation re-establish focus on the new screen
+     * with janus_focus_move(new_screen, 0) right after this. */
+    janus_set_focus(NULL);
     app->active_screen = screen_index;
     janus_render_screen(app->screens[screen_index]);
+}
+
+void janus_set_focus(const janus_widget_desc_t *widget) {
+    const janus_widget_desc_t *previous = g_focused_widget;
+    if (previous == widget) return;
+
+    const void *bound_struct = g_current_screen != NULL ? g_current_screen->bound_struct : NULL;
+    g_focused_widget = widget;
+    if (previous != NULL) render_widget(previous, bound_struct);
+    if (widget != NULL) render_widget(widget, bound_struct);
+}
+
+const janus_widget_desc_t *janus_get_focus(void) {
+    return g_focused_widget;
 }
 
 void janus_toggle_box(const janus_widget_desc_t *box) {

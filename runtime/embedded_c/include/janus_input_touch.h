@@ -12,20 +12,9 @@
 #define JANUS_INPUT_TOUCH_H
 
 #include "janus_runtime.h"
-
-typedef enum {
-    JANUS_INPUT_NONE,          /* no widget at that point, or nothing to dispatch */
-    JANUS_INPUT_ACTION,        /* widget->action is meaningful; caller casts to janus_action_t */
-    JANUS_INPUT_NAVIGATE,      /* navigate_target is meaningful; caller calls janus_switch_screen */
-    JANUS_INPUT_TOGGLE_BOX,    /* widget is the box that was tapped; caller calls janus_toggle_box */
-} janus_input_kind_t;
-
-typedef struct {
-    janus_input_kind_t kind;
-    const janus_widget_desc_t *widget;   /* the resolved widget; NULL when kind == JANUS_INPUT_NONE */
-    janus_action_id_t action;            /* valid when kind == JANUS_INPUT_ACTION */
-    int16_t navigate_target;             /* valid when kind == JANUS_INPUT_NAVIGATE */
-} janus_input_result_t;
+/* janus_input_kind_t/janus_input_result_t now live in janus_runtime.h —
+ * moved there once encoder/buttons needed the identical shape (Stage 6),
+ * so no input modality module depends on another. */
 
 /* Point-in-rect against `screen`'s already-baked absolute geometry,
  * deepest match wins. A box's header region (geometry_collapsed) is

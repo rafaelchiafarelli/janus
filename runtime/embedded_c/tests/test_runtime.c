@@ -198,7 +198,7 @@ static void test_slider_fill_tracks_live_value(void) {
     CHECK(sample_at_0 != sample_at_100);
 }
 
-/* ---- fixture 6: glyph rendering (Stage 4 slice 1 — static text only) --- */
+/* ---- fixture 6: glyph rendering — authored static `text:` --- */
 
 static int count_glyph_sized_calls(void) {
     int n = 0;
@@ -253,21 +253,63 @@ static void test_text_wider_than_widget_clips_without_wrapping(void) {
     CHECK(count_glyph_sized_calls() == 1);
 }
 
-static void test_bound_string_field_still_renders_as_fill_only(void) {
-    /* Slice 1 is static text only — a widget with a `bind` instead of
-     * authored `text:` has static_text == NULL and must fall back to the
-     * plain fill, exactly like before this feature existed. */
+/* ---- fixture 7: slice 2 — bound string fields (see architecture.md) --- */
+typedef struct { const char *name; } demo_str_t;
+static demo_str_t g_demo_str = { .name = NULL };
+
+static void test_bound_string_with_value_draws_glyphs(void) {
+    /* w=20 (< JANUS_TILE_W) so the background is exactly one fill call —
+     * see test_divider_always_draws_unconditionally for why a wider rect
+     * would split across tiles and change this count. */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 60, 12 },
-        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_STRING },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 20, 10 },
+        .bind = { .field_offset = offsetof(demo_str_t, name), .field_type = JANUS_FIELD_STRING },
     };
     static const janus_screen_desc_t screen = {
-        .name = "BoundString", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo,
+        .name = "BoundString", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo_str,
     };
 
+    g_demo_str.name = "AB";
     mock_driver_reset();
     janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 3);      /* 1 background fill + 2 glyphs */
+    CHECK(count_glyph_sized_calls() == 2);
+}
+
+static void test_bound_string_null_renders_fill_only(void) {
+    /* Zero-initialized bindings instance (Stage 7: Janus generates shape,
+     * not data) holds NULL until firmware populates it — must render as
+     * the plain fill, not crash or draw garbage. */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 20, 10 },
+        .bind = { .field_offset = offsetof(demo_str_t, name), .field_type = JANUS_FIELD_STRING },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "BoundStringNull", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo_str,
+    };
+
+    g_demo_str.name = NULL;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);  /* the fill_rect only — no glyph calls */
     CHECK(count_glyph_sized_calls() == 0);
+}
+
+static void test_static_text_wins_over_bound_string(void) {
+    /* Both set (nothing at parse time forbids it) — static_text is the
+     * deterministic tie-break, see janus_runtime.c's draw_label comment. */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "A", .geometry = { 0, 0, 60, 12 },
+        .bind = { .field_offset = offsetof(demo_str_t, name), .field_type = JANUS_FIELD_STRING },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "StaticWins", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo_str,
+    };
+
+    g_demo_str.name = "ZZ";
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 1);  /* "A", not "ZZ" */
 }
 
 static void test_box_header_draws_its_title_text(void) {
@@ -297,7 +339,9 @@ int main(void) {
     test_label_without_text_draws_only_the_background_fill();
     test_label_with_text_draws_one_glyph_call_per_character();
     test_text_wider_than_widget_clips_without_wrapping();
-    test_bound_string_field_still_renders_as_fill_only();
+    test_bound_string_with_value_draws_glyphs();
+    test_bound_string_null_renders_fill_only();
+    test_static_text_wins_over_bound_string();
     test_box_header_draws_its_title_text();
 
     if (g_failures == 0) {

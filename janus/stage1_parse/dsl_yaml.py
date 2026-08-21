@@ -14,9 +14,16 @@ from typing import Any
 
 import yaml
 
-from ..ir import App, Binding, NavTarget, Screen, Widget
+from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, Widget
 
 _VALID_BIND_TYPES = {"string", "int", "int64", "float"}
+_VALID_DISPLAY_COLORS = {"mono", "gray", "rgb565"}
+_VALID_DISPLAY_BUSES = {"spi", "i2c", "parallel"}
+_VALID_DISPLAY_CONTROLLERS = {
+    "st7789", "st7789v", "ili9341", "ili9341v", "hx8357",
+    "gc9a01", "ssd1306", "sh1106", "il3820", "il0373",
+}
+_VALID_INPUT_MODALITIES = {"touch", "encoder", "buttons"}
 _REQUIRES_RANGE = {"progress", "gauge", "slider"}
 _PY_TYPE_FOR_BIND_TYPE: dict[str, type | tuple[type, ...]] = {
     "string": str,
@@ -114,6 +121,40 @@ def _check_navigate_targets(widget: Widget, screen_names: set[str]) -> None:
         _check_navigate_targets(child, screen_names)
 
 
+def _parse_display(data: dict[str, Any] | None) -> DisplayConfig | None:
+    if data is None:
+        return None
+    color = data.get("color", "mono")
+    if color not in _VALID_DISPLAY_COLORS:
+        raise ValueError(
+            f"invalid display color {color!r} — must be one of {sorted(_VALID_DISPLAY_COLORS)}"
+        )
+    bus = data.get("bus")
+    if bus is not None and bus not in _VALID_DISPLAY_BUSES:
+        raise ValueError(
+            f"invalid display bus {bus!r} — must be one of {sorted(_VALID_DISPLAY_BUSES)}"
+        )
+    controller = data.get("controller")
+    if controller is not None and controller not in _VALID_DISPLAY_CONTROLLERS:
+        raise ValueError(
+            f"invalid display controller {controller!r} — must be one of "
+            f"{sorted(_VALID_DISPLAY_CONTROLLERS)}"
+        )
+    w, h = _parse_size(data["size"])
+    return DisplayConfig(width=w, height=h, color=color, bus=bus, controller=controller)
+
+
+def _parse_input_modality(data: dict[str, Any] | None) -> str:
+    if data is None:
+        return "touch"
+    modality = data.get("modality", "touch")
+    if modality not in _VALID_INPUT_MODALITIES:
+        raise ValueError(
+            f"invalid input modality {modality!r} — must be one of {sorted(_VALID_INPUT_MODALITIES)}"
+        )
+    return modality
+
+
 def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
     """`screens` are already-parsed `Screen` objects, in `app.yaml`'s
     `screens:` order — `parse_app` is what actually reads each file."""
@@ -128,7 +169,12 @@ def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
     for screen in screens:
         _check_navigate_targets(screen.root, screen_names)
 
-    return App(screens=screens, nav=nav)
+    return App(
+        screens=screens,
+        nav=nav,
+        display=_parse_display(data.get("display")),
+        input_modality=_parse_input_modality(data.get("input")),
+    )
 
 
 def parse_app(path: str | Path) -> App:

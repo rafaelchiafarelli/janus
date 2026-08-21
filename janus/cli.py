@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .generate import write_project
 from .stage1_parse.dsl_yaml import parse_app
-from .stage2_layout.layout import layout_screen
+from .stage2_layout.layout import check_fits_display, layout_screen
 from .stage5_actions.scaffold_actions import scaffold_actions_c
 from .stage8_scaffold.scaffold_main import scaffold_main_c
 
@@ -31,6 +31,8 @@ def generate(
     app = parse_app(app_yaml)
     for screen in app.screens:
         layout_screen(screen)
+        if app.display is not None:
+            check_fits_display(screen, app.display)
 
     written = write_project(app, target_dir)
 
@@ -38,7 +40,7 @@ def generate(
         scaffold_src = Path(scaffold_src)
         if scaffold_actions_c(app, scaffold_src / "janus_actions.c"):
             written.append(scaffold_src / "janus_actions.c")
-        if scaffold_main_c(scaffold_src / "main.c"):
+        if scaffold_main_c(app, scaffold_src / "main.c"):
             written.append(scaffold_src / "main.c")
 
     return written

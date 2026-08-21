@@ -10,12 +10,13 @@ so it never needs escaping.
 """
 from __future__ import annotations
 
-from ..ir import App, Screen
+from ..ir import App, DisplayConfig, Screen
 from ..templates import load_template
 from .emit_bindings_struct import emit_bindings_header, emit_bindings_source
 from .emit_embedded_c import (
     emit_actions_header,
     emit_app_table,
+    emit_display_config,
     emit_screen,
     screen_bound_messages,
     screen_on_press_actions,
@@ -68,3 +69,8 @@ def render_bindings_header(app: App) -> str:
 def render_bindings_source(app: App) -> str:
     body = emit_bindings_source(app)
     return load_template("bindings.c.tmpl").format(body=body)
+
+
+def render_display_config_header(display: DisplayConfig) -> str:
+    body = emit_display_config(display)
+    return load_template("display_config.h.tmpl").format(guard=_guard("display", "config"), body=body)

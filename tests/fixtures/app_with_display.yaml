@@ -1,0 +1,11 @@
+screens:
+  - user_profile.screen.yaml
+  - box_demo.screen.yaml
+nav:
+  kind: tabs
+  targets:
+    - { screen: UserProfile, title: "Profile" }
+    - { screen: BoxDemo, title: "Boxes" }
+display:
+  size: { w: 240, h: 320 }
+  color: rgb565

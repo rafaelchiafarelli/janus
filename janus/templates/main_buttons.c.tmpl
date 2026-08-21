@@ -1,0 +1,46 @@
+#include "janus_runtime.h"
+#include "janus_input_buttons.h"
+#include "janus_input_focus.h"
+#include "janus_actions.gen.h"
+
+extern janus_app_t janus_app;
+
+void display_driver_init(void);  /* vendor-provided, see src/display_driver.c */
+/* janus_buttons_poll() (janus_input_buttons.h) is the vendor-provided
+ * next/prev/select push-button source — implement it alongside
+ * display_driver_init(). */
+
+int main(void) {
+    display_driver_init();
+    const janus_screen_desc_t *screen = janus_app.screens[janus_app.active_screen];
+    janus_render_screen(screen);
+    janus_focus_move(screen, 0);   /* establish initial focus */
+
+    while (1) {
+        janus_button_event_t event;
+        if (!janus_buttons_poll(&event)) continue;
+
+        screen = janus_app.screens[janus_app.active_screen];
+        if (event == JANUS_BUTTON_NEXT) { janus_focus_move(screen, 1); continue; }
+        if (event == JANUS_BUTTON_PREV) { janus_focus_move(screen, -1); continue; }
+
+        /* JANUS_BUTTON_SELECT */
+        janus_input_result_t hit = janus_focus_activate(screen);
+        switch (hit.kind) {
+            case JANUS_INPUT_ACTION:
+                janus_handle_action((janus_action_t)hit.action);
+                break;
+            case JANUS_INPUT_NAVIGATE:
+                janus_switch_screen(&janus_app, (uint16_t)hit.navigate_target);
+                janus_focus_move(janus_app.screens[janus_app.active_screen], 0);
+                break;
+            case JANUS_INPUT_TOGGLE_BOX:
+                janus_toggle_box(hit.widget);
+                break;
+            default:
+                break;
+        }
+    }
+
+    return 0;
+}

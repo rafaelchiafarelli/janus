@@ -51,6 +51,14 @@ class TestGenerate(unittest.TestCase):
         generate(FIXTURES / "app.yaml", self.target_dir)
         self.assertFalse((Path(self._tmp.name) / "src").exists())
 
+    def test_display_config_written_when_app_yaml_declares_a_display(self) -> None:
+        generate(FIXTURES / "app_with_display.yaml", self.target_dir)
+        self.assertTrue((self.target_dir / "janus_display_config.gen.h").exists())
+
+    def test_screen_too_big_for_declared_display_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            generate(FIXTURES / "app_with_display_too_small.yaml", self.target_dir)
+
 
 class TestMain(unittest.TestCase):
     def setUp(self) -> None:

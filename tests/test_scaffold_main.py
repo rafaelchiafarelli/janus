@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from janus.ir import App
 from janus.stage8_scaffold.scaffold_main import render_main_c, scaffold_main_c
 
 
@@ -40,14 +41,43 @@ class TestRenderMainC(unittest.TestCase):
         self.assertIn("janus_toggle_box(hit.widget);", out)
 
 
+class TestRenderMainCEncoder(unittest.TestCase):
+    def test_polls_encoder_and_moves_focus(self) -> None:
+        out = render_main_c("encoder")
+        self.assertIn('#include "janus_input_encoder.h"', out)
+        self.assertIn('#include "janus_input_focus.h"', out)
+        self.assertIn("janus_encoder_poll(&event, &delta)", out)
+        self.assertIn("janus_focus_move(screen, delta);", out)
+        self.assertIn("janus_focus_activate(screen)", out)
+        self.assertIn("case JANUS_INPUT_ACTION:", out)
+
+    def test_braces_balance(self) -> None:
+        self.assertTrue(_balanced_braces(render_main_c("encoder")))
+
+
+class TestRenderMainCButtons(unittest.TestCase):
+    def test_polls_buttons_and_moves_focus(self) -> None:
+        out = render_main_c("buttons")
+        self.assertIn('#include "janus_input_buttons.h"', out)
+        self.assertIn('#include "janus_input_focus.h"', out)
+        self.assertIn("janus_buttons_poll(&event)", out)
+        self.assertIn("janus_focus_move(screen, 1);", out)
+        self.assertIn("janus_focus_move(screen, -1);", out)
+        self.assertIn("janus_focus_activate(screen)", out)
+
+    def test_braces_balance(self) -> None:
+        self.assertTrue(_balanced_braces(render_main_c("buttons")))
+
+
 class TestScaffoldMainC(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.path = Path(self._tmp.name) / "src" / "main.c"
+        self.app = App(screens=[])
 
     def test_scaffolds_when_missing(self) -> None:
-        self.assertTrue(scaffold_main_c(self.path))
+        self.assertTrue(scaffold_main_c(self.app, self.path))
         self.assertTrue(self.path.exists())
         self.assertIn("int main(void)", self.path.read_text())
 
@@ -55,8 +85,13 @@ class TestScaffoldMainC(unittest.TestCase):
         self.path.parent.mkdir(parents=True)
         self.path.write_text("/* hand-written, do not overwrite */\n")
 
-        self.assertFalse(scaffold_main_c(self.path))
+        self.assertFalse(scaffold_main_c(self.app, self.path))
         self.assertEqual(self.path.read_text(), "/* hand-written, do not overwrite */\n")
+
+    def test_scaffolds_the_modality_the_app_declares(self) -> None:
+        encoder_app = App(screens=[], input_modality="encoder")
+        scaffold_main_c(encoder_app, self.path)
+        self.assertIn("janus_encoder_poll", self.path.read_text())
 
 
 if __name__ == "__main__":

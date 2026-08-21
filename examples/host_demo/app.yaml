@@ -1,2 +1,5 @@
 screens:
   - device_status.screen.yaml
+display:
+  size: { w: 240, h: 320 }
+  color: mono

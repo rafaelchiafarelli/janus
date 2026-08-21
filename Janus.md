@@ -1,12 +1,22 @@
 # Janus — a pre-harpia GUI schema + code generator
 
-> **Status (updated 2026-08-19): the embedded-C target is implemented and
+> **Status (updated 2026-08-20): the embedded-C target is implemented and
 > working end-to-end**, not "design only" anymore — see `architecture.md`'s
-> per-stage "Implementation status." A first glyph-rendering slice landed
-> the same day: static `text:` (space + `A`-`Z` only, see `janus_font.h`) —
-> the "Stage 2+" line below is partially stale as a result, kept for the
-> record. Still open: encoder/button input, bound-string glyph rendering
-> (slice 2), and the JS/Node target. This
+> per-stage "Implementation status." Glyph rendering now covers both
+> static `text:` and live bound string values (space + `A`-`Z` only, see
+> `janus_font.h`) — the "Stage 2+" line below is partially stale as a
+> result, kept for the record. Also landed the same date: `display:`
+> config (`size`/`color`/`bus`/`controller` — see "Display config" below).
+> **The JS/Node target is dropped**, also 2026-08-20 (see "JS/Node web
+> frontend"): harpia's own generated REST/gRPC already gives direct
+> backend access, so a generated frontend on top of it wasn't needed after
+> all — embedded C is now Janus's only target. **Encoder/button input
+> dispatch (Stage 6) also landed the same date** — see "Input / event
+> dispatch": touch, encoder, and next/prev/select push buttons are all
+> real now, sharing one focus core (`janus_input_focus.c`). What's left:
+> the pixel-format rework for non-mono display controllers (RGB565/e-paper
+> — see "Display config"'s Open Questions), and per-controller driver
+> bodies once real hardware is in hand. This
 > file is still meant to let a fresh session pick this project up quickly —
 > read it whole before writing any code. A visual companion to the
 > "Embedded-C code generation architecture" and "Input / event dispatch"
@@ -159,7 +169,21 @@ For small/constrained devices — the original motivating use case.
   no traversal logic), font/glyph atlas packing, asset compression — all
   flagged as "Stage 2+" in the original `DESIGN.md` and still true.
 
-### 2. JS/Node web frontend
+### 2. JS/Node web frontend — DROPPED (2026-08-20)
+
+Kept below for the record of what was scoped and why it was dropped, not
+because it's still a live target. **Reason:** harpia's own generated REST
+(Stage 12) and gRPC (Stage 13) endpoints already give direct backend
+access without Janus generating a frontend on top of them — the thing
+this target existed to provide turned out to already be covered. If a
+generated web frontend is ever wanted again, the two open problems noted
+at the time still apply: (1) no emitter exists (`emit_js`/`emit_node` was
+never started — zero code, zero templates), and (2) the layout pass
+(Stage 2) bakes absolute pixel rects at generation time, which a web
+target can't reuse as-is — it would need a real CSS layout step instead,
+not just a new emit target on the existing geometry.
+
+Original scoping, for the record:
 
 - Rides for free on harpia's already-generated REST (Stage 12) and gRPC
   (Stage 13) endpoints, including their Stage-5 credential gating
@@ -173,19 +197,22 @@ For small/constrained devices — the original motivating use case.
 
 - **First target: embedded C.** The original ask, and the harder of the two
   (real widget rendering, transport, font/glyph work are all still unbuilt)
-  — scoped first rather than deferred, per doc step 2. JS/Node stays
-  designed-for (see IR below) but unimplemented until embedded C works
-  end-to-end for a trivial one-screen example.
+  — scoped first rather than deferred, per doc step 2. JS/Node stayed
+  designed-for (see IR below) but unimplemented — and was dropped outright
+  on 2026-08-20, see "JS/Node web frontend" above; embedded C is now the
+  *only* target, not just the first one built.
 - **Toolchain: Python**, matching harpia's own (lexer/parser, generator
   scripts). Codegen mechanism specifically: harpia-style `.tmpl` files +
   `str.format()` for file skeletons, with Python-built string fragments for
   repeated sections — no templating engine (Jinja2/Mako) anywhere in
   harpia, so Janus doesn't introduce one either. See "Embedded-C code
   generation architecture" below for how this applies to Janus specifically.
-- **Pipeline is target-agnostic through an IR**, so a JS/Node emitter can
-  later plug into the same tree without reworking the front half:
-  `screen.yaml → parse → IR (Screen/Widget/Binding tree) → layout pass
-  (fills in geometry) → emit(harpia Include) / emit(embedded-C)`.
+- **Pipeline is target-agnostic through an IR**: `screen.yaml → parse → IR
+  (Screen/Widget/Binding tree) → layout pass (fills in geometry) →
+  emit(harpia Include) / emit(embedded-C)`. Originally motivated by
+  wanting a JS/Node emitter to plug in later without reworking the front
+  half — that target was dropped (see above), but the IR split is kept: it's
+  still the right shape for the two emitters that do exist.
 - **Concrete v1 DSL: YAML**, explicit bindings, container-based layout with
   geometry computed by Janus at generation time (not authored, not computed
   on-device). Verified against real harpia syntax in
@@ -302,7 +329,55 @@ nav:
   targets:
     - { screen: DeviceStatus, title: "Status" }
     - { screen: Settings, title: "Settings" }
+display:
+  size: { w: 240, h: 320 }
+  color: rgb565    # mono | gray | rgb565, default mono
+  bus: spi         # spi | i2c | parallel — optional
+  controller: st7789v   # optional — see the closed list below
 ```
+
+## Display config (settled 2026-08-20; bus/controller added 2026-08-20)
+
+`app.yaml`'s optional `display:` block is the answer to "how do I set the
+screen size" — until this landed nothing in the pipeline declared it: a
+screen's geometry was whatever its widgets summed to, with no size to
+overflow against (see `architecture.md` Stage 2 for the exact check).
+
+- **`size: {w, h}`** — the physical panel's resolution. When set, Stage 2's
+  layout pass rejects any screen whose computed root geometry exceeds it
+  (`check_fits_display`) — same "validate, don't silently clip" philosophy
+  as the rest of Stage 1/2. Omitting `display:` entirely skips the check,
+  same as today.
+- **`color: mono | gray | rgb565`** (default `mono`) — the panel's pixel
+  format.
+- **`bus: spi | i2c | parallel`** and **`controller:` one of `st7789`,
+  `st7789v`, `ili9341`, `ili9341v`, `hx8357`, `gc9a01`, `ssd1306`,
+  `sh1106`, `il3820`, `il0373`** — both optional, independent of each
+  other and of the rest of `display:` (a project can declare panel
+  size/color before picking real hardware). Validated against this closed
+  list at parse time, same as `bind.type`.
+
+**What "implemented" means here, precisely:** all four fields are parsed,
+validated, and emitted as plain data in `janus_display_config.gen.h`
+(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`) — consumed by
+hand-written vendor driver code, never by the fixed runtime library, which
+stays display-size-agnostic. **The driver bodies themselves are not
+generated and stay human-owned** (settled 2026-08-20, see Open Questions)
+— `bus`/`controller` are a hardware *selection* a human's driver code can
+switch on (`#if JANUS_DISPLAY_CONTROLLER == JANUS_DISPLAY_CONTROLLER_ST7789V`),
+not a promise that Janus writes that driver. Every known bus/controller
+value is always `#define`d regardless of selection (so driver code can
+compare against any of them); only the selection macro itself
+(`JANUS_DISPLAY_BUS`/`JANUS_DISPLAY_CONTROLLER`) is conditional on the
+field being set. This selection-as-data shape is deliberately the seam a
+future Janus-provided driver library would bolt into later without a
+schema change (see Open Questions) — same reasoning as the
+already-existing `draw_area_sync`/`draw_area_async`/`display_busy` driver
+contract. The `uint8_t`-per-pixel assumption baked into the runtime today
+(see `janus_runtime.h`'s driver contract comment) still only holds for
+mono/palette panels — a real `rgb565` TFT breaks that assumption at the
+font/fill-rect level too, not just the driver; that rework is still
+unstarted, tracked in Open Questions.
 
 Worked example exercising every kind above, 2 instances each (`device_status.screen.yaml` covers `label`/`button`/`image`/`progress`/`checkbox`; `settings.screen.yaml` covers the rest):
 
@@ -399,11 +474,14 @@ Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new tem
 
 **Open question as it stood before the above:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout — and *what generates that struct* was unchecked. harpia's own C++ backend (protobuf/SOCI) is explicitly too heavy for this target (see "Why this isn't part of the harpia repo" above); the plan was harpia's `ZmqAdapter` for transport, but whether `ZmqAdapter` emits anything usable as a plain C struct (vs. C++-only protobuf classes) hadn't been checked. This was a real dependency for the doc's own step 2 ("DSL → harpia Include + working UI code for a trivial one-screen example") — needed a research pass into `harpia/ZmqAdapter/` before real generator code got written, not something to guess at.
 
-## Input / event dispatch (deferred, sketched — not yet designed in detail or implemented)
+## Input / event dispatch (Stage 6, implemented 2026-08-20)
 
-Everything above is the *output/rendering* half. Input (how a physical touch, encoder turn, or push button actually triggers a widget's `on_press`/`navigate`) is a separate, currently entirely unbuilt layer — same status as real widget rendering in the original doc ("Not solved yet"). Sketch of how it should fit the existing architecture, so it isn't lost:
+Everything above is the *output/rendering* half. Input (how a physical touch, encoder turn, or push button actually triggers a widget's `on_press`/`navigate`) is the other half — touch shipped first, encoder and next/prev/select push buttons landed together in the same pass, all three now real:
 
-- **Input modality is pluggable, not a rewrite, because widget geometry and IDs already live in the generated descriptor table.** Touch input is "hit-test a point against the geometry rects already in `screen_table.gen.c`, find the widget, dispatch its action" — one function using data that already exists. Encoder input instead needs a *focus order* (which widgets are focusable, in what sequence a rotation moves between them) — a genuinely new, currently-unmodeled piece of per-widget data, but additive: an optional `focus_order` field in the generated descriptor, plus a new `janus_input_encoder.c` module in the runtime library, separate from `janus_input_touch.c`. Physical push buttons are a third, likely even simpler modality (discrete GPIO edges mapped directly to an action or a focus-move, no relative movement to track). All three share the same downstream action-dispatch step — only the "which widget got selected" front-end differs per modality. None of the three exist yet; none is required before the others. **Physical push-button navigation does not need to be implemented now** — deferring it costs nothing, since no input modality is built yet and the architecture already has a slot for it as another pluggable module later.
+- **Input modality is pluggable, exactly as sketched below, and turned out not to need a rewrite of anything already built.** Touch is "hit-test a point against the geometry rects already in `screen_table.gen.c`, find the widget, dispatch its action" (`janus_input_touch.c`, unchanged). Encoder/buttons instead need a *focus order* — which widgets are focusable, in what sequence a rotation or a next/prev button moves between them — baked at generation time by Stage 3b's `_assign_focus_order` (a pre-order tree walk assigning sequential indices to the exact same set touch already dispatches on: `box` headers and any leaf with `on_press`/`navigate`; nothing new to author in YAML). All three modalities resolve to the identical `janus_input_result_t` and get dispatched the same way downstream — only the "which widget got selected" front-end differs per modality, confirming the original sketch's core claim.
+- **Encoder and buttons share almost their entire core**, not just the dispatch step: `janus_input_focus.c` (new, fixed library) owns `janus_focus_move`/`janus_focus_activate` — moving/wrapping among a screen's focusable widgets and resolving whatever's currently focused. `janus_input_encoder.h` and `janus_input_buttons.h` are thin, header-only driver contracts (`janus_encoder_poll`/`janus_buttons_poll`, no `.c` — same shape as `draw_area_sync`/`janus_touch_poll`, vendor-implemented); encoder rotation and button NEXT/PREV both just call `janus_focus_move`, encoder click and button SELECT both call `janus_focus_activate`. Push buttons were scoped as **next/prev/select**, not one-button-per-action — a direct-mapped GPIO→action scheme (bypassing focus entirely) was considered and rejected as a separate, larger, human-authored feature, not part of this pass.
+- **Focus needs a visual highlight to be usable at all** — touch doesn't (you're pointing straight at the widget), but nothing pointed at which widget was selected before this landed. `janus_runtime.c` gained `janus_set_focus`/`janus_get_focus`: a thin border drawn over whatever the widget's own `draw_<kind>()` already painted, tile-scoped (same spirit as `janus_toggle_box`'s redraw, not a full repaint), cleared automatically on `janus_switch_screen` so a stale pointer from the outgoing screen is never redrawn onto the new one.
+- **Which modality a project uses is declared, not baked into every project unconditionally.** `main.c`'s event loop used to poll touch unconditionally, which would have forced every project to implement drivers for hardware it might not have once a second modality existed. `app.yaml`'s `input: { modality: touch | encoder | buttons }` (default `touch`) picks which of three static scaffolds — `main_touch.c.tmpl` / `main_encoder.c.tmpl` / `main_buttons.c.tmpl` — Stage 8 writes.
 - **Wiring a button to a user-defined action reuses the schema-ownership split already established for harpia Includes**, applied to actions: Janus generates a stable, cheap-to-regenerate **action ID enum** (one entry per distinct `on_press`/`navigate` value across all screens, e.g. `JANUS_ACTION_REBOOT`), and each widget descriptor carries `.action = JANUS_ACTION_REBOOT` (an int, not a string). The human writes **one** hand-maintained, never-regenerated function — `void janus_handle_action(janus_action_t action)` — with one `case` per action, exactly like the human's root `.harpia` file: Janus owns the enum (regenerated in full every time, trivial since it's just names), the human owns the dispatch body. Adding a new action-producing widget means the enum picks up one new value and the human adds one `case` — not a regeneration of "the entire action set," and never touches the human's existing cases.
 
 ## Open questions (Stage 1 scoping — not yet decided)
@@ -421,6 +499,32 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   auto-sizing at Janus's *generation* time (one geometry table baked per
   locale, using that locale's glyph atlas metrics), not at device draw time.
   Not needed until font/glyph packing (already "Stage 2+", unbuilt) exists.
+- **Display driver body — RESOLVED (2026-08-20): human-owned for now.**
+  `bus`/`controller` selection (spi/i2c/parallel; st7789, st7789v,
+  ili9341, ili9341v, hx8357, gc9a01, ssd1306, sh1106, il3820, il0373) is
+  implemented as of the same date — see "Display config" above: parsed,
+  validated, emitted as data in `janus_display_config.gen.h`. What's
+  **not** generated is the driver body itself (the actual SPI/I2C register
+  sequences, init code) — same split as `janus_handle_action`: Janus owns
+  the selection, the human owns the implementation, one hand-written
+  `src/display_driver.c` per project. **If this ever needs to change to
+  Janus shipping known-controller drivers itself, it must land as a
+  bolt-on** — an added library a project can opt into without the schema
+  changing underneath it, not a rewrite of the human-owned path. The
+  `JANUS_DISPLAY_BUS`/`JANUS_DISPLAY_CONTROLLER` selection macros already
+  emitted are exactly the seam such a library would switch on, so this is
+  additive whenever it happens, not a redesign.
+- **Pixel-format rework — still open, unblocked by the above.**
+  `janus_runtime.h`'s driver contract is `uint8_t` per pixel today
+  (mono/palette only) — `st7789`/`ili9341`/`hx8357`/`gc9a01` are 16-bit
+  RGB565, `ssd1306`/`sh1106` are 1-bit OLED, `il3820`/`il0373` are e-paper
+  (slow refresh, partial-update APIs) — none of the three fit the same
+  buffer shape, so a real non-mono panel isn't just a driver swap, it
+  touches the font/fill-rect layer too. Not started; not blocking anything
+  today since `color` is declarable without the runtime enforcing it yet.
+  Expect one dedicated test file per controller/driver once real
+  implementation starts, mirroring how per-kind test files are split
+  today.
 - **Janus's own toolchain — no longer open.** Python, confirmed in use
   throughout. Test strategy: `unittest` for the Python pipeline (Stages
   1–3b, 5, 8; 83+ tests), CMake/`ctest` for the C runtime (Stage 4/6).
@@ -450,12 +554,21 @@ on the summary below if `DESIGN.md`'s exact wording ever matters.
 
 ## Suggested next steps for whoever picks this up
 
+Stale as a checklist — steps 1–3 are long done (DSL is YAML, embedded C
+works end-to-end, repo scaffolding exists) — kept for the historical
+record of the original plan, not as live guidance. See the top-of-file
+Status line for what's actually next.
+
 1. Decide the concrete screen/widget DSL syntax (or explicitly adopt YAML
    as a v1 placeholder and say so).
-2. Pick the first target (embedded C or JS/Node) and scope just that one
-   end-to-end: DSL → harpia Include + working UI code for a trivial
-   one-screen, one-bound-field example.
+2. ~~Pick the first target (embedded C or JS/Node) and scope just that one~~
+   ~~end-to-end: DSL → harpia Include + working UI code for a trivial~~
+   ~~one-screen, one-bound-field example.~~ Done for embedded C; JS/Node
+   was dropped entirely (2026-08-20), not just deferred — see "JS/Node web
+   frontend" above.
 3. Stand up Janus's own repo scaffolding (language/toolchain, tests, CI) —
    none of this exists yet.
 4. Only after a first target works end-to-end, revisit the "read access to
-   hand-written harpia files" and second-target questions above.
+   hand-written harpia files" question above (the "second-target"
+   question this originally paired it with no longer applies — there is
+   no second target).
