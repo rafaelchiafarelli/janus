@@ -19,7 +19,6 @@ from .emit_embedded_c import (
     emit_display_config,
     emit_screen,
     screen_bound_messages,
-    screen_on_press_actions,
     screen_var,
 )
 
@@ -39,9 +38,13 @@ def render_screen_source(
     sv = screen_var(screen.name)
     body = emit_screen(screen, screen_index_by_name)
 
-    includes = []
-    if screen_on_press_actions(screen):
-        includes.append('#include "janus_actions.gen.h"')
+    # Always included: every widget's initializer references
+    # JANUS_ACTION_NONE (emit_embedded_c.py's _widget_init), regardless of
+    # whether this screen has any real on_press action — a screen with none
+    # would otherwise fail to compile for using a sentinel it never
+    # declared. janus_actions.gen.h is itself unconditional (generate.py's
+    # write_project), so this never references a file that doesn't exist.
+    includes = ['#include "janus_actions.gen.h"']
     if screen_bound_messages(screen):
         includes.append('#include "janus_bindings.gen.h"')
     extra_includes = "\n".join(includes)

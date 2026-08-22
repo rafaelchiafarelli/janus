@@ -75,6 +75,15 @@ class TestEmitFiles(unittest.TestCase):
         out = render_screen_source(self.app.screens[0], screen_index_map(self.app))
         self.assertIn('#include "janus_actions.gen.h"', out)
 
+    def test_screen_source_includes_actions_header_even_without_on_press(self) -> None:
+        # Every widget's initializer references JANUS_ACTION_NONE
+        # (emit_embedded_c.py's _widget_init) regardless of whether the
+        # screen has a real on_press action, so the include can't be
+        # conditional on that — a screen with none would otherwise fail to
+        # compile for using a sentinel it never declared.
+        out = render_screen_source(self.app.screens[1])
+        self.assertIn('#include "janus_actions.gen.h"', out)
+
     def test_screen_source_omits_bindings_header_when_screen_has_no_binds(self) -> None:
         from janus.stage3b_embedded_c.emit_embedded_c import screen_index_map
 
@@ -93,7 +102,7 @@ class TestEmitFiles(unittest.TestCase):
         layout_screen(bound_screen)
         out = render_screen_source(bound_screen)
         self.assertIn('#include "janus_bindings.gen.h"', out)
-        self.assertNotIn('#include "janus_actions.gen.h"', out)
+        self.assertIn('#include "janus_actions.gen.h"', out)
 
     def test_actions_header_has_guard(self) -> None:
         out = render_actions_header(self.app)
