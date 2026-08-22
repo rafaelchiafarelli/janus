@@ -3,13 +3,22 @@
  * string values (janus_runtime.c's draw_label/draw_header) — this module
  * only supplies glyph lookup, agnostic to where the string came from.
  *
- * Deliberately minimal coverage: space + 'A'-'Z' (27 glyphs) — enough
- * for this project's own authored strings ("Device Status", "Reboot",
- * "Diagnostics"). No digits/punctuation/lowercase glyphs yet;
- * lowercase input case-folds onto the uppercase glyph instead of going
- * unrendered. Widening the character set is pure data (add rows to
- * GLYPHS in janus_font.c), never touches the blit logic in
- * janus_runtime.c.
+ * Occidental (Latin) coverage: space, digits, common punctuation, true
+ * upper/lowercase letters (no case-folding — 'a' and 'A' are distinct
+ * glyphs), and the Latin-1 accented set needed for Western European
+ * languages (á é í ó ú ñ ü ç à è ì ò ù â ê î ô û ã õ and uppercase
+ * equivalents). At 5x7, an accent mark is a coarse one-row indicator
+ * distinguished by which column(s) it lights, not faithful stroke shape.
+ * A handful of ASCII punctuation marks still have no glyph (`< > [ ] \ ^
+ * \` { | } ~ $`) — not required by anything Janus itself authors or
+ * generates today; widening further is pure data, same as before.
+ *
+ * **Strings must be Latin-1 (ISO-8859-1) encoded, not UTF-8.** This
+ * module maps one `char` to one glyph — a UTF-8 accented character is
+ * multiple bytes and would render as mojibake (each byte looked up and
+ * blitted independently), not decoded as one codepoint. Latin-1 encodes
+ * every accented character in this font as a single byte, matching the
+ * one-`char`-per-`draw_glyph` call in `janus_runtime.c`'s `draw_string`.
  */
 #ifndef JANUS_FONT_H
 #define JANUS_FONT_H

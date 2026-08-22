@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from janus.ir import App
+from janus.ir import App, DisplayConfig
 from janus.stage8_scaffold.scaffold_main import render_main_c, scaffold_main_c
 
 
@@ -69,6 +69,26 @@ class TestRenderMainCButtons(unittest.TestCase):
         self.assertTrue(_balanced_braces(render_main_c("buttons")))
 
 
+class TestRenderMainCNonBlocking(unittest.TestCase):
+    def test_touch_uses_async_render_entry_points(self) -> None:
+        out = render_main_c("touch", "non_blocking")
+        self.assertIn("janus_render_screen_async_start(janus_app.screens[janus_app.active_screen]);", out)
+        self.assertIn("janus_render_poll();", out)
+        self.assertIn("janus_switch_screen_async_start(&janus_app, (uint16_t)hit.navigate_target);", out)
+        self.assertNotIn("janus_render_screen(janus_app.screens[janus_app.active_screen]);", out)
+
+    def test_encoder_and_buttons_also_use_async_render_entry_points(self) -> None:
+        for modality in ("encoder", "buttons"):
+            out = render_main_c(modality, "non_blocking")
+            self.assertIn("janus_render_screen_async_start(screen);", out)
+            self.assertIn("janus_render_poll();", out)
+            self.assertIn("janus_switch_screen_async_start(&janus_app, (uint16_t)hit.navigate_target);", out)
+
+    def test_braces_balance(self) -> None:
+        for modality in ("touch", "encoder", "buttons"):
+            self.assertTrue(_balanced_braces(render_main_c(modality, "non_blocking")))
+
+
 class TestScaffoldMainC(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -92,6 +112,15 @@ class TestScaffoldMainC(unittest.TestCase):
         encoder_app = App(screens=[], input_modality="encoder")
         scaffold_main_c(encoder_app, self.path)
         self.assertIn("janus_encoder_poll", self.path.read_text())
+
+    def test_scaffolds_blocking_when_no_display_declared(self) -> None:
+        scaffold_main_c(self.app, self.path)
+        self.assertIn("janus_render_screen(janus_app.screens[janus_app.active_screen]);", self.path.read_text())
+
+    def test_scaffolds_non_blocking_when_the_display_declares_it(self) -> None:
+        app = App(screens=[], display=DisplayConfig(width=240, height=320, color="mono", render_mode="non_blocking"))
+        scaffold_main_c(app, self.path)
+        self.assertIn("janus_render_screen_async_start", self.path.read_text())
 
 
 if __name__ == "__main__":

@@ -26,10 +26,10 @@ static void render_and_summarize(const char *label) {
     printf("%s: %u draw_area_sync call(s)\n", label, (unsigned)mock_driver_log_count);
     for (uint16_t i = 0; i < mock_driver_log_count; i++) {
         printf(
-            "  [%2u] x=%3u y=%3u w=%3u h=%3u fill=0x%02x\n", i,
+            "  [%2u] x=%3u y=%3u w=%3u h=%3u fill=0x%04x\n", i,
             mock_driver_log[i].x, mock_driver_log[i].y,
             mock_driver_log[i].w, mock_driver_log[i].h,
-            mock_driver_log[i].sample_byte
+            mock_driver_log[i].sample_pixel
         );
     }
 }

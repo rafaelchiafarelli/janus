@@ -9,6 +9,7 @@ seeing every screen at once.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,9 @@ _VALID_DISPLAY_CONTROLLERS = {
     "gc9a01", "ssd1306", "sh1106", "il3820", "il0373",
 }
 _VALID_INPUT_MODALITIES = {"touch", "encoder", "buttons"}
+_VALID_RENDER_MODES = {"blocking", "non_blocking"}
 _REQUIRES_RANGE = {"progress", "gauge", "slider"}
+_HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _PY_TYPE_FOR_BIND_TYPE: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "int": int,
@@ -54,6 +57,14 @@ def _parse_range(data: dict[str, Any] | None) -> tuple[float, float] | None:
     if data is None:
         return None
     return (data["min"], data["max"])
+
+
+def _parse_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not _HEX_COLOR_RE.match(value):
+        raise ValueError(f"invalid color {value!r} — must match #RRGGBB (6 hex digits)")
+    return value
 
 
 def _check_radiobutton_value(radiobutton: Widget, bind_type: str) -> None:
@@ -90,6 +101,8 @@ def _parse_widget(data: dict[str, Any]) -> Widget:
         collapsible=data.get("collapsible", False),
         default_expanded=data.get("default_expanded", True),
         layout=data.get("layout"),
+        color=_parse_color(data.get("color")),
+        bg=_parse_color(data.get("bg")),
         children=[_parse_widget(c) for c in data.get("children", [])],
     )
     _validate_widget(widget)
@@ -140,8 +153,16 @@ def _parse_display(data: dict[str, Any] | None) -> DisplayConfig | None:
             f"invalid display controller {controller!r} — must be one of "
             f"{sorted(_VALID_DISPLAY_CONTROLLERS)}"
         )
+    render_mode = data.get("render_mode", "blocking")
+    if render_mode not in _VALID_RENDER_MODES:
+        raise ValueError(
+            f"invalid display render_mode {render_mode!r} — must be one of "
+            f"{sorted(_VALID_RENDER_MODES)}"
+        )
     w, h = _parse_size(data["size"])
-    return DisplayConfig(width=w, height=h, color=color, bus=bus, controller=controller)
+    return DisplayConfig(
+        width=w, height=h, color=color, bus=bus, controller=controller, render_mode=render_mode
+    )
 
 
 def _parse_input_modality(data: dict[str, Any] | None) -> str:

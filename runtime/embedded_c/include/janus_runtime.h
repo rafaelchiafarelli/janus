@@ -26,6 +26,16 @@ typedef enum {
 
 typedef struct { int16_t x, y, w, h; } janus_rect_t;
 
+/* RGB565: 5 bits red, 6 bits green, 5 bits blue, packed into one 16-bit
+ * value — see emit_embedded_c.py's _pack_rgb565 for how a widget's
+ * authored "#RRGGBB" becomes one of these at generation time. Stage 3b
+ * emits one of these two literally whenever a widget's `color`/`bg` is
+ * left unauthored, so every generated descriptor always carries a real
+ * color — no runtime-side fallback branch needed. */
+#define JANUS_COLOR_DEFAULT_FG ((uint16_t)0x0000)   /* black */
+#define JANUS_COLOR_DEFAULT_BG ((uint16_t)0xffff)   /* white */
+#define JANUS_COLOR_LED_WARN   ((uint16_t)0xfd80)   /* amber (255,176,0) — led's third state has no authored color (v1) */
+
 typedef struct {
     uint16_t field_offset;         /* offsetof() into bound_struct; 0 if unbound */
     janus_field_type_t field_type;
@@ -82,6 +92,8 @@ typedef struct janus_widget_desc {
     janus_action_id_t action;          /* on_press only; JANUS_ACTION_ID_NONE otherwise */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
     uint8_t focus_order;               /* encoder/button traversal order, or JANUS_FOCUS_NONE; touch ignores this */
+    uint16_t color;                    /* RGB565 ink/foreground/on-state fill — see JANUS_COLOR_DEFAULT_FG */
+    uint16_t bg_color;                 /* RGB565 background/off-state fill — see JANUS_COLOR_DEFAULT_BG */
     const struct janus_widget_desc *children;
     uint16_t child_count;
 } janus_widget_desc_t;
@@ -100,20 +112,39 @@ typedef struct {
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
 
-/* driver contract, carried forward from the deleted Copilot branch's DESIGN.md.
+/* driver contract, carried forward from the original prototype's DESIGN.md.
  * Implemented by vendor/host code, never by the fixed library itself.
- * `pixels` is `w * h` bytes, row-major (row 0 first, left-to-right within
- * a row) — never stated explicitly before janus_font.c became the first
- * caller to draw non-uniform content; every existing fill_rect() call is
- * a uniform memset, so it never depended on an orientation either way. */
-void draw_area_sync(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *pixels);
-bool draw_area_async(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *pixels);
+ * `pixels` is `w * h` RGB565 values, row-major (row 0 first, left-to-right
+ * within a row) — never stated explicitly before janus_font.c became the
+ * first caller to draw non-uniform content; every existing fill_rect()
+ * call is a uniform fill, so it never depended on an orientation either
+ * way. Pixel type is `uint16_t` (RGB565) — this driver contract targets
+ * the RGB565 hardware Janus generates for today; a mono/palette or
+ * e-paper target would need its own pixel type and isn't handled by this
+ * header (see Janus.md's Open Questions). */
+void draw_area_sync(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
+bool draw_area_async(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
 bool display_busy(void);
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
+
+/* Non-blocking (polled) rendering — app.yaml's `display.render_mode:
+ * non_blocking` (default `blocking`). `janus_render_screen_async_start`
+ * computes the screen's draw operations up front (a CPU-only pass, no
+ * driver calls) and `janus_render_poll` submits exactly one of them per
+ * call via `draw_area_async`, backing off (without advancing) while
+ * `display_busy()` — see janus_runtime.c for why this is a queue built
+ * once, not a resumable traversal. Call `janus_render_poll` repeatedly
+ * (e.g. once per event-loop iteration) until it returns false, meaning
+ * the screen is fully drawn. `janus_switch_screen_async_start` is
+ * `janus_switch_screen`'s non-blocking counterpart, for the same
+ * `navigate` handling under `render_mode: non_blocking`. */
+void janus_render_screen_async_start(const janus_screen_desc_t *screen);
+bool janus_render_poll(void);
+void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index);
 
 /* box's current expand/collapse bit, from the runtime-owned state table
  * (the descriptor itself is static const — see janus_runtime.c). Exposed

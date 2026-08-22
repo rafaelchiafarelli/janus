@@ -85,5 +85,25 @@ class TestRadiobuttonValueValidation(unittest.TestCase):
         screen_from_dict(data)  # must not raise
 
 
+class TestColorValidation(unittest.TestCase):
+    def test_malformed_hex_color_rejected(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "hi", "color": "red"}])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_short_hex_color_rejected(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "hi", "color": "#fff"}])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_valid_hex_color_and_bg_accepted(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "hi", "color": "#FF0000", "bg": "#00ff00"}])
+        screen_from_dict(data)  # must not raise
+
+    def test_color_omitted_is_fine(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "hi"}])
+        screen_from_dict(data)  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

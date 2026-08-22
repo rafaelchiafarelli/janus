@@ -6,7 +6,7 @@ exactly what it receives, what it produces, who owns the output, and whether
 it gets regenerated. Read `Janus.md` first for *why*; this file is *what*,
 precisely enough to implement against.
 
-Status (updated 2026-08-20): Stages 1–8 are implemented and tested for the
+Status (updated 2026-08-22): Stages 1–8 are implemented and tested for the
 embedded-C target (see each stage's "Implementation status" / "Owner" —
 `examples/host_demo` builds and runs end-to-end, including Janus-generated
 bindings and glyph rendering for both static text and live bound string
@@ -17,10 +17,19 @@ already gives direct backend access, so a generated frontend on top of it
 wasn't needed. **Stage 6 (encoder/button input dispatch) is now also
 implemented** — touch, encoder, and next/prev/select push buttons all
 work, sharing one focus core (`janus_input_focus.c`); see Stage 6 below.
-Still genuinely open: the pixel-format rework for non-mono display
-controllers (RGB565/e-paper) and per-controller driver bodies, both
-blocked on real hardware to build against — see Janus.md's Open
-Questions. Where a shape isn't nailed down, it's marked **OPEN**.
+**Target hardware is RGB565**, and four more gaps closed the same day: the
+runtime speaks real `uint16_t` RGB565 throughout (driver contract, tile
+buffer, every `draw_<kind>`), colors are authored per-widget in YAML
+(`color`/`bg`) instead of hardcoded runtime placeholders, the font widened
+from space+A-Z to full occidental Latin coverage, `janus-generate
+--vendor-runtime DIR` copies the fixed runtime library into a generated
+project instead of requiring a Janus repo checkout alongside it, and
+non-blocking (polled) rendering is real (`display.render_mode:
+non_blocking`, Stage 4's draw-op queue). Still genuinely open:
+per-controller driver bodies, blocked on real hardware to build against
+(design already settled — see Janus.md's Open Questions), and
+screen-size/resolution beyond the placeholder default (not yet scoped).
+Where a shape isn't nailed down, it's marked **OPEN**.
 
 ## Ownership vocabulary (used throughout)
 
@@ -359,9 +368,15 @@ built by `emit_screen`, one initializer line per widget, exactly like
 
 ## Stage 4 — Runtime library (`runtime/embedded_c/`)
 
-**Receives:** nothing generated. Hand-written once, shipped with Janus,
-vendored into every generated project (copy or build-system dependency —
-**OPEN**, not yet decided which).
+**Receives:** nothing generated. Hand-written once, shipped with Janus.
+**Vendoring — RESOLVED (2026-08-22): copy-based.** `janus-generate
+--vendor-runtime DIR` copies the whole `runtime/embedded_c` tree
+(`CMakeLists.txt`, `include/`, `src/`, `tests/`, `host_mock/` — everything
+except the `build/` CMake-artifact directory) into `DIR` via
+`janus/writer.py`'s `copy_tree_if_changed`, one file at a time through the
+same content-diff-before-write discipline as every other Janus output. A
+project's copy is, for all intents and purposes, now part of that
+project — Janus itself isn't a runtime dependency of it afterward.
 
 **Produces — the stable C API every generated file and every human file
 compiles against** (`runtime/embedded_c/include/janus_runtime.h`, which
@@ -406,6 +421,14 @@ typedef struct {
     float range_min, range_max;    /* progress/gauge only */
 } janus_bind_t;
 
+/* RGB565: 5 bits red, 6 bits green, 5 bits blue, packed into one 16-bit
+ * value — see emit_embedded_c.py's _pack_rgb565. Stage 3b emits one of
+ * these two literally whenever a widget's `color`/`bg` is left
+ * unauthored, so every generated descriptor always carries a real color. */
+#define JANUS_COLOR_DEFAULT_FG ((uint16_t)0x0000)   /* black */
+#define JANUS_COLOR_DEFAULT_BG ((uint16_t)0xffff)   /* white */
+#define JANUS_COLOR_LED_WARN   ((uint16_t)0xfd80)   /* amber — led's third state has no authored color (v1) */
+
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;
@@ -417,6 +440,8 @@ typedef struct janus_widget_desc {
     janus_action_id_t action;          /* on_press only; 0 otherwise (== JANUS_ACTION_NONE by convention) */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
     uint8_t focus_order;               /* encoder/button traversal order, or JANUS_FOCUS_NONE; touch ignores this */
+    uint16_t color;                    /* RGB565 ink/foreground/on-state fill — authored per-widget (`color:`) */
+    uint16_t bg_color;                 /* RGB565 background/off-state fill — authored per-widget (`bg:`) */
     const struct janus_widget_desc *children;
     uint16_t child_count;
 } janus_widget_desc_t;
@@ -435,9 +460,12 @@ typedef struct {
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
 
-/* driver contract, carried forward from the deleted Copilot branch's DESIGN.md */
-void draw_area_sync(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *pixels);
-bool draw_area_async(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *pixels);
+/* driver contract, carried forward from the original prototype's DESIGN.md.
+ * Pixel type is uint16_t (RGB565) — this targets the RGB565 hardware
+ * Janus generates for today; mono/palette or e-paper would need their own
+ * pixel type (see Janus.md's Open Questions). */
+void draw_area_sync(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
+bool draw_area_async(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
 bool display_busy(void);
 
 /* runtime entry points */
@@ -449,6 +477,16 @@ bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads th
 /* Stage 6: encoder/button focus highlight — see Stage 6 below. */
 void janus_set_focus(const janus_widget_desc_t *widget);   /* NULL clears it */
 const janus_widget_desc_t *janus_get_focus(void);
+
+/* Non-blocking (polled) rendering — display.render_mode: non_blocking
+ * (Stage 8). janus_render_screen_async_start builds a draw-op queue up
+ * front (a CPU-only pass, no driver calls — every draw_<kind> function
+ * runs unchanged, just enqueuing instead of drawing); janus_render_poll
+ * drains one op per call via draw_area_async, backing off (without
+ * advancing) while display_busy(). See "Non-blocking rendering" below. */
+void janus_render_screen_async_start(const janus_screen_desc_t *screen);
+bool janus_render_poll(void);
+void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index);
 ```
 
 **Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
@@ -489,32 +527,36 @@ focusable, so the redraw never needs `bind` data — `read_bound_value`/
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
 DESIGN.md's actual rendering logic lives, finally for real (not the
-deleted Copilot stub). Scope note: only the synchronous path
-(`draw_area_sync`) is driven by the traversal so far — `draw_area_async`/
-`display_busy` are declared (any driver must still provide them) but not
-yet called by anything; polled/non-blocking scheduling is real future
-work. Leaf rendering is a kind-distinct solid fill of `geometry`, except
-`progress`/`gauge` (fraction of range) and `checkbox` (checked/unchecked)
-which read the *live* bound value and vary the fill accordingly — the
-concrete difference from the deleted Copilot stub's "empty buffer
-regardless of screen contents."
+original prototype's stub). The blocking path (`janus_render_screen`)
+drives `draw_area_sync` directly; the non-blocking path
+(`janus_render_screen_async_start`/`janus_render_poll`, see below) drives
+`draw_area_async`/`display_busy` instead — both are real now (2026-08-22).
+Leaf rendering fills `geometry` with the widget's own authored `.color`/
+`.bg_color` (RGB565, see "Color" above), except `progress`/`gauge`/
+`slider` (fraction of range, `.color` for the filled portion) and
+`checkbox`/`toggle`/`badge` (checked/unchecked) which read the *live*
+bound value and vary the fill accordingly — the concrete difference from
+the original prototype's "empty buffer regardless of screen contents"
+stub.
 
-**Glyph rendering (2026-08-19, slice 1; slice 2 completed 2026-08-20) —
-both static text and live bound strings.** `label`/`header`/`button`/
-box-header draw real characters over that same solid fill when
-`.static_text` is non-`NULL`, via a fixed-library module (`janus_font.h`/
-`.c`, alongside `janus_input_touch.c` as another pluggable piece — same
-"one file per concern" pattern): a 5×7 bitmap font covering space +
-`A`-`Z` only (27 glyphs; lowercase case-folds onto the uppercase glyph,
-digits/punctuation have no glyph yet — a real coverage gap, not a bug,
-widened by adding rows to `janus_font.c`'s table, nothing else).
-`draw_string()` blits left-aligned, vertically centered, and clips (never
-wraps or shrinks the font) once a character would run past the widget's
-`geometry` — Janus never auto-sizes text at generation time (`Janus.md`'s
-deferred auto-sizing note), so overflow is an expected v1 case:
-`examples/host_demo`'s own `diagnostics_box` (24px wide) clips
-"Diagnostics" down to "Diag" for exactly this reason, verified against
-the real generated output, not just unit tests.
+**Glyph rendering (2026-08-19, slice 1; slice 2 completed 2026-08-20;
+widened to full occidental Latin coverage 2026-08-22) — both static text
+and live bound strings.** `label`/`header`/`button`/box-header draw real
+characters over that same solid fill when `.static_text` is non-`NULL`,
+via a fixed-library module (`janus_font.h`/`.c`, alongside
+`janus_input_touch.c` as another pluggable piece — same "one file per
+concern" pattern): a 5×7 bitmap font now covering space, digits, common
+punctuation, true upper/lowercase letters (no case-folding), and the
+Latin-1 accented set for Western European languages (123 glyphs total —
+see `janus_font.h`; **strings must be Latin-1-encoded, not UTF-8**, since
+this module maps one `char` to one glyph). `draw_string()` blits
+left-aligned, vertically centered, and clips (never wraps or shrinks the
+font) once a character would run past the widget's `geometry` — Janus
+never auto-sizes text at generation time (`Janus.md`'s deferred
+auto-sizing note), so overflow is an expected v1 case: `examples/
+host_demo`'s own `diagnostics_box` (24px wide) clips "Diagnostics" down to
+"Diag" for exactly this reason, verified against the real generated
+output, not just unit tests.
 
 Stage 3b bakes `.static_text` from `Widget.text` for every widget
 (`emit_embedded_c.py`'s `_widget_init`) — previously `Widget.text` was
@@ -542,6 +584,35 @@ an unpopulated bound string renders as the plain fill — unchanged
 behavior from before this slice, not a special case. `static_text` wins
 if a widget somehow has both (nothing at parse time forbids it) — a
 deterministic tie-break, not new validation.
+
+**Non-blocking rendering (2026-08-22).** DESIGN.md called for "blocking
+AND non-blocking, tiled, polled rendering" — `draw_area_async`/
+`display_busy` were declared in the driver contract from Stage 4's start
+but nothing called them until now. Design: a draw-op queue built once,
+not a resumable traversal — making `fill_rect`'s tile loop or
+`draw_string`'s glyph loop themselves suspendable (so a poll could resume
+mid-loop) would need real coroutine/continuation machinery this runtime
+doesn't have. Instead, `fill_rect` and `draw_glyph` — the only two places
+that ever call the driver — check a file-static `g_async_enqueue` flag;
+when set, they append a `janus_async_op_t` (`{kind: FILL|GLYPH, x, y, w,
+h, color, bg, glyph}`) to a fixed-capacity array (`JANUS_MAX_ASYNC_OPS`,
+256, matching `MOCK_DRIVER_LOG_CAPACITY`'s existing precedent) instead of
+drawing. `janus_render_screen_async_start(screen)` sets the flag, runs the
+*exact same* `janus_render_screen` traversal (every `draw_<kind>`
+function unchanged — nothing about "how to draw a progress bar" is
+duplicated for the async case), then clears it: a pure CPU pass, no
+driver calls, so nothing to block on. `janus_render_poll()` drains one op
+per call: checks `display_busy()` first (returns `true`, not advancing, if
+busy), else fills `g_tile_buffer` from that one op and submits it via
+`draw_area_async`, advancing the cursor; returns `false` once the queue is
+exhausted. `janus_switch_screen_async_start` mirrors `janus_switch_screen`
+but calls the async start instead of the blocking render. Trade-off,
+inherent to "queue then drain": the queue reflects bound values as of
+`_async_start`, not whatever they become while draining — same "snapshot,
+not live" property any queued frame has. `janus_toggle_box`/
+`janus_set_focus` stay synchronous under `non_blocking` too — they're
+small, tile-scoped redraws, not full-screen, so blocking briefly for one
+of them is an accepted trade, not an oversight.
 
 **Owner:** fixed library. **Adding a widget kind = adding one
 `draw_<kind>()` function here + one enum value + one entry in the Python
@@ -719,18 +790,6 @@ plain C struct for embedded — not one consuming the other's output).
 **Implemented** the same day this was scoped — see the follow-up
 research pass and Stage 3b's `.bound_struct` resolution above.
 
-**Bonus finding, corrects `Janus.md`:** that doc's "Origin"/"Salvageable"
-sections state the Copilot `GuiAdapter/` branch was "deleted, both
-locally and on `origin`". It is not — `harpia`'s `dev` branch (current
-`HEAD`, `git ls-files GuiAdapter/`) still has it in full
-(`DESIGN.md`/`README.md`/`runtime/`/`tool/`), unchanged since its
-original commit. Doesn't change any decision already made here (Janus
-staying a standalone repo, the DESIGN.md salvage plan, the "why not part
-of harpia" reasoning all stand on their own merits either way), but
-`Janus.md`'s deletion claim itself is factually wrong and worth fixing
-next time that file's touched, so a future session doesn't rely on
-"memory of what was in it" when the actual code is one `cd` away.
-
 **Follow-up research pass (2026-08-19), scoping the Stage 3b increment
 above — IMPLEMENTED same day, see Stage 3b's `.bound_struct` resolution
 above.** Confirmed the "no plain C struct" finding one level deeper than
@@ -789,15 +848,16 @@ This is the "how does it all actually get compiled" question.
 | file | owner | regenerated? |
 |---|---|---|
 | `runtime/embedded_c/src/janus_runtime.c` | Janus (fixed library) | no — only on Janus version upgrade |
-| `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` | Janus (fixed library) | no — only on Janus version upgrade |
+| `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` / `janus_font.c` | Janus (fixed library) | no — only on Janus version upgrade |
+| `runtime/embedded_c/` itself, under a project — vendored via `janus-generate --vendor-runtime DIR` | Janus (fixed library, copied) | yes, every build (content-diffed — see Stage 4's vendoring note; unchanged files never touch mtime) |
 | `build/generated/{screen}_screen.gen.c` | Janus | yes, every build |
 | `build/generated/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
 | `build/generated/janus_app.gen.c` | Janus | yes, every build |
 | `build/generated/janus_bindings.gen.h/.c` | Janus | yes, every build (struct shape only — instance zero-inits; a human file populates real values at runtime) |
-| `build/generated/janus_display_config.gen.h` | Janus | yes, every build (only if `app.display` set) |
+| `build/generated/janus_display_config.gen.h` | Janus | yes, every build (only if `app.display` set — now also carries `JANUS_DISPLAY_RENDER_MODE`) |
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
-| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`, picked by `app.input_modality`) | no |
+| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`/`main_touch_async.c.tmpl`/`main_encoder_async.c.tmpl`/`main_buttons_async.c.tmpl`, picked by `app.input_modality` × `app.display.render_mode`) | no |
 | `src/display_driver.c` | human/vendor | no |
 
 **Runtime call flow, boot to first render:**
@@ -837,6 +897,16 @@ This is the "how does it all actually get compiled" question.
      using `geometry` vs `geometry_collapsed` — a tile-scoped redraw, not
      a full screen repaint, per DESIGN.md's tiling model.
 
+**Under `render_mode: non_blocking`** (the `*_async.c.tmpl` scaffolds):
+step 3 becomes `janus_render_screen_async_start(...)` (builds the draw-op
+queue, no driver calls yet), and the event loop calls `janus_render_poll()`
+once per iteration *alongside* the input poll (not instead of it) — one
+loop iteration does at most one render op and checks for at most one input
+event, so neither blocks the other. Step 5's `JANUS_INPUT_NAVIGATE` case
+calls `janus_switch_screen_async_start` instead of `janus_switch_screen`.
+`JANUS_INPUT_TOGGLE_BOX` and focus-move/-activate stay exactly as above —
+synchronous, tile-scoped, unaffected by render mode.
+
 ---
 
 ## Ownership quick reference
@@ -851,7 +921,7 @@ This is the "how does it all actually get compiled" question.
 | `janus_app.gen.c` | Janus | every run |
 | `janus_bindings.gen.h/.c` | Janus | every run (zero-init only — see Stage 8) |
 | `janus_display_config.gen.h` | Janus | every run (only if `app.display` set) |
-| `runtime/embedded_c/*` | Janus (fixed library) | on Janus upgrade only |
+| `runtime/embedded_c/*` | Janus (fixed library) | on Janus upgrade only (or every run if vendored via `--vendor-runtime` — content-diffed, so an unchanged file's mtime is untouched) |
 | `src/janus_actions.c` | human | never |
 | `src/main.c` | human | never |
 | `src/display_driver.c` | human/vendor | never |

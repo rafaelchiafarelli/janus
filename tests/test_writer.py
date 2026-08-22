@@ -2,7 +2,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from janus.writer import write_if_changed
+from janus.writer import copy_tree_if_changed, write_if_changed
 
 
 class TestWriteIfChanged(unittest.TestCase):
@@ -33,6 +33,34 @@ class TestWriteIfChanged(unittest.TestCase):
         write_if_changed(path, "hello")
         self.assertTrue(write_if_changed(path, "goodbye"))
         self.assertEqual(path.read_text(), "goodbye")
+
+
+class TestCopyTreeIfChanged(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.src = Path(self._tmp.name) / "src"
+        self.dest = Path(self._tmp.name) / "dest"
+        (self.src / "nested").mkdir(parents=True)
+        (self.src / "top.txt").write_text("top")
+        (self.src / "nested" / "deep.txt").write_text("deep")
+
+    def test_copies_every_file_preserving_layout(self) -> None:
+        written = copy_tree_if_changed(self.src, self.dest)
+        self.assertEqual((self.dest / "top.txt").read_text(), "top")
+        self.assertEqual((self.dest / "nested" / "deep.txt").read_text(), "deep")
+        self.assertEqual(len(written), 2)
+
+    def test_second_run_with_no_changes_writes_nothing(self) -> None:
+        copy_tree_if_changed(self.src, self.dest)
+        written = copy_tree_if_changed(self.src, self.dest)
+        self.assertEqual(written, [])
+
+    def test_changing_one_file_rewrites_only_that_one(self) -> None:
+        copy_tree_if_changed(self.src, self.dest)
+        (self.src / "top.txt").write_text("changed")
+        written = copy_tree_if_changed(self.src, self.dest)
+        self.assertEqual(written, [self.dest / "top.txt"])
 
 
 if __name__ == "__main__":

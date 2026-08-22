@@ -3,11 +3,29 @@ import unittest
 from janus.stage3b_embedded_c.emit_embedded_c import (
     emit_actions_header,
     emit_app_table,
+    emit_display_config,
     emit_screen,
     screen_index_map,
 )
-from janus.ir import App, NavTarget, Screen, Widget
+from janus.ir import App, DisplayConfig, NavTarget, Screen, Widget
 from janus.stage2_layout.layout import layout_screen
+
+
+class TestEmitDisplayConfigRenderMode(unittest.TestCase):
+    def test_default_render_mode_emits_blocking_selection(self) -> None:
+        out = emit_display_config(DisplayConfig(width=240, height=320, color="rgb565"))
+        self.assertIn("#define JANUS_DISPLAY_RENDER_MODE JANUS_DISPLAY_RENDER_MODE_BLOCKING", out)
+
+    def test_non_blocking_render_mode_emits_its_own_selection(self) -> None:
+        out = emit_display_config(
+            DisplayConfig(width=240, height=320, color="rgb565", render_mode="non_blocking")
+        )
+        self.assertIn("#define JANUS_DISPLAY_RENDER_MODE JANUS_DISPLAY_RENDER_MODE_NON_BLOCKING", out)
+
+    def test_both_render_mode_values_are_always_defined(self) -> None:
+        out = emit_display_config(DisplayConfig(width=240, height=320, color="rgb565"))
+        self.assertIn("#define JANUS_DISPLAY_RENDER_MODE_BLOCKING", out)
+        self.assertIn("#define JANUS_DISPLAY_RENDER_MODE_NON_BLOCKING", out)
 
 
 class TestActionsAndAppTable(unittest.TestCase):

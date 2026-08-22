@@ -1,22 +1,23 @@
 # Janus — a pre-harpia GUI schema + code generator
 
-> **Status (updated 2026-08-20): the embedded-C target is implemented and
-> working end-to-end**, not "design only" anymore — see `architecture.md`'s
-> per-stage "Implementation status." Glyph rendering now covers both
-> static `text:` and live bound string values (space + `A`-`Z` only, see
-> `janus_font.h`) — the "Stage 2+" line below is partially stale as a
-> result, kept for the record. Also landed the same date: `display:`
-> config (`size`/`color`/`bus`/`controller` — see "Display config" below).
-> **The JS/Node target is dropped**, also 2026-08-20 (see "JS/Node web
-> frontend"): harpia's own generated REST/gRPC already gives direct
-> backend access, so a generated frontend on top of it wasn't needed after
-> all — embedded C is now Janus's only target. **Encoder/button input
-> dispatch (Stage 6) also landed the same date** — see "Input / event
-> dispatch": touch, encoder, and next/prev/select push buttons are all
-> real now, sharing one focus core (`janus_input_focus.c`). What's left:
-> the pixel-format rework for non-mono display controllers (RGB565/e-paper
-> — see "Display config"'s Open Questions), and per-controller driver
-> bodies once real hardware is in hand. This
+> **Status (updated 2026-08-22): the target hardware is RGB565**, and the
+> runtime now speaks it for real — every widget's fill/text color is
+> authored per-widget in YAML (`color`/`bg`, hex `#RRGGBB`, packed to
+> RGB565 at generation time) and drawn through the actual driver contract
+> (`uint16_t` pixels), not a hardcoded mono placeholder byte. Landed the
+> same date: **font coverage widened from space+A-Z to full occidental
+> Latin** (digits, punctuation, true lowercase, Latin-1 accents — see
+> `janus_font.h`; strings must be Latin-1-encoded, not UTF-8), **copy-based
+> vendoring** (`janus-generate --vendor-runtime DIR` copies the fixed
+> runtime library into a project so it's no longer only usable from inside
+> the Janus checkout — see "Embedded-C code generation architecture"), and
+> **non-blocking (polled) rendering** (`display.render_mode: non_blocking`
+> — `janus_render_screen_async_start`/`janus_render_poll`, draining one
+> `draw_area_async` call per poll instead of blocking for a whole screen;
+> see `architecture.md` Stage 4). What's left: per-controller driver
+> bodies once real hardware is in hand (design already settled — see
+> Open Questions), and screen-size/resolution beyond the placeholder
+> 240×320 default (flagged, not yet scoped). This
 > file is still meant to let a fresh session pick this project up quickly —
 > read it whole before writing any code. A visual companion to the
 > "Embedded-C code generation architecture" and "Input / event dispatch"
@@ -38,36 +39,37 @@ Janus is the gate between them, not a merger of the two.
 
 harpia (a separate project — a `.harpia` → C++ code generator: protobuf,
 SOCI-backed SQL/CRUDL, JSON/XML/SOAP/REST/gRPC/ZMQ, generated tests) needed
-a GUI generator for small/constrained devices. GitHub Copilot's first
-attempt lived on harpia's `gui-dsl-prototype` branch (`GuiAdapter/`).
-harpia's `NEXT_SESSION.md` has a one-line pointer back to this file.
+a GUI generator for small/constrained devices. An earlier prototype
+(GitHub Copilot-authored) explored this on harpia's `gui-dsl-prototype`
+branch, at `GuiAdapter/` — still present in full on harpia's `dev` branch
+today (`DESIGN.md`/`README.md`/`runtime/`/`tool/`, unchanged since its
+original commit; an earlier draft of this doc wrongly claimed it had been
+deleted). harpia's `NEXT_SESSION.md` has a one-line pointer back to this
+file.
 
-**Correction (2026-08-19):** earlier drafts of this doc claimed
-`GuiAdapter/` was deleted from harpia, both locally and on `origin`. It
-isn't — confirmed still present in full on harpia's `dev` branch (current
-`HEAD`) during Stage 7's research pass. Doesn't change anything decided
-below (the verdict, the "why not part of harpia" reasoning, and the
-salvage plan all stand on their own merits regardless), but "Salvageable
-from the deleted Copilot branch" further down is stale in the same way —
-treat both as "not deleted, just not reused," not "gone."
+It wasn't reused as architecture. `GuiAdapter/` was named and located like
+one of harpia's real backends (`JsonAdapter/`, `XmlAdapter/`, `ZmqAdapter/`,
+`Database/`), all of which parse the *same* already-built `.harpia`
+Message/Variable tree — but its generator (`GuiAdapter/tool/generator.py`)
+parsed a totally separate, bespoke YAML file and never touched harpia's
+lexer/parser at all. It looked integrated; it wasn't. Its actual code was
+a self-described "Stage 1" stub: `gui_render_blocking` drew an empty,
+unfilled tile buffer regardless of screen contents — no widget traversal,
+no font rendering, no event dispatch. Promised in its own `DESIGN.md`
+§11–12 but never delivered: a host mock driver for testing, any CMake
+integration, any golden tests. The prototype's `generator.py` itself
+(~90 lines of throwaway struct-emission code, no error handling, no schema
+derivation, no connection to any real input/output contract Janus needs)
+and its bespoke YAML format and `GuiAdapter/` naming/location were all
+discarded outright — reusing any of those would have repeated exactly the
+"looks integrated, isn't" problem this project exists to avoid.
 
-## Verdict on the Copilot prototype (why it wasn't reused as architecture)
-
-- It lived at `GuiAdapter/` — named and located like one of harpia's real
-  backends (`JsonAdapter/`, `XmlAdapter/`, `ZmqAdapter/`, `Database/`), all
-  of which parse the *same* already-built `.harpia` Message/Variable tree —
-  but its generator (`GuiAdapter/tool/generator.py`) parsed a totally
-  separate, bespoke YAML file and never touched harpia's lexer/parser at
-  all. It looked integrated; it wasn't.
-- Its actual code was a self-described "Stage 1" stub:
-  `gui_render_blocking` drew an empty, unfilled tile buffer regardless of
-  screen contents — no widget traversal, no font rendering, no event
-  dispatch. Promised in its own `DESIGN.md` §11–12 but never delivered: a
-  host mock driver for testing, any CMake integration, any golden tests.
-- Its `DESIGN.md` (runtime contract, memory budget, tiling model, driver
-  contract) is genuinely solid and worth carrying forward almost as-is into
-  Janus's embedded-C target spec — see "Salvageable" below. The problem was
-  never the runtime design, it was the integration story.
+What *was* worth keeping, and is carried forward almost as-is: its
+`DESIGN.md`'s runtime contract, memory budget, and tiling model — see
+"Embedded C runtime" below for where that landed (240×320-class displays,
+~2 KiB RAM budget, blocking/non-blocking tiled rendering, the
+`draw_area_sync`/`draw_area_async`/`display_busy` driver contract). The
+problem was never the runtime design, it was the integration story.
 
 ## Why this isn't part of the harpia repo or its grammar
 
@@ -152,7 +154,7 @@ Two targets, deliberately asymmetric — they don't share a backend story.
 
 For small/constrained devices — the original motivating use case.
 
-- Carries forward Copilot's `DESIGN.md` almost as-is: 240×320-class
+- Carries forward the prototype's `DESIGN.md` almost as-is: 240×320-class
   displays, ~2 KiB RAM budget for transient buffers, blocking AND
   non-blocking (tiled, polled) rendering, a small driver contract
   (`draw_area_sync`/`draw_area_async`/`display_busy`), no malloc, never
@@ -165,7 +167,7 @@ For small/constrained devices — the original motivating use case.
   CURVE security doesn't compose with ESP-IDF's native mbedTLS anyway
   (that's a separate, harder problem, noted in harpia's own
   `NEXT_SESSION.md` — don't reopen it here).
-- Not solved yet: real widget rendering (Copilot's runtime is a stub with
+- Not solved yet: real widget rendering (the prototype's runtime is a stub with
   no traversal logic), font/glyph atlas packing, asset compression — all
   flagged as "Stage 2+" in the original `DESIGN.md` and still true.
 
@@ -306,6 +308,19 @@ Leaves:
 | `badge` | `int` (0/nonzero convention) | a small on/off status dot — same bind shape as `checkbox`/`toggle`, distinct fill so it reads as its own kind |
 | `slider` | numeric + `range: {min, max}` | identical bind shape to `progress`/`gauge` — display-only in v1 (shows a live value; doesn't write back). An interactive, write-back slider is a separate, larger future increment, not this kind |
 
+**Color (added 2026-08-22).** Every kind above also takes two optional
+fields, `color` and `bg`, hex `"#RRGGBB"`, packed to RGB565 at generation
+time (never on-device): `color` is the ink/foreground/on-state fill,
+`bg` is the background/off-state fill — the same two-field pair covers
+both the text-on-background duality (`label`/`header`/`button`/box
+headers) and the on/off-state duality (`checkbox`/`toggle`/`badge`/
+`progress`/`gauge`/`slider`). Both are optional; omitting either falls
+back to a fixed runtime default (black ink on white), so every example in
+this doc still generates unchanged without authoring color at all. `led`'s
+third state (`warn`) isn't authorable yet — it draws a fixed runtime amber
+regardless of what `color`/`bg` say — a `states`-parallel `colors:` list is
+the natural follow-up if that needs to change.
+
 Project-level nav (not an in-screen widget kind):
 
 | kind | shape | notes |
@@ -334,6 +349,7 @@ display:
   color: rgb565    # mono | gray | rgb565, default mono
   bus: spi         # spi | i2c | parallel — optional
   controller: st7789v   # optional — see the closed list below
+  render_mode: non_blocking   # blocking | non_blocking, default blocking
 ```
 
 ## Display config (settled 2026-08-20; bus/controller added 2026-08-20)
@@ -356,12 +372,23 @@ overflow against (see `architecture.md` Stage 2 for the exact check).
   other and of the rest of `display:` (a project can declare panel
   size/color before picking real hardware). Validated against this closed
   list at parse time, same as `bind.type`.
+- **`render_mode: blocking | non_blocking`** (default `blocking`, added
+  2026-08-22) — picks which of Stage 8's scaffolds `main.c` gets:
+  `blocking` calls `janus_render_screen` once per screen (today's
+  original behavior, unchanged); `non_blocking` calls
+  `janus_render_screen_async_start` once and polls `janus_render_poll`
+  inside the event loop instead, one `draw_area_async` submission per
+  poll — see `architecture.md` Stage 4 for the queue-based design (a
+  draw-op queue built once per screen entry, drained one driver call at a
+  time, backing off while `display_busy()`). Declared, not baked into
+  every project unconditionally — same "input.modality" precedent.
 
-**What "implemented" means here, precisely:** all four fields are parsed,
+**What "implemented" means here, precisely:** all five fields are parsed,
 validated, and emitted as plain data in `janus_display_config.gen.h`
-(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`) — consumed by
-hand-written vendor driver code, never by the fixed runtime library, which
-stays display-size-agnostic. **The driver bodies themselves are not
+(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`)
+— consumed by hand-written vendor driver code (except `render_mode`, which
+Stage 8's scaffold itself consumes), never by the fixed runtime library,
+which stays display-size-agnostic. **The driver bodies themselves are not
 generated and stay human-owned** (settled 2026-08-20, see Open Questions)
 — `bus`/`controller` are a hardware *selection* a human's driver code can
 switch on (`#if JANUS_DISPLAY_CONTROLLER == JANUS_DISPLAY_CONTROLLER_ST7789V`),
@@ -373,11 +400,12 @@ field being set. This selection-as-data shape is deliberately the seam a
 future Janus-provided driver library would bolt into later without a
 schema change (see Open Questions) — same reasoning as the
 already-existing `draw_area_sync`/`draw_area_async`/`display_busy` driver
-contract. The `uint8_t`-per-pixel assumption baked into the runtime today
-(see `janus_runtime.h`'s driver contract comment) still only holds for
-mono/palette panels — a real `rgb565` TFT breaks that assumption at the
-font/fill-rect level too, not just the driver; that rework is still
-unstarted, tracked in Open Questions.
+contract. **RGB565 pixel-format rework — done (2026-08-22):** the runtime's
+driver contract, tile buffer, and every `draw_<kind>` function now speak
+`uint16_t` RGB565 throughout (`janus_runtime.h`'s driver contract comment);
+mono/palette and e-paper targets are still unhandled by this header (real
+future work if either becomes a real target — see Open Questions), but
+they were never today's target hardware.
 
 Worked example exercising every kind above, 2 instances each (`device_status.screen.yaml` covers `label`/`button`/`image`/`progress`/`checkbox`; `settings.screen.yaml` covers the rest):
 
@@ -445,7 +473,7 @@ message settings{
 
 Verified against the actual harpia generator (not guessed): harpia uses **no templating engine** (no Jinja2/Mako anywhere in the repo). Its real mechanism is `.tmpl` files with `str.format()`-style `{placeholder}` markers (literal C++ braces doubled as `{{`/`}}`), loaded once via `Util/util.py`'s `loadTemplate`. Repeated sections (field lists, FK includes) are built as Python string fragments in adapter helper methods (e.g. `Database/CrudlAdapter.py`'s `_create_locals`/`_extract_set`/`_map_write`) and fed into a single `.format()` call per file. One `.tmpl` + one adapter module per output kind (`Database/`, `JsonAdapter/`, `XmlAdapter/`, `ZmqAdapter/`, each independent, `.tmpl` files living alongside their adapter). Files are written unconditionally (`open(path, "w").write(...)`), and the whole output directory is `shutil.rmtree()`'d before regeneration (`main.py`) — full wipe-and-regenerate, not a smart diff/prune step.
 
-Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new templating dependency) but **splits embedded-C output into two things generated very differently**, because Janus's generation surface is lumpier than harpia's (13 widget kinds, `box`'s dual geometry tables, tab/nav switching, driver dispatch — vs. harpia's fairly uniform "one CRUDL class per table"). Templating *all* of that per-project would mean regenerating drawing logic on every build: a rendering bug fix would only land in projects that happen to regenerate, and every generated project would duplicate the same traversal/tiling code. That's exactly the failure mode the Copilot stub never got past.
+Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new templating dependency) but **splits embedded-C output into two things generated very differently**, because Janus's generation surface is lumpier than harpia's (13 widget kinds, `box`'s dual geometry tables, tab/nav switching, driver dispatch — vs. harpia's fairly uniform "one CRUDL class per table"). Templating *all* of that per-project would mean regenerating drawing logic on every build: a rendering bug fix would only land in projects that happen to regenerate, and every generated project would duplicate the same traversal/tiling code. That's exactly the failure mode the prototype's stub never got past.
 
 1. **A fixed runtime library, hand-written once, shipped with Janus, never templated per-project** — `runtime/embedded_c/{include/janus_runtime.h, src/janus_runtime.c}`. This is where DESIGN.md's traversal, tiling, driver contract (`draw_area_sync`/`draw_area_async`/`display_busy`), and one `draw_<kind>()` function per widget kind actually live. Every generated project links the same library; a rendering fix ships by rebuilding, not regenerating. **Adding a new widget kind (e.g. a "bolt-button") means adding one `draw_bolt_button()` function here plus one entry in the Python kind catalog — not touching layout, harpia emission, or any other widget's code.** (Caveat: a kind that needs a *new bind shape* — like `radiogroup`'s group-level bind — or *new runtime state* — like `box`'s collapse bit — touches a few more places: the shared descriptor/state struct and the layout pass if it affects geometry. Still additive, never a rewrite.)
 
@@ -469,6 +497,8 @@ Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new tem
    `{widget_entries}` is built by a Python loop over the IR (one initializer line per widget), joined and dropped into the single `.format()` call — the exact same two-tier pattern as `crudl.h.tmpl` + `CrudlAdapter._create_locals`, just applied to a much smaller surface (data, not control flow).
 
 3. **Deliberate improvement over harpia, not a borrowed one:** since generated `.c` files get compiled, an unconditional overwrite touches mtime and forces recompilation even when content is byte-identical — wasteful for embedded incremental builds. Janus's own file-writer should do a real diff-before-write (compare content, skip the write if unchanged).
+
+4. **Vendoring the fixed library into a generated project (2026-08-22).** Everything above assumes the fixed runtime library (item 1) is *available* to link against — until now that meant reaching into the Janus repo checkout by relative path (`examples/host_demo/CMakeLists.txt`'s `add_subdirectory(../../runtime/embedded_c)`), so a generated project was never usable standalone. `janus-generate --vendor-runtime DIR` copies the whole `runtime/embedded_c` tree (`CMakeLists.txt`, `include/`, `src/`, `tests/`, `host_mock/` — everything except the `build/` CMake-artifact directory) into `DIR`, one file at a time through the same content-diff-before-write writer as every other Janus output (`janus/writer.py`'s `copy_tree_if_changed`). A project does `add_subdirectory(runtime)` (or whatever `DIR` is named) against its own copy instead of the Janus checkout — for all intents and purposes that folder is now part of the project; Janus itself isn't a runtime dependency of it afterward.
 
 **RESOLVED (2026-08-19), corrects the "Open question" below:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout. Two research passes the same day confirmed harpia can never be the source of it — `ZmqAdapter` only emits header-only C++ wrapping protobuf's own C++ classes, and one level deeper, `protoFile/ProtoCompiler.py` hardcodes `protoc --cpp_out` with no `--c_out`/nanopb/protobuf-c path anywhere in harpia. Structurally, no plain C struct exists in that pipeline for any message. So Janus generates its own: `emit_bindings_struct.py` (Stage 3b) walks the same `Binding`s `emit_harpia.py` already collects and emits `{message}_t` + a zero-initialized `{message}_instance` — `janus_bindings.gen.h`/`.gen.c`, replacing the hand-written `examples/host_demo/janus_bindings.h`/`.c` this doc originally described. See `architecture.md`'s Stage 3b/7 for the exact contract; the paragraph below is kept for the record of what was actually unresolved before this pass, not because it's still accurate.
 
@@ -514,43 +544,40 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   `JANUS_DISPLAY_BUS`/`JANUS_DISPLAY_CONTROLLER` selection macros already
   emitted are exactly the seam such a library would switch on, so this is
   additive whenever it happens, not a redesign.
-- **Pixel-format rework — still open, unblocked by the above.**
-  `janus_runtime.h`'s driver contract is `uint8_t` per pixel today
-  (mono/palette only) — `st7789`/`ili9341`/`hx8357`/`gc9a01` are 16-bit
-  RGB565, `ssd1306`/`sh1106` are 1-bit OLED, `il3820`/`il0373` are e-paper
-  (slow refresh, partial-update APIs) — none of the three fit the same
-  buffer shape, so a real non-mono panel isn't just a driver swap, it
-  touches the font/fill-rect layer too. Not started; not blocking anything
-  today since `color` is declarable without the runtime enforcing it yet.
-  Expect one dedicated test file per controller/driver once real
-  implementation starts, mirroring how per-kind test files are split
-  today.
+- **Pixel-format rework — RESOLVED for RGB565 (2026-08-22).**
+  `janus_runtime.h`'s driver contract, the tile buffer, and every
+  `draw_<kind>` function now speak `uint16_t` RGB565 throughout — see
+  "Display config" above and `architecture.md` Stage 4. Real target
+  hardware is RGB565 (`st7789`/`ili9341`/`hx8357`/`gc9a01`-class), so this
+  is done for the hardware actually in scope. Still genuinely open if
+  `ssd1306`/`sh1106` (1-bit OLED) or `il3820`/`il0373` (e-paper, slow
+  refresh, partial-update APIs) ever become real targets — neither fits
+  the RGB565 buffer shape, and e-paper's refresh model doesn't fit the
+  tile-and-blit driver contract at all. Not blocking anything today; expect
+  one dedicated test file per controller/driver family whenever either
+  becomes real, mirroring how per-kind test files are split today.
+- **Runtime library vendoring — RESOLVED (2026-08-22): copy-based.**
+  `janus-generate --vendor-runtime DIR` copies `runtime/embedded_c`
+  (`CMakeLists.txt`/`include/`/`src/`/`tests/`/`host_mock/`, everything
+  except the `build/` artifact directory) into `DIR`, content-diffed like
+  every other Janus output — see "Embedded-C code generation architecture"
+  above. A generated project's own copy is, for all intents and purposes,
+  now part of that project; Janus itself is not a runtime dependency of it
+  afterward. Assumes Janus is run from a repo checkout (true today, see
+  `pyproject.toml`'s `package-data`) — making `runtime/embedded_c`
+  installable package data for a real distribution is packaging/infra
+  work, deferred with the rest of that category.
+- **Non-blocking rendering — RESOLVED (2026-08-22).** DESIGN.md's
+  "blocking AND non-blocking, tiled, polled rendering" requirement was
+  unmet until now — `draw_area_async`/`display_busy` were declared but
+  never called. `display.render_mode: non_blocking` now drives a real
+  polled path: see "Display config" above and `architecture.md` Stage 4
+  for the draw-op-queue design.
 - **Janus's own toolchain — no longer open.** Python, confirmed in use
   throughout. Test strategy: `unittest` for the Python pipeline (Stages
-  1–3b, 5, 8; 83+ tests), CMake/`ctest` for the C runtime (Stage 4/6).
-  Repo layout: `janus/stage{N}_*/` subpackages matching architecture.md's
-  own stage numbering.
-
-## Salvageable from the Copilot GuiAdapter branch
-
-Still present, in full, on harpia's `dev` branch (`GuiAdapter/` — see the
-correction above) — this section was written under the earlier, wrong
-assumption that it was gone. Worth reading directly rather than relying
-on the summary below if `DESIGN.md`'s exact wording ever matters.
-
-- `GuiAdapter/DESIGN.md`'s runtime contract, memory model, and tiling
-  design — reusable close to as-is as the starting spec for Janus's
-  embedded-C target.
-- `GuiAdapter/runtime/gui_runtime.{c,h}` — reusable as a rough
-  skeleton/reference for API shape only; the actual rendering logic was a
-  non-functional stub and needs to be written for real.
-- `GuiAdapter/tool/generator.py` — not worth carrying forward: ~90 lines of
-  throwaway struct-emission code with no error handling, no schema
-  derivation, and no connection to any real input/output contract Janus
-  needs.
-- The YAML input format and the `GuiAdapter/` naming/location themselves:
-  discard both — that's precisely the "looks integrated, isn't" problem
-  this project exists to avoid repeating.
+  1–3b, 5, 8; 155+ tests), CMake/`ctest` for the C runtime (Stage 4/6; 7
+  suites). Repo layout: `janus/stage{N}_*/` subpackages matching
+  architecture.md's own stage numbering.
 
 ## Suggested next steps for whoever picks this up
 

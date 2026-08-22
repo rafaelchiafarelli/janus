@@ -105,6 +105,27 @@ class TestAppFromDictDisplay(unittest.TestCase):
         with self.assertRaises(ValueError):
             app_from_dict(data, self._screens())
 
+    def test_render_mode_defaults_to_blocking(self) -> None:
+        data = {"screens": [], "display": {"size": {"w": 240, "h": 320}}}
+        app = app_from_dict(data, self._screens())
+        self.assertEqual(app.display.render_mode, "blocking")
+
+    def test_render_mode_parsed_when_given(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}, "render_mode": "non_blocking"},
+        }
+        app = app_from_dict(data, self._screens())
+        self.assertEqual(app.display.render_mode, "non_blocking")
+
+    def test_invalid_render_mode_rejected(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}, "render_mode": "polled"},
+        }
+        with self.assertRaises(ValueError):
+            app_from_dict(data, self._screens())
+
 
 class TestAppFromDictInput(unittest.TestCase):
     def _screens(self) -> list[Screen]:

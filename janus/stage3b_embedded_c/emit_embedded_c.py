@@ -83,6 +83,14 @@ _DISPLAY_CONTROLLER_VALUES = [
     "JANUS_DISPLAY_CONTROLLER_IL3820", "JANUS_DISPLAY_CONTROLLER_IL0373",
 ]
 
+_DISPLAY_RENDER_MODE_MACRO = {
+    "blocking": "JANUS_DISPLAY_RENDER_MODE_BLOCKING",
+    "non_blocking": "JANUS_DISPLAY_RENDER_MODE_NON_BLOCKING",
+}
+_DISPLAY_RENDER_MODE_VALUES = [
+    "JANUS_DISPLAY_RENDER_MODE_BLOCKING", "JANUS_DISPLAY_RENDER_MODE_NON_BLOCKING",
+]
+
 
 def _c_string(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -90,6 +98,22 @@ def _c_string(s: str) -> str:
 
 def _rect(r) -> str:
     return f"{{{r.x}, {r.y}, {r.w}, {r.h}}}" if r is not None else "{0, 0, 0, 0}"
+
+
+def _pack_rgb565(hex_color: str) -> int:
+    """"#RRGGBB" -> packed 16-bit RGB565 (5 bits R, 6 bits G, 5 bits B).
+    Colors are packed here, at generation time, not on-device — same
+    "push work to build time" spirit as geometry."""
+    r = int(hex_color[1:3], 16)
+    g = int(hex_color[3:5], 16)
+    b = int(hex_color[5:7], 16)
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+
+
+def _color_c(hex_color: str | None, default_macro: str) -> str:
+    if hex_color is None:
+        return default_macro
+    return f"0x{_pack_rgb565(hex_color):04x}"
 
 
 def screen_var(name: str) -> str:
@@ -233,6 +257,8 @@ def _widget_init(
     initial_expanded_c = "true" if widget.default_expanded else "false"
     static_text_c = _c_string(widget.text) if widget.text is not None else "NULL"
     focus_order_c = str(focus_order_map.get(id(widget), FOCUS_ORDER_NONE))
+    color_c = _color_c(widget.color, "JANUS_COLOR_DEFAULT_FG")
+    bg_color_c = _color_c(widget.bg, "JANUS_COLOR_DEFAULT_BG")
 
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {_c_string(widget.id)}, "
@@ -243,6 +269,7 @@ def _widget_init(
         f".bind = {{ {bind_c} }}, .action = {action_c}, "
         f".navigate_target = {navigate_target_c}, "
         f".focus_order = {focus_order_c}, "
+        f".color = {color_c}, .bg_color = {bg_color_c}, "
         f".children = {children_array_name}, .child_count = {child_count} }}"
     )
 
@@ -339,6 +366,9 @@ def emit_display_config(display: DisplayConfig) -> str:
     controller_defines = "\n".join(
         f"#define {name} {i}" for i, name in enumerate(_DISPLAY_CONTROLLER_VALUES)
     )
+    render_mode_defines = "\n".join(
+        f"#define {name} {i}" for i, name in enumerate(_DISPLAY_RENDER_MODE_VALUES)
+    )
 
     parts = [
         f"#define JANUS_DISPLAY_WIDTH {display.width}\n"
@@ -353,6 +383,8 @@ def emit_display_config(display: DisplayConfig) -> str:
             f"#define JANUS_DISPLAY_CONTROLLER {_DISPLAY_CONTROLLER_MACRO[display.controller]}\n"
             if display.controller is not None else ""
         ),
+        f"{render_mode_defines}\n"
+        f"#define JANUS_DISPLAY_RENDER_MODE {_DISPLAY_RENDER_MODE_MACRO[display.render_mode]}\n",
     ]
     return "\n".join(parts)
 

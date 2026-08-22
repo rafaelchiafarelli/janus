@@ -2,6 +2,11 @@
  * fixtures, no Python involved, asserted against the host mock driver's
  * call log. Plain checks + a pass/fail counter, no test framework
  * (matching this project's existing style for its Python tests).
+ *
+ * Tile size is JANUS_TILE_W x JANUS_TILE_H = 16x16 (janus_runtime.c) —
+ * fixtures that assert an exact mock_driver_log_count keep their
+ * rectangles under 16px on the axis that matters so a fill doesn't
+ * silently split across tiles and change the expected count.
  */
 #include <stddef.h>
 #include <stdio.h>
@@ -45,6 +50,7 @@ static void test_progress_fill_tracks_live_value(void) {
             .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
             .range_min = 0, .range_max = 100,
         },
+        .color = 0x1111, .bg_color = 0xeeee,
     };
     static const janus_screen_desc_t screen = {
         .name = "Progress", .widgets = &progress, .widget_count = 1, .bound_struct = &g_demo,
@@ -54,13 +60,13 @@ static void test_progress_fill_tracks_live_value(void) {
     mock_driver_reset();
     janus_render_screen(&screen);
     CHECK(mock_driver_log_count > 0);
-    uint8_t sample_at_0 = mock_driver_log[0].sample_byte;
+    uint16_t sample_at_0 = mock_driver_log[0].sample_pixel;
 
     g_demo.level = 100;
     mock_driver_reset();
     janus_render_screen(&screen);
     CHECK(mock_driver_log_count > 0);
-    uint8_t sample_at_100 = mock_driver_log[0].sample_byte;
+    uint16_t sample_at_100 = mock_driver_log[0].sample_pixel;
 
     CHECK(sample_at_0 != sample_at_100);
 }
@@ -126,13 +132,14 @@ static void test_divider_always_draws_unconditionally(void) {
 
     mock_driver_reset();
     janus_render_screen(&screen);
-    CHECK(mock_driver_log_count == 2); /* 60px wide spans two 32px tiles */
+    CHECK(mock_driver_log_count == 4); /* 60px wide spans four 16px tiles (16+16+16+12) */
 }
 
 static void test_toggle_fill_tracks_live_value(void) {
     static const janus_widget_desc_t toggle = {
-        .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 24, 12 },
+        .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 12, 12 },
         .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+        .color = 0x2222, .bg_color = 0xdddd,
     };
     static const janus_screen_desc_t screen = {
         .name = "Toggle", .widgets = &toggle, .widget_count = 1, .bound_struct = &g_demo,
@@ -141,12 +148,12 @@ static void test_toggle_fill_tracks_live_value(void) {
     g_demo.level = 0;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint8_t sample_off = mock_driver_log[0].sample_byte;
+    uint16_t sample_off = mock_driver_log[0].sample_pixel;
 
     g_demo.level = 1;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint8_t sample_on = mock_driver_log[0].sample_byte;
+    uint16_t sample_on = mock_driver_log[0].sample_pixel;
 
     CHECK(sample_off != sample_on);
 }
@@ -155,6 +162,7 @@ static void test_badge_fill_tracks_live_value(void) {
     static const janus_widget_desc_t badge = {
         .kind = JANUS_WIDGET_BADGE, .id = "b", .geometry = { 0, 0, 8, 8 },
         .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+        .color = 0x3333, .bg_color = 0xcccc,
     };
     static const janus_screen_desc_t screen = {
         .name = "Badge", .widgets = &badge, .widget_count = 1, .bound_struct = &g_demo,
@@ -163,12 +171,12 @@ static void test_badge_fill_tracks_live_value(void) {
     g_demo.level = 0;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint8_t sample_off = mock_driver_log[0].sample_byte;
+    uint16_t sample_off = mock_driver_log[0].sample_pixel;
 
     g_demo.level = 1;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint8_t sample_on = mock_driver_log[0].sample_byte;
+    uint16_t sample_on = mock_driver_log[0].sample_pixel;
 
     CHECK(sample_off != sample_on);
 }
@@ -180,6 +188,7 @@ static void test_slider_fill_tracks_live_value(void) {
             .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
             .range_min = 0, .range_max = 100,
         },
+        .color = 0x4444, .bg_color = 0xbbbb,
     };
     static const janus_screen_desc_t screen = {
         .name = "Slider", .widgets = &slider, .widget_count = 1, .bound_struct = &g_demo,
@@ -188,12 +197,12 @@ static void test_slider_fill_tracks_live_value(void) {
     g_demo.level = 0;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint8_t sample_at_0 = mock_driver_log[0].sample_byte;
+    uint16_t sample_at_0 = mock_driver_log[0].sample_pixel;
 
     g_demo.level = 100;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint8_t sample_at_100 = mock_driver_log[0].sample_byte;
+    uint16_t sample_at_100 = mock_driver_log[0].sample_pixel;
 
     CHECK(sample_at_0 != sample_at_100);
 }
@@ -225,8 +234,11 @@ static void test_label_without_text_draws_only_the_background_fill(void) {
 }
 
 static void test_label_with_text_draws_one_glyph_call_per_character(void) {
+    /* w=14 (< JANUS_TILE_W) so the background is exactly one fill call —
+     * see test_divider_always_draws_unconditionally for why a wider rect
+     * would split across tiles and change this count. */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 20, 10 },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 14, 10 },
     };
     static const janus_screen_desc_t screen = {
         .name = "Text", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
@@ -258,11 +270,11 @@ typedef struct { const char *name; } demo_str_t;
 static demo_str_t g_demo_str = { .name = NULL };
 
 static void test_bound_string_with_value_draws_glyphs(void) {
-    /* w=20 (< JANUS_TILE_W) so the background is exactly one fill call —
+    /* w=14 (< JANUS_TILE_W) so the background is exactly one fill call —
      * see test_divider_always_draws_unconditionally for why a wider rect
      * would split across tiles and change this count. */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 20, 10 },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 14, 10 },
         .bind = { .field_offset = offsetof(demo_str_t, name), .field_type = JANUS_FIELD_STRING },
     };
     static const janus_screen_desc_t screen = {
@@ -281,7 +293,7 @@ static void test_bound_string_null_renders_fill_only(void) {
      * not data) holds NULL until firmware populates it — must render as
      * the plain fill, not crash or draw garbage. */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 20, 10 },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 14, 10 },
         .bind = { .field_offset = offsetof(demo_str_t, name), .field_type = JANUS_FIELD_STRING },
     };
     static const janus_screen_desc_t screen = {
@@ -327,6 +339,41 @@ static void test_box_header_draws_its_title_text(void) {
     CHECK(count_glyph_sized_calls() == 2);
 }
 
+/* ---- fixture 8: authored RGB565 color actually reaches the driver ---- */
+static void test_widget_authored_color_is_what_gets_drawn(void) {
+    static const janus_widget_desc_t image = {
+        .kind = JANUS_WIDGET_IMAGE, .id = "i", .geometry = { 0, 0, 10, 10 },
+        .color = 0xf800, /* pure red */
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Colored", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);
+    CHECK(mock_driver_log[0].sample_pixel == 0xf800);
+}
+
+static void test_widget_default_colors_are_the_runtime_constants(void) {
+    /* No .color/.bg_color authored — a zero-initialized struct literal
+     * leaves both at 0, which is JANUS_COLOR_DEFAULT_FG's own value, so
+     * this only proves something meaningful once compared against a
+     * widget that explicitly authors JANUS_COLOR_DEFAULT_BG for bg. */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = NULL, .geometry = { 0, 0, 10, 10 },
+        .color = JANUS_COLOR_DEFAULT_FG, .bg_color = JANUS_COLOR_DEFAULT_BG,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Default", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);
+    CHECK(mock_driver_log[0].sample_pixel == JANUS_COLOR_DEFAULT_BG);
+}
+
 int main(void) {
     test_traversal_reaches_every_widget();
     test_progress_fill_tracks_live_value();
@@ -343,6 +390,8 @@ int main(void) {
     test_bound_string_null_renders_fill_only();
     test_static_text_wins_over_bound_string();
     test_box_header_draws_its_title_text();
+    test_widget_authored_color_is_what_gets_drawn();
+    test_widget_default_colors_are_the_runtime_constants();
 
     if (g_failures == 0) {
         printf("all tests passed\n");

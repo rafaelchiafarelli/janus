@@ -34,3 +34,21 @@ def write_if_missing(path: str | Path, content: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return True
+
+
+def copy_tree_if_changed(src_dir: str | Path, dest_dir: str | Path) -> list[Path]:
+    """Recursively copies every file under `src_dir` into `dest_dir`,
+    preserving the relative layout, via `write_if_changed` per file — so
+    vendoring the fixed runtime library into a generated project never
+    touches mtime on files whose content hasn't changed. Returns every
+    destination path actually written (empty on a no-op re-run)."""
+    src_dir = Path(src_dir)
+    dest_dir = Path(dest_dir)
+    written = []
+    for src_path in sorted(src_dir.rglob("*")):
+        if src_path.is_dir():
+            continue
+        dest_path = dest_dir / src_path.relative_to(src_dir)
+        if write_if_changed(dest_path, src_path.read_text()):
+            written.append(dest_path)
+    return written

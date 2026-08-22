@@ -96,6 +96,30 @@ class TestEmitEmbeddedCBoundStruct(unittest.TestCase):
             emit_screen(screen)
 
 
+class TestEmitEmbeddedCColor(unittest.TestCase):
+    def test_authored_hex_color_packed_to_rgb565(self) -> None:
+        screen = layout_screen(Screen(
+            name="Colored",
+            root=Widget(kind="column", id="r", children=[
+                Widget(kind="label", id="l", text="hi", color="#FF0000", bg="#00FF00"),
+            ]),
+        ))
+        out = emit_screen(screen)
+        self.assertIn(".color = 0xf800,", out)   # pure red
+        self.assertIn(".bg_color = 0x07e0,", out)  # pure green
+
+    def test_unstyled_widget_gets_the_default_color_macros(self) -> None:
+        screen = layout_screen(Screen(
+            name="Unstyled",
+            root=Widget(kind="column", id="r", children=[
+                Widget(kind="label", id="l", text="hi"),
+            ]),
+        ))
+        out = emit_screen(screen)
+        self.assertIn(".color = JANUS_COLOR_DEFAULT_FG,", out)
+        self.assertIn(".bg_color = JANUS_COLOR_DEFAULT_BG,", out)
+
+
 class TestEmitEmbeddedCBox(unittest.TestCase):
     """Closes the gap flagged after the Stage 3b slice: box's dual
     geometry (expanded vs collapsed) was only ever tested through

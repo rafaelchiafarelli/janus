@@ -14,6 +14,7 @@ DisplayController = Literal[
     "gc9a01", "ssd1306", "sh1106", "il3820", "il0373",
 ]
 InputModality = Literal["touch", "encoder", "buttons"]
+RenderMode = Literal["blocking", "non_blocking"]
 
 
 @dataclass
@@ -47,6 +48,14 @@ class Widget:
     collapsible: bool = False
     default_expanded: bool = True
     layout: Optional[Literal["column", "row"]] = None
+    # "#RRGGBB" hex, packed to RGB565 at Stage 3b emission time — not
+    # authored on-device, same "push work to build time" spirit as
+    # geometry. `color` is the ink/foreground/on-state fill; `bg` is the
+    # background/off-state fill. Both optional — Stage 3b falls back to a
+    # fixed runtime default when either is omitted, so existing specs with
+    # no color at all keep generating unchanged.
+    color: Optional[str] = None
+    bg: Optional[str] = None
     children: list["Widget"] = field(default_factory=list)
     # filled in later by the layout pass; always empty coming out of the parser
     geometry: Optional[Rect] = None
@@ -79,6 +88,12 @@ class DisplayConfig:
     # schema change: a future library would switch on this same value.
     bus: Optional[DisplayBus] = None
     controller: Optional[DisplayController] = None
+    # blocking (default) keeps today's behavior unchanged — main.c calls
+    # janus_render_screen once and blocks until it's done. non_blocking
+    # picks the janus_render_screen_async_start/janus_render_poll scaffold
+    # instead (see Stage 8's scaffold_main.py) — declared, not baked into
+    # every project unconditionally, same "input.modality" precedent.
+    render_mode: RenderMode = "blocking"
 
 
 @dataclass

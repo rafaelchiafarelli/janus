@@ -55,6 +55,24 @@ class TestGenerate(unittest.TestCase):
         generate(FIXTURES / "app_with_display.yaml", self.target_dir)
         self.assertTrue((self.target_dir / "janus_display_config.gen.h").exists())
 
+    def test_vendor_runtime_copies_the_fixed_library(self) -> None:
+        runtime_dir = Path(self._tmp.name) / "runtime"
+        written = generate(FIXTURES / "app.yaml", self.target_dir, vendor_runtime=runtime_dir)
+
+        repo_root = Path(__file__).resolve().parents[1]
+        source_cmakelists = repo_root / "runtime" / "embedded_c" / "CMakeLists.txt"
+        self.assertEqual((runtime_dir / "CMakeLists.txt").read_text(), source_cmakelists.read_text())
+        self.assertTrue((runtime_dir / "include" / "janus_runtime.h").exists())
+        self.assertTrue((runtime_dir / "src" / "janus_runtime.c").exists())
+        self.assertFalse((runtime_dir / "build").exists())
+        self.assertIn(runtime_dir / "CMakeLists.txt", written)
+
+    def test_vendor_runtime_second_run_with_no_changes_writes_nothing(self) -> None:
+        runtime_dir = Path(self._tmp.name) / "runtime"
+        generate(FIXTURES / "app.yaml", self.target_dir, vendor_runtime=runtime_dir)
+        written = generate(FIXTURES / "app.yaml", self.target_dir, vendor_runtime=runtime_dir)
+        self.assertEqual(written, [])
+
     def test_screen_too_big_for_declared_display_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             generate(FIXTURES / "app_with_display_too_small.yaml", self.target_dir)
