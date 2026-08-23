@@ -98,6 +98,89 @@ class TestLayoutNewLowEffortKinds(unittest.TestCase):
         self.assertEqual(screen.root.children[0].geometry, Rect(x=0, y=0, w=24, h=12))
 
 
+class TestLayoutFill(unittest.TestCase):
+    def test_single_fill_child_consumes_leftover_height(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Fill",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="header", id="h", text="Title"),  # default 80x16
+                Widget(kind="label", id="body", fill=True),
+            ]),
+        )
+        layout_screen(screen, DisplayConfig(width=200, height=100, color="mono"))
+        header, body = screen.root.children
+        self.assertEqual(header.geometry, Rect(x=0, y=0, w=80, h=16))
+        # 100 - 16 (header) - GAP(4) = 80 left over for the fill label
+        self.assertEqual(body.geometry, Rect(x=0, y=20, w=60, h=80))
+        self.assertEqual(screen.root.geometry, Rect(x=0, y=0, w=80, h=100))
+
+    def test_two_fill_siblings_split_evenly_remainder_on_last(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Fill",
+            root=Widget(kind="row", id="root", children=[
+                Widget(kind="label", id="a", fill=True),
+                Widget(kind="label", id="b", fill=True),
+            ]),
+        )
+        layout_screen(screen, DisplayConfig(width=101, height=50, color="mono"))
+        a, b = screen.root.children
+        # 101 - GAP(4) = 97 leftover; 97 // 2 = 48, remainder 1 goes to b
+        self.assertEqual(a.geometry.w, 48)
+        self.assertEqual(b.geometry.w, 49)
+
+    def test_fill_without_a_known_size_raises(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Fill",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="label", id="body", fill=True),
+            ]),
+        )
+        with self.assertRaises(ValueError):
+            layout_screen(screen)  # no display -> root's own height is unknown
+
+    def test_fill_children_overflowing_available_space_raises(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Fill",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="header", id="h", text="Title"),  # default 80x16
+                Widget(kind="label", id="body", fill=True),
+            ]),
+        )
+        with self.assertRaises(ValueError):
+            layout_screen(screen, DisplayConfig(width=200, height=10, color="mono"))
+
+    def test_fill_propagates_into_a_nested_container(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Fill",
+            root=Widget(kind="column", id="root", children=[
+                Widget(
+                    kind="row", id="middle", fill=True, children=[
+                        Widget(kind="label", id="left", fill=True),
+                        Widget(kind="label", id="right"),  # default 60x12
+                    ],
+                ),
+            ]),
+        )
+        layout_screen(screen, DisplayConfig(width=200, height=90, color="mono"))
+        middle = screen.root.children[0]
+        left, right = middle.children
+        self.assertEqual(middle.geometry, Rect(x=0, y=0, w=200, h=90))
+        # middle's own width (200) is now known -> left fills leftover width:
+        # 200 - 60 (right, default) - GAP(4) = 136
+        self.assertEqual(left.geometry, Rect(x=0, y=0, w=136, h=12))
+        self.assertEqual(right.geometry, Rect(x=140, y=0, w=60, h=12))
+
+
 class TestCheckFitsDisplay(unittest.TestCase):
     def setUp(self) -> None:
         self.screen = layout_screen(parse_screen(FIXTURES / "user_profile.screen.yaml"))

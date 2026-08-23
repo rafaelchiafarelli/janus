@@ -101,6 +101,7 @@ def _parse_widget(data: dict[str, Any]) -> Widget:
         collapsible=data.get("collapsible", False),
         default_expanded=data.get("default_expanded", True),
         layout=data.get("layout"),
+        fill=data.get("fill", False),
         color=_parse_color(data.get("color")),
         bg=_parse_color(data.get("bg")),
         children=[_parse_widget(c) for c in data.get("children", [])],

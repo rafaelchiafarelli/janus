@@ -10,15 +10,18 @@ children:
   - { kind: header, id: pwm_header, text: "PWM", size: { w: 180, h: 14 } }
 
   - kind: row
+    fill: true
     children:
       - kind: column
         id: pwm_simplex_col
+        fill: true
         children:
           - kind: box
             id: pwm_ch0_box
             layout: column
             collapsible: true
             default_expanded: true
+            fill: true
             children:
               - kind: row
                 children:
@@ -39,6 +42,7 @@ children:
             layout: column
             collapsible: true
             default_expanded: true
+            fill: true
             children:
               - kind: row
                 children:
@@ -56,12 +60,14 @@ children:
 
       - kind: column
         id: pwm_complex_col
+        fill: true
         children:
           - kind: box
             id: pwm_ch2_box
             layout: column
             collapsible: true
             default_expanded: false
+            fill: true
             children:
               - kind: row
                 children:
@@ -90,6 +96,7 @@ children:
             layout: column
             collapsible: true
             default_expanded: false
+            fill: true
             children:
               - kind: row
                 children:

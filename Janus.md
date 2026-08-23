@@ -1,23 +1,33 @@
 # Janus — a pre-harpia GUI schema + code generator
 
-> **Status (updated 2026-08-22): the target hardware is RGB565**, and the
-> runtime now speaks it for real — every widget's fill/text color is
-> authored per-widget in YAML (`color`/`bg`, hex `#RRGGBB`, packed to
-> RGB565 at generation time) and drawn through the actual driver contract
-> (`uint16_t` pixels), not a hardcoded mono placeholder byte. Landed the
-> same date: **font coverage widened from space+A-Z to full occidental
-> Latin** (digits, punctuation, true lowercase, Latin-1 accents — see
-> `janus_font.h`; strings must be Latin-1-encoded, not UTF-8), **copy-based
-> vendoring** (`janus-generate --vendor-runtime DIR` copies the fixed
-> runtime library into a project so it's no longer only usable from inside
-> the Janus checkout — see "Embedded-C code generation architecture"), and
-> **non-blocking (polled) rendering** (`display.render_mode: non_blocking`
-> — `janus_render_screen_async_start`/`janus_render_poll`, draining one
-> `draw_area_async` call per poll instead of blocking for a whole screen;
-> see `architecture.md` Stage 4). What's left: per-controller driver
-> bodies once real hardware is in hand (design already settled — see
-> Open Questions), and screen-size/resolution beyond the placeholder
-> 240×320 default (flagged, not yet scoped). This
+> **Status (updated 2026-08-23): first real AVR hardware bring-up
+> happened**, and it found (then fixed) real bugs no host-only
+> verification could ever have caught. Bringing up `examples/host_demo`'s
+> generated output on a real Mega2560 (ArduinoIHM's board firmware —
+> separate repo, see the memory note there — not this one) surfaced a
+> `JANUS_PROGMEM`-safety bug: generated widget/screen descriptors are
+> flash-resident on AVR, but a handful of read sites (both inside the
+> fixed runtime library *and*, worse, every scaffolded `main.c` template)
+> were still dereferencing them with a plain pointer read — invisible on
+> host builds (where the PROGMEM macros are no-ops), a garbage pointer
+> read on the real board. Root-caused and fixed generically — not
+> patched only in the downstream project — see `architecture.md` Stage 4's
+> new "PROGMEM safety" section for the full mechanism and every fix site.
+> Also landed the same date: a **`fill` layout primitive**
+> (`fill: true` on any widget — grows along the parent's main axis to
+> consume leftover space, single-axis, requires an `app.display`-anchored
+> size chain; see "v1 decisions" below and `architecture.md` Stage 2) so a
+> screen's containers can actually use the whole panel instead of
+> shrink-wrapping into a corner — applied to all three `examples/
+> host_demo` screens as the first real usage. **Not yet done:** the fixed
+> `fill`-using output hasn't been round-tripped back onto real ArduinoIHM
+> hardware yet — that's the next concrete step, not a formality, given
+> this same loop (generate → looks fine on host → real bug on real
+> hardware) is exactly how the PROGMEM issue was found in the first place.
+> Also still true from before: per-controller driver bodies once more
+> real hardware is in hand (design already settled — see Open Questions),
+> and screen-size/resolution beyond the placeholder 240×320 default
+> (flagged, not yet scoped). This
 > file is still meant to let a fresh session pick this project up quickly —
 > read it whole before writing any code. A visual companion to the
 > "Embedded-C code generation architecture" and "Input / event dispatch"
@@ -278,6 +288,18 @@ Original scoping, for the record:
     `radiobutton`, `divider`, `toggle` get a fixed v1 placeholder default
     per kind when `size` is omitted (overridable), standing in until real
     font-metric auto-sizing exists (see auto-sizing note below).
+  - **`fill: true` (added 2026-08-23)** on any widget grows it along its
+    *parent's* main axis (a `column`'s height, a `row`'s width) to consume
+    an even share of whatever's left over after its non-`fill` siblings —
+    the one way today to make a screen's containers use the whole panel
+    instead of shrink-wrapping to their content. Single-axis only: the
+    cross axis still resolves normally (explicit `size`, per-kind default,
+    or intrinsic-from-children), so this isn't a general stretch/flex
+    model — a `fill` container's own children don't get bigger just
+    because the container did. Needs an unbroken chain of known sizes
+    back to a screen with `app.display` set; using it without that raises
+    at generation time rather than silently doing nothing. See
+    `architecture.md` Stage 2 for the exact algorithm.
 
 ## v1 widget catalog
 
@@ -578,6 +600,27 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   1–3b, 5, 8; 155+ tests), CMake/`ctest` for the C runtime (Stage 4/6; 7
   suites). Repo layout: `janus/stage{N}_*/` subpackages matching
   architecture.md's own stage numbering.
+- **`fill` doesn't stretch the cross axis (open, 2026-08-23).** Today's
+  `fill` (see "v1 decisions" above) only grows a widget along its
+  parent's main axis; there's no way to say "also stretch to the
+  container's full width/height" the way CSS flexbox's `align-items:
+  stretch` would. Concretely: marking a `box` `fill: true` inside a wide
+  `row` makes it taller, not wider — the box's own children (whose width
+  is bounded by the box's, an intrinsic cross-axis quantity) never grow
+  just because the box did. Workaround today is marking a *leaf inside*
+  the container `fill: true` on that axis instead (used for
+  `bus_status`/`relay`'s labels in `examples/host_demo`). A real fix
+  would be a second boolean (`stretch`? mirroring flexbox's
+  cross-axis-vs-main-axis split) — not attempted yet since the immediate
+  "make the screen use the whole panel" need was solvable without it.
+- **`fill`'s real-hardware validation is still pending (open,
+  2026-08-23).** `examples/host_demo` regenerates and passes
+  `check_fits_display` cleanly with `fill` applied, and every layout unit
+  test + the host-only C build/run passes — but none of that would have
+  caught the PROGMEM bug either (see the Status line at top). The next
+  session that has ArduinoIHM hardware in hand should re-run the same
+  generate → vendor → build → flash loop before trusting `fill`'s output
+  is actually correct on a real panel, not just "didn't error."
 
 ## Suggested next steps for whoever picks this up
 

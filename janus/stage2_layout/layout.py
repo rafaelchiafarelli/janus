@@ -27,8 +27,14 @@ _DEFAULT_SIZE = {
 }
 
 
-def layout_screen(screen: Screen) -> Screen:
-    _layout_widget(screen.root, x=0, y=0)
+def layout_screen(screen: Screen, display: DisplayConfig | None = None) -> Screen:
+    """`display`, when given, is what a top-level `fill: true` widget
+    grows against — without it (today's default), `fill` on any widget
+    whose ancestor chain never reaches a known size raises ValueError;
+    every other widget lays out exactly as before regardless."""
+    avail_w = display.width if display is not None else None
+    avail_h = display.height if display is not None else None
+    _layout_widget(screen.root, x=0, y=0, avail_w=avail_w, avail_h=avail_h)
     return screen
 
 
@@ -66,14 +72,86 @@ def _direction_of(widget: Widget) -> str:
     return "column"
 
 
-def _layout_widget(widget: Widget, x: int, y: int) -> None:
+def _distribute_fill(
+    widget: Widget, direction: str, main_avail: int | None,
+    body_avail_w: int | None, body_avail_h: int | None,
+) -> dict[int, int]:
+    """Measures every non-fill direct child of `widget` (at a throwaway
+    position — only `.geometry.w/.h` are read here, the real position pass
+    in `_layout_widget` below overwrites `.geometry` for every child
+    afterward) to find how much of `main_avail` is left over, then splits
+    that evenly among `widget`'s `fill` children (last one absorbs the
+    remainder). Keyed by `id(child)` since `Widget` isn't hashable/no
+    identity field cheaper than that. Empty dict, no measuring, if `widget`
+    has no fill children — the zero-cost path every existing screen takes."""
+    fill_children = [c for c in widget.children if c.fill]
+    if not fill_children:
+        return {}
+    if main_avail is None:
+        axis = "height" if direction == "column" else "width"
+        raise ValueError(
+            f"widget {widget.id!r} has a `fill` child but its own {axis} isn't "
+            f"known — `fill` needs an unbroken chain of explicit/filled sizes "
+            f"back to a screen with `app.display` set"
+        )
+
+    total_non_fill_main = 0
+    for child in widget.children:
+        if child.fill:
+            continue
+        if direction == "column":
+            _layout_widget(child, 0, 0, avail_w=body_avail_w, avail_h=None)
+            total_non_fill_main += child.geometry.h
+        else:
+            _layout_widget(child, 0, 0, avail_w=None, avail_h=body_avail_h)
+            total_non_fill_main += child.geometry.w
+
+    gaps = GAP * max(len(widget.children) - 1, 0)
+    leftover = main_avail - total_non_fill_main - gaps
+    if leftover < 0:
+        axis = "height" if direction == "column" else "width"
+        raise ValueError(
+            f"widget {widget.id!r}'s children already need more {axis} "
+            f"({total_non_fill_main + gaps}px) than it has available "
+            f"({main_avail}px), before any `fill` child gets a share"
+        )
+
+    share, extra = divmod(leftover, len(fill_children))
+    return {
+        id(child): share + (extra if i == len(fill_children) - 1 else 0)
+        for i, child in enumerate(fill_children)
+    }
+
+
+def _layout_widget(
+    widget: Widget, x: int, y: int,
+    avail_w: int | None = None, avail_h: int | None = None,
+    forced_w: int | None = None, forced_h: int | None = None,
+) -> None:
     if widget.kind in _LEAF_KINDS:
         w, h = _resolve_leaf_size(widget)
+        if forced_w is not None:
+            w = forced_w
+        if forced_h is not None:
+            h = forced_h
         widget.geometry = Rect(x=x, y=y, w=w, h=h)
         return
 
+    # A forced dimension (this widget was itself given a `fill` share by
+    # its parent, just below) is an exactly-known size — fold it into
+    # `avail` so it's usable the same way a known size from anywhere else
+    # would be, when sizing *this* widget's own children.
+    own_avail_w = forced_w if forced_w is not None else avail_w
+    own_avail_h = forced_h if forced_h is not None else avail_h
+
     direction = _direction_of(widget)
     header_h = BOX_HEADER_H if widget.kind == "box" else 0
+
+    body_avail_w = own_avail_w
+    body_avail_h = None if own_avail_h is None else own_avail_h - header_h
+    main_avail = body_avail_h if direction == "column" else body_avail_w
+
+    fill_sizes = _distribute_fill(widget, direction, main_avail, body_avail_w, body_avail_h)
 
     cursor_x, cursor_y = x, y + header_h
     for i, child in enumerate(widget.children):
@@ -82,7 +160,24 @@ def _layout_widget(widget: Widget, x: int, y: int) -> None:
                 cursor_y += GAP
             else:
                 cursor_x += GAP
-        _layout_widget(child, cursor_x, cursor_y)
+
+        child_forced_w = child_forced_h = None
+        if child.fill:
+            if direction == "column":
+                child_forced_h = fill_sizes[id(child)]
+            else:
+                child_forced_w = fill_sizes[id(child)]
+        # cross-axis avail is forwarded to every child as-is (informational
+        # ceiling, not a forced size); main-axis avail only matters for a
+        # fill child, handled above via forced_w/forced_h instead.
+        child_avail_w = body_avail_w if direction == "column" else None
+        child_avail_h = body_avail_h if direction == "row" else None
+
+        _layout_widget(
+            child, cursor_x, cursor_y,
+            avail_w=child_avail_w, avail_h=child_avail_h,
+            forced_w=child_forced_w, forced_h=child_forced_h,
+        )
         if direction == "column":
             cursor_y += child.geometry.h
         else:
@@ -95,6 +190,12 @@ def _layout_widget(widget: Widget, x: int, y: int) -> None:
         body_w = cursor_x - x
         body_h = max((c.geometry.h for c in widget.children), default=0)
 
-    widget.geometry = Rect(x=x, y=y, w=body_w, h=header_h + body_h)
+    w, h = body_w, header_h + body_h
+    if forced_w is not None:
+        w = forced_w
+    if forced_h is not None:
+        h = forced_h
+
+    widget.geometry = Rect(x=x, y=y, w=w, h=h)
     if widget.kind == "box":
-        widget.geometry_collapsed = Rect(x=x, y=y, w=body_w, h=header_h)
+        widget.geometry_collapsed = Rect(x=x, y=y, w=w, h=header_h)

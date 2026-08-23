@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from janus.stage1_parse.dsl_yaml import parse_screen
+from janus.stage1_parse.dsl_yaml import parse_screen, screen_from_dict
 from janus.ir import Binding
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -36,6 +36,18 @@ class TestParseScreen(unittest.TestCase):
         self.assertEqual(bar.bind, Binding(message="user", field="battery_level", type="int"))
         self.assertEqual(bar.size, (80, 12))
         self.assertIsNone(bar.geometry)  # layout pass hasn't run yet
+
+    def test_fill_defaults_false_and_parses_true(self) -> None:
+        screen = screen_from_dict({
+            "screen": "Fill",
+            "layout": "column",
+            "children": [
+                {"kind": "label", "id": "a"},
+                {"kind": "label", "id": "b", "fill": True},
+            ],
+        })
+        self.assertFalse(screen.root.children[0].fill)
+        self.assertTrue(screen.root.children[1].fill)
 
 
 if __name__ == "__main__":

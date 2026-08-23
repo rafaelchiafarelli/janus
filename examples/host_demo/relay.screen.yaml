@@ -8,36 +8,37 @@ children:
   - kind: navlist
     id: relay_list
     layout: column
+    fill: true
     children:
       - kind: row
         children:
           - { kind: toggle, id: relay_0, bind: { message: relay, field: relay_0, type: int }, on_press: toggle_relay_0 }
-          - { kind: label, id: relay_0_label, text: "Relay 0" }
+          - { kind: label, id: relay_0_label, text: "Relay 0", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_1, bind: { message: relay, field: relay_1, type: int }, on_press: toggle_relay_1 }
-          - { kind: label, id: relay_1_label, text: "Relay 1" }
+          - { kind: label, id: relay_1_label, text: "Relay 1", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_2, bind: { message: relay, field: relay_2, type: int }, on_press: toggle_relay_2 }
-          - { kind: label, id: relay_2_label, text: "Relay 2" }
+          - { kind: label, id: relay_2_label, text: "Relay 2", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_3, bind: { message: relay, field: relay_3, type: int }, on_press: toggle_relay_3 }
-          - { kind: label, id: relay_3_label, text: "Relay 3" }
+          - { kind: label, id: relay_3_label, text: "Relay 3", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_4, bind: { message: relay, field: relay_4, type: int }, on_press: toggle_relay_4 }
-          - { kind: label, id: relay_4_label, text: "Relay 4" }
+          - { kind: label, id: relay_4_label, text: "Relay 4", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_5, bind: { message: relay, field: relay_5, type: int }, on_press: toggle_relay_5 }
-          - { kind: label, id: relay_5_label, text: "Relay 5" }
+          - { kind: label, id: relay_5_label, text: "Relay 5", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_6, bind: { message: relay, field: relay_6, type: int }, on_press: toggle_relay_6 }
-          - { kind: label, id: relay_6_label, text: "Relay 6" }
+          - { kind: label, id: relay_6_label, text: "Relay 6", fill: true }
       - kind: row
         children:
           - { kind: toggle, id: relay_7, bind: { message: relay, field: relay_7, type: int }, on_press: toggle_relay_7 }
-          - { kind: label, id: relay_7_label, text: "Relay 7" }
+          - { kind: label, id: relay_7_label, text: "Relay 7", fill: true }

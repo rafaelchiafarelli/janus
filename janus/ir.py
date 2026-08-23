@@ -48,6 +48,12 @@ class Widget:
     collapsible: bool = False
     default_expanded: bool = True
     layout: Optional[Literal["column", "row"]] = None
+    # Stage 2: grow along the parent's main axis (column -> height, row ->
+    # width) to consume an equal share of whatever's left over after
+    # every sibling takes its normal size — see stage2_layout/layout.py.
+    # False (default) keeps today's pure intrinsic-size behavior
+    # unchanged; the cross axis is never affected by this.
+    fill: bool = False
     # "#RRGGBB" hex, packed to RGB565 at Stage 3b emission time — not
     # authored on-device, same "push work to build time" spirit as
     # geometry. `color` is the ink/foreground/on-state fill; `bg` is the

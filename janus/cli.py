@@ -55,7 +55,7 @@ def generate(
     (empty on a no-op re-run)."""
     app = parse_app(app_yaml)
     for screen in app.screens:
-        layout_screen(screen)
+        layout_screen(screen, app.display)
         if app.display is not None:
             check_fits_display(screen, app.display)
 

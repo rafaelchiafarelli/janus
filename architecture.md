@@ -215,6 +215,34 @@ children (sum along the stack direction, max across it) plus a fixed
 inter-sibling gap — no container is ever explicitly sized by the author.
 No widget ever authors its own position.
 
+**`fill` (added 2026-08-23) — the one exception to pure bottom-up
+sizing.** A widget authored `fill: true` grows along its *parent's* main
+axis (the stack direction — height for `column`, width for `row`) to
+consume an equal share of whatever's left over after every non-`fill`
+sibling takes its normal size and every inter-sibling `GAP` is
+subtracted; multiple `fill` siblings split the remainder evenly, the last
+one absorbing any rounding remainder. The cross axis is never touched —
+a `fill` leaf still gets its own explicit/default size there, a `fill`
+container still sizes its cross axis intrinsically from its own children
+— so this is single-axis growth, not a general stretch/flex model.
+Implemented as a top-down `avail` (a ceiling, forwarded to every child
+along the parent's cross axis regardless of `fill`, informational until
+something below actually claims it) plus `forced` (an authoritative
+override, set only on a widget's own main-axis dimension when its parent
+just gave it a `fill` share) threaded alongside the original bottom-up
+recursion in `_layout_widget`; a forced dimension folds into a widget's
+own `avail` before it sizes *its* children, which is what lets `fill`
+cascade through nested containers. Requires an unbroken chain of known
+sizes back to a screen with `app.display` set (`layout_screen` takes an
+optional `display: DisplayConfig | None` now, threaded from
+`janus/cli.py`) — `fill` on a widget whose container's own size on that
+axis is never resolved (no `app.display`, and no `fill`/explicit-size
+ancestor supplying it) raises `ValueError` rather than silently no-oping,
+same "validate, don't guess" spirit as `_REQUIRES_EXPLICIT_SIZE`. A
+screen with no `fill` widgets anywhere lays out byte-identical to before
+this existed — `avail`/`forced` thread through unconditionally, but only
+have any effect once a `fill` child exists to consume them.
+
 **Size resolution per leaf** (implements the split in `Janus.md`'s v1
 widget catalog):
 - `progress`, `gauge`, `image`, `led` — `size` is **required**; the layout
@@ -487,7 +515,71 @@ const janus_widget_desc_t *janus_get_focus(void);
 void janus_render_screen_async_start(const janus_screen_desc_t *screen);
 bool janus_render_poll(void);
 void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index);
+
+/* PROGMEM-safe: see "PROGMEM safety" below. Every caller that needs an
+ * entry out of janus_app_t.screens — the fixed library and every
+ * scaffolded main.c alike — goes through this, never a raw index. */
+const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t index);
 ```
+
+**PROGMEM safety (found on real AVR hardware, fixed 2026-08-23).**
+Generation-time-fixed UI data — every `janus_widget_desc_t`/
+`janus_screen_desc_t` instance, the `janus_app_screens[]` pointer table,
+and the `id`/`static_text`/screen-`name` string literals inside them — is
+emitted `JANUS_PROGMEM` (`runtime/embedded_c/include/janus_progmem.h`;
+`= PROGMEM` on `__AVR__`, blank elsewhere) so it stays flash-resident
+instead of avr-gcc's default of also shadowing every `const` global into
+RAM at startup (an ATmega2560 has 8 KiB total RAM — see Janus.md). On
+classic AVR (Harvard architecture), an ordinary pointer dereference
+(`->`, `[]`) only ever reads RAM; reading flash needs `pgm_read_byte`/
+`pgm_read_ptr`/`memcpy_P` instead (`janus_progmem.h`'s
+`JANUS_PGM_READ_U8`/`JANUS_PGM_READ_PTR`/`JANUS_MEMCPY_P` — real macros
+under `#ifdef __AVR__`, plain-memory identity operations off-AVR, so host
+builds and the host test suite can't observe this class of bug at all).
+Getting this wrong doesn't crash outright — a plain load from what's
+actually a flash byte offset just returns a plausible-looking garbage
+value, so a screen can render *mostly* correctly (or even fully, by luck)
+before a `fill_rect` with a garbage width sends `draw_area_sync` into an
+unbounded tiling loop. First hit bringing up `examples/host_demo`'s
+generated output on a real Mega2560 (`IHM/lib/GUI/`, ArduinoIHM's board
+firmware — see the memory note in that repo — not this one) — every prior
+verification of this stage had been host-only.
+
+Fix pattern, applied everywhere a `JANUS_PROGMEM` value is read:
+- A whole `janus_widget_desc_t`/`janus_screen_desc_t` struct: copy it into
+  a RAM-resident local first (`janus_widget_load()`/`janus_screen_load()`,
+  `static inline` in `janus_runtime.h`, one `JANUS_MEMCPY_P` each) and read
+  every field off that copy — simpler than a `pgm_read_*` per field since
+  both structs are flat POD. Used at the top of every function in
+  `janus_runtime.c`/`janus_input_focus.c`/`janus_input_touch.c` that used
+  to dereference a descriptor pointer directly.
+- A single byte out of a flash string (glyph lookup, `draw_string`'s
+  `from_flash` path): `JANUS_PGM_READ_U8` per byte, not a whole-string
+  copy — `janus_font.c`, `janus_runtime.c`'s `draw_glyph`/`draw_string`.
+- A pointer *out of* a `JANUS_PROGMEM` pointer table —
+  `janus_app_t.screens[]` specifically: `janus_app_get_screen(app, index)`
+  (`JANUS_PGM_READ_PTR` plus the bounds check every caller needs anyway).
+  **This one bites outside the fixed library too** — every scaffolded
+  `main.c` (`janus/templates/main_{touch,encoder,buttons}[_async].c.tmpl`,
+  Stage 8) reads the app's active screen to kick off the first render and
+  on every input-loop iteration; before 2026-08-23 these all did
+  `janus_app.screens[janus_app.active_screen]` directly, which happened to
+  be invisible on host builds (the macros collapse to identity there) but
+  fetched a garbage pointer on the real board — the actual bug ArduinoIHM
+  hit, not (only) anything inside the fixed library. Every template, plus
+  `examples/host_demo/src/main.c` (already-scaffolded, so regenerating
+  never touches it — had to be fixed by hand), now goes through
+  `janus_app_get_screen` instead.
+
+`emit_embedded_c.py` (Stage 3b) is the other half: it's what actually
+emits the `JANUS_PROGMEM` attribute on every generated array/struct, and
+routes every `id`/`static_text`/screen-`name` string through
+`_emit_flash_string()` — a named `static const char ... JANUS_PROGMEM`
+declaration per string, since an inline string literal has no way to
+carry its own `PROGMEM` attribute in C. `nav_titles` is the one exception,
+deliberately left as plain (RAM-shadowed) — nothing in `janus_runtime.c`
+reads a nav title yet (no tab-bar rendering implemented); revisit once
+that lands.
 
 **Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
 `janus_action_t` is defined by the *generated*, per-project
