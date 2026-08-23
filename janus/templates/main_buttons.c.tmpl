@@ -12,7 +12,7 @@ void display_driver_init(void);  /* vendor-provided, see src/display_driver.c */
 
 int main(void) {
     display_driver_init();
-    const janus_screen_desc_t *screen = janus_app.screens[janus_app.active_screen];
+    const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
     janus_render_screen(screen);
     janus_focus_move(screen, 0);   /* establish initial focus */
 
@@ -20,7 +20,7 @@ int main(void) {
         janus_button_event_t event;
         if (!janus_buttons_poll(&event)) continue;
 
-        screen = janus_app.screens[janus_app.active_screen];
+        screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
         if (event == JANUS_BUTTON_NEXT) { janus_focus_move(screen, 1); continue; }
         if (event == JANUS_BUTTON_PREV) { janus_focus_move(screen, -1); continue; }
 
@@ -32,7 +32,7 @@ int main(void) {
                 break;
             case JANUS_INPUT_NAVIGATE:
                 janus_switch_screen(&janus_app, (uint16_t)hit.navigate_target);
-                janus_focus_move(janus_app.screens[janus_app.active_screen], 0);
+                janus_focus_move(janus_app_get_screen(&janus_app, janus_app.active_screen), 0);
                 break;
             case JANUS_INPUT_TOGGLE_BOX:
                 janus_toggle_box(hit.widget);

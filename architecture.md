@@ -864,7 +864,7 @@ This is the "how does it all actually get compiled" question.
 1. `main()` calls the vendor's `display_driver_init()`.
 2. `main()` constructs `janus_app_t app` from `janus_app.gen.c`'s table,
    `active_screen = 0`.
-3. `main()` calls `janus_render_screen(app.screens[app.active_screen])`,
+3. `main()` calls `janus_render_screen(janus_app_get_screen(&app, app.active_screen))`,
    which walks that screen's `janus_widget_desc_t[]`; for each widget it
    dispatches to the matching internal `draw_<kind>()`, which reads the
    live value at `bind.field_offset` inside `bound_struct` and calls the

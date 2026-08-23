@@ -10,13 +10,13 @@ void display_driver_init(void);  /* vendor-provided, see src/display_driver.c */
 
 int main(void) {
     display_driver_init();
-    janus_render_screen(janus_app.screens[janus_app.active_screen]);
+    janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));
 
     while (1) {
         int16_t x, y;
         if (!janus_touch_poll(&x, &y)) continue;
 
-        const janus_screen_desc_t *screen = janus_app.screens[janus_app.active_screen];
+        const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
         janus_input_result_t hit = janus_touch_hit_test(screen, x, y);
         switch (hit.kind) {
             case JANUS_INPUT_ACTION:

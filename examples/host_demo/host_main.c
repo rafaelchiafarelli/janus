@@ -21,7 +21,7 @@ void display_driver_init(void);
 
 static void render_and_summarize(const char *label) {
     mock_driver_reset();
-    janus_render_screen(janus_app.screens[janus_app.active_screen]);
+    janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));
 
     printf("%s: %u draw_area_sync call(s)\n", label, (unsigned)mock_driver_log_count);
     for (uint16_t i = 0; i < mock_driver_log_count; i++) {
@@ -42,7 +42,7 @@ static void simulate_tap(int16_t x, int16_t y) {
     int16_t tx, ty;
     if (!janus_touch_poll(&tx, &ty)) return;
 
-    const janus_screen_desc_t *screen = janus_app.screens[janus_app.active_screen];
+    const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
     janus_input_result_t hit = janus_touch_hit_test(screen, tx, ty);
     switch (hit.kind) {
         case JANUS_INPUT_ACTION:
@@ -66,22 +66,22 @@ static void simulate_tap(int16_t x, int16_t y) {
 int main(void) {
     display_driver_init();
 
-    /* janus_bindings.gen.c only zero-inits device_instance (Janus
-     * generates the struct's shape, not its data — see architecture.md
-     * Stage 7); real firmware would populate this from a sensor read or
-     * a ZMQ receive callback, this demo just fakes that step. */
-    device_instance.name = "demo-unit";
-    device_instance.battery_level = 42;
-    device_instance.online = 1;
+    /* janus_bindings.gen.c only zero-inits pwm_instance (Janus generates
+     * the struct's shape, not its data — see architecture.md Stage 7);
+     * real firmware would populate this from a sensor read or a ZMQ
+     * receive callback, this demo just fakes that step. */
+    pwm_instance.ch0_enabled = 1;
+    pwm_instance.ch0_frequency = 20000;
+    pwm_instance.ch0_duty_percent = 42;
 
-    render_and_summarize("initial render (diagnostics box starts collapsed)");
-
-    printf("\n");
-    simulate_tap(10, 80);   /* inside diagnostics_box's header: {0,72,24,16} */
-    render_and_summarize("re-render after the tap (box now expanded)");
+    render_and_summarize("initial render (pwm_ch0_box starts expanded)");
 
     printf("\n");
-    simulate_tap(10, 140);  /* inside reboot_button: {0,132,64,20} */
+    simulate_tap(10, 24);   /* inside pwm_ch0_box's header: {0,18,92,16} */
+    render_and_summarize("re-render after the tap (box now collapsed)");
+
+    printf("\n");
+    simulate_tap(5, 40);    /* inside pwm_ch0_enabled toggle: {0,34,20,12} — bind-only, no touch action */
 
     return 0;
 }

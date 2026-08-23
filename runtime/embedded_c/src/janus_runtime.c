@@ -436,6 +436,11 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
     }
 }
 
+const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t index) {
+    if (index >= app->screen_count) return NULL;
+    return JANUS_PGM_READ_PTR(&app->screens[index]);
+}
+
 void janus_render_screen(const janus_screen_desc_t *screen) {
     g_current_screen = screen;
     janus_screen_desc_t ls = janus_screen_load(screen);
@@ -454,8 +459,7 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
      * with janus_focus_move(new_screen, 0) right after this. */
     janus_set_focus(NULL);
     app->active_screen = screen_index;
-    const janus_screen_desc_t *screen = JANUS_PGM_READ_PTR(&app->screens[screen_index]);
-    janus_render_screen(screen);
+    janus_render_screen(janus_app_get_screen(app, screen_index));
 }
 
 void janus_render_screen_async_start(const janus_screen_desc_t *screen) {
@@ -491,8 +495,7 @@ void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index) {
     if (screen_index >= app->screen_count) return;
     janus_set_focus(NULL);   /* same reasoning as janus_switch_screen */
     app->active_screen = screen_index;
-    const janus_screen_desc_t *screen = JANUS_PGM_READ_PTR(&app->screens[screen_index]);
-    janus_render_screen_async_start(screen);
+    janus_render_screen_async_start(janus_app_get_screen(app, screen_index));
 }
 
 void janus_set_focus(const janus_widget_desc_t *widget) {

@@ -121,8 +121,8 @@ typedef struct {
 
 typedef struct {
     const janus_screen_desc_t *const *screens;   /* generated as a JANUS_PROGMEM pointer table on
-                                                   * AVR — read via JANUS_PGM_READ_PTR(&screens[i]),
-                                                   * never a plain array index (janus_runtime.c) */
+                                                   * AVR — read via janus_app_get_screen(app, i)
+                                                   * below, never a plain array index */
     const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset (no tab bar) */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
@@ -164,6 +164,15 @@ static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *s
 void draw_area_sync(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
 bool draw_area_async(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint16_t *pixels);
 bool display_busy(void);
+
+/* app->screens is a JANUS_PROGMEM pointer table on AVR (see janus_app_t
+ * above) — this is the one safe way to read an entry out of it. Every
+ * scaffolded main.c (janus/templates/main_*.c.tmpl) uses this instead of
+ * `janus_app.screens[i]` directly for that reason; a raw index there
+ * looked fine on host builds (where the PROGMEM macros are plain memory
+ * ops, janus_progmem.h) but fetched a garbage pointer on real AVR
+ * hardware. Returns NULL if `index` is out of range. */
+const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t index);
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);

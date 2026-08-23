@@ -22,7 +22,7 @@ class TestRenderMainC(unittest.TestCase):
     def test_boots_driver_then_renders_active_screen(self) -> None:
         out = render_main_c()
         self.assertIn("display_driver_init();", out)
-        self.assertIn("janus_render_screen(janus_app.screens[janus_app.active_screen]);", out)
+        self.assertIn("janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));", out)
         self.assertIn("int main(void) {", out)
 
     def test_braces_balance(self) -> None:
@@ -72,10 +72,10 @@ class TestRenderMainCButtons(unittest.TestCase):
 class TestRenderMainCNonBlocking(unittest.TestCase):
     def test_touch_uses_async_render_entry_points(self) -> None:
         out = render_main_c("touch", "non_blocking")
-        self.assertIn("janus_render_screen_async_start(janus_app.screens[janus_app.active_screen]);", out)
+        self.assertIn("janus_render_screen_async_start(janus_app_get_screen(&janus_app, janus_app.active_screen));", out)
         self.assertIn("janus_render_poll();", out)
         self.assertIn("janus_switch_screen_async_start(&janus_app, (uint16_t)hit.navigate_target);", out)
-        self.assertNotIn("janus_render_screen(janus_app.screens[janus_app.active_screen]);", out)
+        self.assertNotIn("janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));", out)
 
     def test_encoder_and_buttons_also_use_async_render_entry_points(self) -> None:
         for modality in ("encoder", "buttons"):
@@ -115,7 +115,7 @@ class TestScaffoldMainC(unittest.TestCase):
 
     def test_scaffolds_blocking_when_no_display_declared(self) -> None:
         scaffold_main_c(self.app, self.path)
-        self.assertIn("janus_render_screen(janus_app.screens[janus_app.active_screen]);", self.path.read_text())
+        self.assertIn("janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));", self.path.read_text())
 
     def test_scaffolds_non_blocking_when_the_display_declares_it(self) -> None:
         app = App(screens=[], display=DisplayConfig(width=240, height=320, color="mono", render_mode="non_blocking"))
