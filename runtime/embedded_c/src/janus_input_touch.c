@@ -6,15 +6,17 @@ static bool point_in_rect(int16_t x, int16_t y, janus_rect_t r) {
 
 static bool hit_test_widget(const janus_widget_desc_t *w, int16_t x, int16_t y,
                              janus_input_result_t *out) {
-    if (w->kind == JANUS_WIDGET_BOX) {
-        if (point_in_rect(x, y, w->geometry_collapsed)) {
+    janus_widget_desc_t lw = janus_widget_load(w);
+
+    if (lw.kind == JANUS_WIDGET_BOX) {
+        if (point_in_rect(x, y, lw.geometry_collapsed)) {
             out->kind = JANUS_INPUT_TOGGLE_BOX;
             out->widget = w;
             return true;
         }
         if (janus_box_is_expanded(w)) {
-            for (uint16_t i = 0; i < w->child_count; i++) {
-                if (hit_test_widget(&w->children[i], x, y, out)) return true;
+            for (uint16_t i = 0; i < lw.child_count; i++) {
+                if (hit_test_widget(&lw.children[i], x, y, out)) return true;
             }
         }
         return false;
@@ -23,27 +25,27 @@ static bool hit_test_widget(const janus_widget_desc_t *w, int16_t x, int16_t y,
     /* structural containers — no rect of their own action-wise (Janus.md
      * widget catalog); a hit anywhere in them is really a hit on one of
      * their children, or nothing. */
-    if (w->kind == JANUS_WIDGET_COLUMN || w->kind == JANUS_WIDGET_ROW ||
-        w->kind == JANUS_WIDGET_RADIOGROUP) {
-        for (uint16_t i = 0; i < w->child_count; i++) {
-            if (hit_test_widget(&w->children[i], x, y, out)) return true;
+    if (lw.kind == JANUS_WIDGET_COLUMN || lw.kind == JANUS_WIDGET_ROW ||
+        lw.kind == JANUS_WIDGET_RADIOGROUP) {
+        for (uint16_t i = 0; i < lw.child_count; i++) {
+            if (hit_test_widget(&lw.children[i], x, y, out)) return true;
         }
         return false;
     }
 
     /* leaf */
-    if (!point_in_rect(x, y, w->geometry)) return false;
+    if (!point_in_rect(x, y, lw.geometry)) return false;
 
-    if (w->navigate_target >= 0) {
+    if (lw.navigate_target >= 0) {
         out->kind = JANUS_INPUT_NAVIGATE;
         out->widget = w;
-        out->navigate_target = w->navigate_target;
+        out->navigate_target = lw.navigate_target;
         return true;
     }
-    if (w->action != JANUS_ACTION_ID_NONE) {
+    if (lw.action != JANUS_ACTION_ID_NONE) {
         out->kind = JANUS_INPUT_ACTION;
         out->widget = w;
-        out->action = w->action;
+        out->action = lw.action;
         return true;
     }
     /* hit a leaf with no attached behavior (a plain label, an unwired
@@ -56,8 +58,9 @@ janus_input_result_t janus_touch_hit_test(const janus_screen_desc_t *screen, int
         .kind = JANUS_INPUT_NONE, .widget = NULL,
         .action = JANUS_ACTION_ID_NONE, .navigate_target = -1,
     };
-    for (uint16_t i = 0; i < screen->widget_count; i++) {
-        if (hit_test_widget(&screen->widgets[i], x, y, &result)) break;
+    janus_screen_desc_t ls = janus_screen_load(screen);
+    for (uint16_t i = 0; i < ls.widget_count; i++) {
+        if (hit_test_widget(&ls.widgets[i], x, y, &result)) break;
     }
     return result;
 }

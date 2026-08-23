@@ -21,6 +21,29 @@ def _balanced_braces(text: str) -> bool:
     return depth == 0
 
 
+def _find_flash_string_var(out: str, value: str) -> str:
+    """Widget id/static_text and a screen's own name are generated as named
+    `JANUS_PROGMEM` string constants (flash residency — see
+    emit_embedded_c.py's _emit_flash_string) rather than inline literals, so
+    tests locate a constant's variable name from its own declaration first,
+    then use that name to find wherever it's referenced (`.id = `, `.name =
+    `, ...)."""
+    decl = f'JANUS_PROGMEM = "{value}";'
+    decl_idx = out.index(decl)
+    name_start = out.rindex("const char ", 0, decl_idx) + len("const char ")
+    name_end = out.index("[", name_start)
+    return out[name_start:name_end]
+
+
+def _widget_segment(out: str, widget_id: str, span: int = 400) -> str:
+    """The generated initializer text for the widget authored with
+    `widget_id`, found via its id's flash-string declaration (see
+    `_find_flash_string_var`) rather than an inline `.id = "..."` search."""
+    var = _find_flash_string_var(out, widget_id)
+    use_idx = out.index(f".id = {var}")
+    return out[use_idx: use_idx + span]
+
+
 class TestEmitEmbeddedC(unittest.TestCase):
     def setUp(self) -> None:
         screen = parse_screen(FIXTURES / "user_profile.screen.yaml")
@@ -31,7 +54,7 @@ class TestEmitEmbeddedC(unittest.TestCase):
         self.assertTrue(_balanced_braces(self.out))
 
     def test_top_level_widgets_array_has_both_children(self) -> None:
-        self.assertIn("static const janus_widget_desc_t userprofile_widgets[] = {", self.out)
+        self.assertIn("static const janus_widget_desc_t userprofile_widgets[] JANUS_PROGMEM = {", self.out)
         self.assertIn(".widget_count = 2,", self.out)
 
     def test_nested_row_gets_its_own_array_emitted_before_use(self) -> None:
@@ -46,10 +69,8 @@ class TestEmitEmbeddedC(unittest.TestCase):
         self.assertIn("JANUS_FIELD_INT,", self.out)
 
     def test_static_label_has_no_bind(self) -> None:
-        self.assertIn('.id = "battery_caption"', self.out)
         # the static caption's own entry has no offsetof call right after its id
-        idx = self.out.index('.id = "battery_caption"')
-        segment = self.out[idx: idx + 200]
+        segment = _widget_segment(self.out, "battery_caption", 200)
         self.assertIn("JANUS_FIELD_NONE", segment)
 
     def test_geometry_baked_in(self) -> None:
@@ -57,19 +78,19 @@ class TestEmitEmbeddedC(unittest.TestCase):
         self.assertIn(".geometry = {64, 16, 80, 12}", self.out)  # battery_bar
 
     def test_screen_desc_name(self) -> None:
-        self.assertIn('.name = "UserProfile",', self.out)
+        var = _find_flash_string_var(self.out, "UserProfile")
+        self.assertIn(f".name = {var},", self.out)
 
     def test_bound_struct_points_at_the_single_message_instance(self) -> None:
         self.assertIn(".bound_struct = &user_instance,", self.out)
 
     def test_static_text_widget_gets_its_text_baked_in(self) -> None:
-        idx = self.out.index('.id = "battery_caption"')
-        segment = self.out[idx: idx + 200]
-        self.assertIn('.static_text = "Battery:",', segment)
+        segment = _widget_segment(self.out, "battery_caption", 200)
+        text_var = _find_flash_string_var(self.out, "Battery:")
+        self.assertIn(f".static_text = {text_var},", segment)
 
     def test_bound_widget_has_null_static_text(self) -> None:
-        idx = self.out.index('.id = "name_label"')
-        segment = self.out[idx: idx + 200]
+        segment = _widget_segment(self.out, "name_label", 200)
         self.assertIn(".static_text = NULL,", segment)
 
 
@@ -144,8 +165,7 @@ class TestEmitEmbeddedCBox(unittest.TestCase):
         self.assertIn("offsetof(dev_t, status)", self.out)
 
     def test_box_default_expanded_true_is_baked_in(self) -> None:
-        idx = self.out.index('.id = "net_box"')
-        segment = self.out[idx: idx + 300]
+        segment = _widget_segment(self.out, "net_box", 300)
         self.assertIn(".initial_expanded = true", segment)
 
 
@@ -164,8 +184,7 @@ class TestEmitEmbeddedCBoxCollapsedByDefault(unittest.TestCase):
         self.out = emit_screen(screen)
 
     def test_initial_expanded_false_is_baked_in(self) -> None:
-        idx = self.out.index('.id = "settings_box"')
-        segment = self.out[idx: idx + 300]
+        segment = _widget_segment(self.out, "settings_box", 300)
         self.assertIn(".initial_expanded = false", segment)
 
 
@@ -204,8 +223,7 @@ class TestEmitEmbeddedCLowEffortKinds(unittest.TestCase):
 
     def test_slider_reuses_progress_style_bind_with_range(self) -> None:
         self.assertIn("offsetof(dev_t, level)", self.out)
-        idx = self.out.index('.id = "s"')
-        segment = self.out[idx: idx + 300]
+        segment = _widget_segment(self.out, "s", 300)
         self.assertIn(".range_min = 0, .range_max = 100", segment)
 
 
@@ -216,8 +234,7 @@ class TestEmitEmbeddedCFocusOrder(unittest.TestCase):
     for forward declarations only, see emit_embedded_c.py)."""
 
     def _segment(self, out: str, widget_id: str) -> str:
-        idx = out.index(f'.id = "{widget_id}"')
-        return out[idx: idx + 400]
+        return _widget_segment(out, widget_id, 400)
 
     def test_button_with_on_press_is_focusable(self) -> None:
         screen = Screen(

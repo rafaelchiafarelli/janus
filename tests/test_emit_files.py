@@ -61,7 +61,7 @@ class TestEmitFiles(unittest.TestCase):
 
         out = render_screen_source(self.app.screens[0], screen_index_map(self.app))
         self.assertIn('#include "one_screen.gen.h"', out)
-        self.assertIn("const janus_screen_desc_t one_screen = {", out)
+        self.assertIn("const janus_screen_desc_t one_screen JANUS_PROGMEM = {", out)
         self.assertIn(".navigate_target = 1", out)  # "Two" is index 1
         self.assertTrue(_balanced_braces(out))
 

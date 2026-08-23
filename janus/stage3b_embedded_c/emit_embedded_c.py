@@ -96,6 +96,20 @@ def _c_string(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _emit_flash_string(lines: list[str], sv: str, str_counter: list[int], value: str) -> str:
+    """Emits (via `lines`) a `JANUS_PROGMEM` string constant and returns the
+    variable name to reference it by. Widget `id`/`static_text` and a
+    screen's own `name` are all generation-time-fixed string data — same
+    "flash only, no RAM shadow on AVR" reasoning as the descriptor arrays
+    themselves (janus_progmem.h), and inline string literals have no way to
+    carry a `PROGMEM` attribute of their own in C, so each needs its own
+    named declaration ahead of whatever initializer references it."""
+    str_counter[0] += 1
+    name = f"{sv}_str{str_counter[0]}"
+    lines.append(f"static const char {name}[] JANUS_PROGMEM = {_c_string(value)};")
+    return name
+
+
 def _rect(r) -> str:
     return f"{{{r.x}, {r.y}, {r.w}, {r.h}}}" if r is not None else "{0, 0, 0, 0}"
 
@@ -230,6 +244,9 @@ def _widget_init(
     child_count: int,
     screen_index_by_name: dict[str, int] | None,
     focus_order_map: dict[int, int],
+    lines: list[str],
+    sv: str,
+    str_counter: list[int],
 ) -> str:
     if widget.bind is not None:
         struct_type = f"{widget.bind.message}_t"
@@ -255,13 +272,17 @@ def _widget_init(
         navigate_target_c = "-1"
 
     initial_expanded_c = "true" if widget.default_expanded else "false"
-    static_text_c = _c_string(widget.text) if widget.text is not None else "NULL"
+    static_text_c = (
+        _emit_flash_string(lines, sv, str_counter, widget.text)
+        if widget.text is not None else "NULL"
+    )
+    id_c = _emit_flash_string(lines, sv, str_counter, widget.id)
     focus_order_c = str(focus_order_map.get(id(widget), FOCUS_ORDER_NONE))
     color_c = _color_c(widget.color, "JANUS_COLOR_DEFAULT_FG")
     bg_color_c = _color_c(widget.bg, "JANUS_COLOR_DEFAULT_BG")
 
     return (
-        f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {_c_string(widget.id)}, "
+        f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {id_c}, "
         f".static_text = {static_text_c}, "
         f".geometry = {_rect(widget.geometry)}, "
         f".geometry_collapsed = {_rect(widget.geometry_collapsed)}, "
@@ -281,6 +302,7 @@ def _emit_widget(
     counter: list[int],
     screen_index_by_name: dict[str, int] | None,
     focus_order_map: dict[int, int],
+    str_counter: list[int],
 ) -> str:
     """Emits (via `lines`) this widget's own children array, if it has
     any — children first, so a container's array is only ever referenced
@@ -292,7 +314,7 @@ def _emit_widget(
     child_count = 0
     if widget.children:
         child_inits = [
-            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map)
+            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map, str_counter)
             for c in widget.children
         ]
         counter[0] += 1
@@ -300,9 +322,12 @@ def _emit_widget(
         child_count = len(child_inits)
         body = ",\n".join(f"    {ci}" for ci in child_inits)
         lines.append(
-            f"static const janus_widget_desc_t {children_array_name}[] = {{\n{body}\n}};"
+            f"static const janus_widget_desc_t {children_array_name}[] JANUS_PROGMEM = {{\n{body}\n}};"
         )
-    return _widget_init(widget, children_array_name, child_count, screen_index_by_name, focus_order_map)
+    return _widget_init(
+        widget, children_array_name, child_count, screen_index_by_name, focus_order_map,
+        lines, sv, str_counter,
+    )
 
 
 def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = None) -> str:
@@ -312,15 +337,16 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
     sv = screen_var(screen.name)
     lines: list[str] = []
     counter = [0]
+    str_counter = [0]
     focus_order_map = _assign_focus_order(screen.root)
 
     top_inits = [
-        _emit_widget(child, lines, sv, counter, screen_index_by_name, focus_order_map)
+        _emit_widget(child, lines, sv, counter, screen_index_by_name, focus_order_map, str_counter)
         for child in screen.root.children
     ]
     widgets_array = f"{sv}_widgets"
     body = ",\n".join(f"    {init}" for init in top_inits)
-    lines.append(f"static const janus_widget_desc_t {widgets_array}[] = {{\n{body}\n}};")
+    lines.append(f"static const janus_widget_desc_t {widgets_array}[] JANUS_PROGMEM = {{\n{body}\n}};")
 
     messages = screen_bound_messages(screen)
     if len(messages) > 1:
@@ -330,10 +356,11 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
             f"screen (see architecture.md Stage 3b/7)"
         )
     bound_struct_c = f"&{messages[0]}_instance" if messages else "NULL"
+    name_c = _emit_flash_string(lines, sv, str_counter, screen.name)
 
     lines.append(
-        f"const janus_screen_desc_t {sv}_screen = {{\n"
-        f"    .name = {_c_string(screen.name)},\n"
+        f"const janus_screen_desc_t {sv}_screen JANUS_PROGMEM = {{\n"
+        f"    .name = {name_c},\n"
         f"    .widgets = {widgets_array},\n"
         f"    .widget_count = {len(top_inits)},\n"
         f"    .bound_struct = {bound_struct_c},\n"
@@ -396,7 +423,7 @@ def emit_app_table(app: App) -> str:
 
     lines = [
         "\n".join(f"extern const janus_screen_desc_t {sv}_screen;" for sv in screen_vars),
-        "static const janus_screen_desc_t *const janus_app_screens[] = {\n"
+        "static const janus_screen_desc_t *const janus_app_screens[] JANUS_PROGMEM = {\n"
         + ",\n".join(f"    &{sv}_screen" for sv in screen_vars)
         + "\n};",
     ]
@@ -406,11 +433,16 @@ def emit_app_table(app: App) -> str:
         missing = [s.name for s in app.screens if s.name not in title_by_screen]
         if missing:
             raise ValueError(f"app.nav is missing a title for screen(s): {missing}")
+        # Title bytes themselves stay plain (RAM-shadowed) literals for now —
+        # nothing in janus_runtime.c reads a nav title yet (no tab-bar
+        # rendering implemented), unlike widget id/static_text/screen name
+        # above, which the runtime does read. Revisit (JANUS_PROGMEM +
+        # _emit_flash_string, same as those) once tab-bar rendering lands.
         titles_body = ",\n".join(
             f"    {_c_string(title_by_screen[s.name])}" for s in app.screens
         )
         lines.append(
-            f"static const char *const janus_app_nav_titles[] = {{\n{titles_body}\n}};"
+            f"static const char *const janus_app_nav_titles[] JANUS_PROGMEM = {{\n{titles_body}\n}};"
         )
         titles_ref = "janus_app_nav_titles"
     else:

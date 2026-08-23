@@ -1,0 +1,114 @@
+# PWM tab -- 2 simplex channels (CH0/Timer3/OC3A, CH1/Timer5/OC5A) and
+# 2 complex channels (CH2/Timer1/OC1A,B,C, CH3/Timer4/OC4A,B,C).
+# Field shapes mirror PWMChannelConfig / PWMComplexChannelConfig
+# (lib/MultiOutput/src/PWMChannelConfig.h). Widget sizes are kept small
+# and explicit throughout so all 4 channels fit the 320x240 panel at once
+# (Janus's layout pass has no scrolling -- see app.yaml's display block).
+screen: PWM
+layout: column
+children:
+  - { kind: header, id: pwm_header, text: "PWM", size: { w: 180, h: 14 } }
+
+  - kind: row
+    children:
+      - kind: column
+        id: pwm_simplex_col
+        children:
+          - kind: box
+            id: pwm_ch0_box
+            layout: column
+            collapsible: true
+            default_expanded: true
+            children:
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch0_enabled, bind: { message: pwm, field: ch0_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch0_enabled_label, text: "En", size: { w: 18, h: 12 } }
+                  - { kind: toggle, id: pwm_ch0_inverting, bind: { message: pwm, field: ch0_inverting, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch0_inverting_label, text: "Inv", size: { w: 22, h: 12 } }
+              - kind: row
+                children:
+                  - { kind: label, id: pwm_ch0_freq_label, text: "F", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch0_freq, bind: { message: pwm, field: ch0_frequency, type: int }, size: { w: 30, h: 12 } }
+                  - { kind: label, id: pwm_ch0_top_label, text: "T", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch0_top, bind: { message: pwm, field: ch0_variable_top, type: int }, size: { w: 30, h: 12 } }
+              - { kind: progress, id: pwm_ch0_duty, bind: { message: pwm, field: ch0_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 92, h: 10 } }
+
+          - kind: box
+            id: pwm_ch1_box
+            layout: column
+            collapsible: true
+            default_expanded: true
+            children:
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch1_enabled, bind: { message: pwm, field: ch1_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch1_enabled_label, text: "En", size: { w: 18, h: 12 } }
+                  - { kind: toggle, id: pwm_ch1_inverting, bind: { message: pwm, field: ch1_inverting, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch1_inverting_label, text: "Inv", size: { w: 22, h: 12 } }
+              - kind: row
+                children:
+                  - { kind: label, id: pwm_ch1_freq_label, text: "F", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch1_freq, bind: { message: pwm, field: ch1_frequency, type: int }, size: { w: 30, h: 12 } }
+                  - { kind: label, id: pwm_ch1_top_label, text: "T", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch1_top, bind: { message: pwm, field: ch1_variable_top, type: int }, size: { w: 30, h: 12 } }
+              - { kind: progress, id: pwm_ch1_duty, bind: { message: pwm, field: ch1_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 92, h: 10 } }
+
+      - kind: column
+        id: pwm_complex_col
+        children:
+          - kind: box
+            id: pwm_ch2_box
+            layout: column
+            collapsible: true
+            default_expanded: false
+            children:
+              - kind: row
+                children:
+                  - { kind: label, id: pwm_ch2_freq_label, text: "F", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch2_freq, bind: { message: pwm, field: ch2_frequency, type: int }, size: { w: 30, h: 12 } }
+                  - { kind: label, id: pwm_ch2_top_label, text: "T", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch2_top, bind: { message: pwm, field: ch2_variable_top, type: int }, size: { w: 30, h: 12 } }
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch2_a_enabled, bind: { message: pwm, field: ch2_a_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch2_a_label, text: "A", size: { w: 14, h: 12 } }
+                  - { kind: progress, id: pwm_ch2_a_duty, bind: { message: pwm, field: ch2_a_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 46, h: 10 } }
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch2_b_enabled, bind: { message: pwm, field: ch2_b_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch2_b_label, text: "B", size: { w: 14, h: 12 } }
+                  - { kind: progress, id: pwm_ch2_b_duty, bind: { message: pwm, field: ch2_b_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 46, h: 10 } }
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch2_c_enabled, bind: { message: pwm, field: ch2_c_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch2_c_label, text: "C", size: { w: 14, h: 12 } }
+                  - { kind: progress, id: pwm_ch2_c_duty, bind: { message: pwm, field: ch2_c_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 46, h: 10 } }
+
+          - kind: box
+            id: pwm_ch3_box
+            layout: column
+            collapsible: true
+            default_expanded: false
+            children:
+              - kind: row
+                children:
+                  - { kind: label, id: pwm_ch3_freq_label, text: "F", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch3_freq, bind: { message: pwm, field: ch3_frequency, type: int }, size: { w: 30, h: 12 } }
+                  - { kind: label, id: pwm_ch3_top_label, text: "T", size: { w: 10, h: 12 } }
+                  - { kind: label, id: pwm_ch3_top, bind: { message: pwm, field: ch3_variable_top, type: int }, size: { w: 30, h: 12 } }
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch3_a_enabled, bind: { message: pwm, field: ch3_a_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch3_a_label, text: "A", size: { w: 14, h: 12 } }
+                  - { kind: progress, id: pwm_ch3_a_duty, bind: { message: pwm, field: ch3_a_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 46, h: 10 } }
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch3_b_enabled, bind: { message: pwm, field: ch3_b_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch3_b_label, text: "B", size: { w: 14, h: 12 } }
+                  - { kind: progress, id: pwm_ch3_b_duty, bind: { message: pwm, field: ch3_b_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 46, h: 10 } }
+              - kind: row
+                children:
+                  - { kind: toggle, id: pwm_ch3_c_enabled, bind: { message: pwm, field: ch3_c_enabled, type: int }, size: { w: 20, h: 12 } }
+                  - { kind: label, id: pwm_ch3_c_label, text: "C", size: { w: 14, h: 12 } }
+                  - { kind: progress, id: pwm_ch3_c_duty, bind: { message: pwm, field: ch3_c_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 46, h: 10 } }

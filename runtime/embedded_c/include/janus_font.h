@@ -29,7 +29,10 @@
 #define JANUS_FONT_GLYPH_H 7
 
 /* Returns the glyph's 5 column-bytes (bit r = row r, 0 = top, 6 =
- * bottom; set = lit pixel), or NULL if `c` has no glyph in this font. */
+ * bottom; set = lit pixel), or NULL if `c` has no glyph in this font.
+ * Flash-resident (JANUS_PROGMEM) on AVR — read each byte via
+ * JANUS_PGM_READ_U8 (janus_progmem.h), never a plain dereference; see
+ * janus_runtime.c's draw_glyph. */
 const uint8_t *janus_font_glyph(char c);
 
 #endif /* JANUS_FONT_H */

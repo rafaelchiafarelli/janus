@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 static bool is_focusable(const janus_widget_desc_t *w) {
-    return w->focus_order != JANUS_FOCUS_NONE;
+    return janus_widget_load(w).focus_order != JANUS_FOCUS_NONE;
 }
 
 /* Depth-first, left-to-right — same order janus_runtime.c's render_widget
@@ -17,19 +17,21 @@ static bool is_focusable(const janus_widget_desc_t *w) {
 typedef bool (*focus_visitor_t)(const janus_widget_desc_t *w, void *ctx);
 
 static bool walk_focusable(const janus_widget_desc_t *w, focus_visitor_t visit, void *ctx) {
+    janus_widget_desc_t lw = janus_widget_load(w);
     if (is_focusable(w)) {
         if (visit(w, ctx)) return true;
     }
-    if (w->kind == JANUS_WIDGET_BOX && !janus_box_is_expanded(w)) return false;
-    for (uint16_t i = 0; i < w->child_count; i++) {
-        if (walk_focusable(&w->children[i], visit, ctx)) return true;
+    if (lw.kind == JANUS_WIDGET_BOX && !janus_box_is_expanded(w)) return false;
+    for (uint16_t i = 0; i < lw.child_count; i++) {
+        if (walk_focusable(&lw.children[i], visit, ctx)) return true;
     }
     return false;
 }
 
 static bool walk_screen(const janus_screen_desc_t *screen, focus_visitor_t visit, void *ctx) {
-    for (uint16_t i = 0; i < screen->widget_count; i++) {
-        if (walk_focusable(&screen->widgets[i], visit, ctx)) return true;
+    janus_screen_desc_t ls = janus_screen_load(screen);
+    for (uint16_t i = 0; i < ls.widget_count; i++) {
+        if (walk_focusable(&ls.widgets[i], visit, ctx)) return true;
     }
     return false;
 }
@@ -104,21 +106,22 @@ janus_input_result_t janus_focus_activate(const janus_screen_desc_t *screen) {
      * case — box always toggles; otherwise navigate wins over action if
      * somehow both are set (matches Stage 1's own on_press/navigate
      * handling, not a new tie-break). */
-    if (w->kind == JANUS_WIDGET_BOX) {
+    janus_widget_desc_t lw = janus_widget_load(w);
+    if (lw.kind == JANUS_WIDGET_BOX) {
         result.kind = JANUS_INPUT_TOGGLE_BOX;
         result.widget = w;
         return result;
     }
-    if (w->navigate_target >= 0) {
+    if (lw.navigate_target >= 0) {
         result.kind = JANUS_INPUT_NAVIGATE;
         result.widget = w;
-        result.navigate_target = w->navigate_target;
+        result.navigate_target = lw.navigate_target;
         return result;
     }
-    if (w->action != JANUS_ACTION_ID_NONE) {
+    if (lw.action != JANUS_ACTION_ID_NONE) {
         result.kind = JANUS_INPUT_ACTION;
         result.widget = w;
-        result.action = w->action;
+        result.action = lw.action;
         return result;
     }
     return result;

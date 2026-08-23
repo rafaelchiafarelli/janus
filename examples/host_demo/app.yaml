@@ -1,5 +1,16 @@
 screens:
-  - device_status.screen.yaml
+  - pwm.screen.yaml
+  - bus_status.screen.yaml
+  - relay.screen.yaml
+nav:
+  kind: tabs
+  targets:
+    - { screen: PWM, title: "PWM" }
+    - { screen: BusStatus, title: "SERIAL" }
+    - { screen: Relay, title: "Output" }
 display:
-  size: { w: 240, h: 320 }
-  color: mono
+  size: { w: 320, h: 240 }
+  color: rgb565
+  bus: parallel
+input:
+  modality: encoder

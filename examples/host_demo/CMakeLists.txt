@@ -9,7 +9,9 @@ set(JANUS_RUNTIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${RUNTIME_DIR} janus_runtime_build)
 
 set(GENERATED_SOURCES
-    build/generated/devicestatus_screen.gen.c
+    build/generated/pwm_screen.gen.c
+    build/generated/busstatus_screen.gen.c
+    build/generated/relay_screen.gen.c
     build/generated/janus_app.gen.c
     build/generated/janus_bindings.gen.c
 )

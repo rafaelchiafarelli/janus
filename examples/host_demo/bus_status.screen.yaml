@@ -1,0 +1,43 @@
+# SERIAL tab -- read-only monitor of the CAN0/CAN1/RS-485 signal-generator
+# config received over MAVLink from the PC app (BusStatusScreen.h,
+# lib/MavlinkComms/src/MavlinkComms.h). No encoder-driven editing here,
+# matching the real screen's cursor-less behavior.
+screen: BusStatus
+layout: column
+children:
+  - { kind: header, id: bus_status_header, text: "SERIAL" }
+
+  - kind: box
+    id: can0_box
+    layout: row
+    collapsible: false
+    default_expanded: true
+    children:
+      - { kind: led, id: can0_led, bind: { message: bus_status, field: can0_enabled, type: int }, states: [off, on], size: { w: 10, h: 10 } }
+      - { kind: label, id: can0_label, text: "CAN0" }
+      - { kind: label, id: can0_id, bind: { message: bus_status, field: can0_id, type: int } }
+      - { kind: label, id: can0_dlc, bind: { message: bus_status, field: can0_dlc, type: int } }
+      - { kind: label, id: can0_extended, bind: { message: bus_status, field: can0_extended, type: int } }
+
+  - kind: box
+    id: can1_box
+    layout: row
+    collapsible: false
+    default_expanded: true
+    children:
+      - { kind: led, id: can1_led, bind: { message: bus_status, field: can1_enabled, type: int }, states: [off, on], size: { w: 10, h: 10 } }
+      - { kind: label, id: can1_label, text: "CAN1" }
+      - { kind: label, id: can1_id, bind: { message: bus_status, field: can1_id, type: int } }
+      - { kind: label, id: can1_dlc, bind: { message: bus_status, field: can1_dlc, type: int } }
+      - { kind: label, id: can1_extended, bind: { message: bus_status, field: can1_extended, type: int } }
+
+  - kind: box
+    id: rs485_box
+    layout: row
+    collapsible: false
+    default_expanded: true
+    children:
+      - { kind: led, id: rs485_led, bind: { message: bus_status, field: rs485_enabled, type: int }, states: [off, on], size: { w: 10, h: 10 } }
+      - { kind: label, id: rs485_label, text: "RS485" }
+      - { kind: label, id: rs485_length, bind: { message: bus_status, field: rs485_length, type: int } }
+      - { kind: label, id: rs485_period_ms, bind: { message: bus_status, field: rs485_period_ms, type: int } }

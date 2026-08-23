@@ -1,4 +1,5 @@
 #include "janus_font.h"
+#include "janus_progmem.h"
 
 #include <stddef.h>
 
@@ -10,7 +11,7 @@
  * Ordered by codepoint; index in this array has no meaning outside
  * glyph_index() below, which is the only thing that maps a character to a
  * row here. */
-static const uint8_t GLYPHS[123][JANUS_FONT_GLYPH_W] = {
+static const uint8_t GLYPHS[123][JANUS_FONT_GLYPH_W] JANUS_PROGMEM = {
     { 0x00, 0x00, 0x00, 0x00, 0x00 },  /* [0] space U+0020 */
     { 0x00, 0x00, 0x5f, 0x00, 0x00 },  /* [1] ! U+0021 */
     { 0x07, 0x00, 0x07, 0x00, 0x00 },  /* [2] " U+0022 */
