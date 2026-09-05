@@ -10,6 +10,7 @@ runnable directly as `python3 -m janus.cli`.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -94,6 +95,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    # Generation is "log and keep going" for soft failures (an image
+    # asset that won't decode, an oversized bitmap) — surface those on
+    # stderr instead of letting them pass silently.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     if not args.app_yaml.is_file():
         parser.error(f"{args.app_yaml}: no such file")

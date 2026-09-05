@@ -15,7 +15,12 @@ is the natural next increment here.
 """
 from __future__ import annotations
 
+import logging
+
 from ..ir import App, DisplayConfig, Screen, Widget
+from .image_asset import ImageAssetError, load_rgb565
+
+log = logging.getLogger("janus.emit")
 
 _KIND_ENUM = {
     "label": "JANUS_WIDGET_LABEL",
@@ -117,6 +122,34 @@ def _emit_flash_string(lines: list[str], sv: str, str_counter: list[int], value:
 
 def _rect(r) -> str:
     return f"{{{r.x}, {r.y}, {r.w}, {r.h}}}" if r is not None else "{0, 0, 0, 0}"
+
+
+def _image_fields_c(widget: Widget, lines: list[str], id_var: str) -> str:
+    """`.image_pixels / .image_w / .image_h / .image_error` for a widget.
+    Only an `image` with a `file:` does any work: it decodes + rescales
+    the file and emits (via `lines`) a `JANUS_PROGMEM` RGB565 array —
+    named after this widget's own id flash-string var (`{id_var}_px`) so
+    it needs no counter of its own — for `.image_pixels` to point at. A
+    decode/lookup failure is logged (never raised) and baked as
+    `.image_error = true`, which makes the runtime paint a magenta
+    placeholder over the widget's rect."""
+    if widget.kind != "image" or widget.image_file is None:
+        return ".image_pixels = NULL, .image_w = 0, .image_h = 0, .image_error = false"
+
+    target = widget.size or (
+        (widget.geometry.w, widget.geometry.h) if widget.geometry is not None else (0, 0)
+    )
+    tw, th = int(target[0]), int(target[1])
+    try:
+        pixels = load_rgb565(widget.image_file, tw, th)
+    except ImageAssetError as exc:
+        log.warning("image %r: %s — baking a magenta placeholder", widget.id or "<unnamed>", exc)
+        return ".image_pixels = NULL, .image_w = 0, .image_h = 0, .image_error = true"
+
+    name = f"{id_var}_px"
+    body = ", ".join(f"0x{value:04x}" for value in pixels)
+    lines.append(f"static const uint16_t {name}[] JANUS_PROGMEM = {{ {body} }};")
+    return f".image_pixels = {name}, .image_w = {tw}, .image_h = {th}, .image_error = false"
 
 
 def _pack_rgb565(hex_color: str) -> int:
@@ -294,6 +327,7 @@ def _widget_init(
     color_c = _color_c(widget.color, "JANUS_COLOR_DEFAULT_FG")
     bg_color_c = _color_c(widget.bg, "JANUS_COLOR_DEFAULT_BG")
     font_size_c = _FONT_SIZE_ENUM[widget.font_size]
+    image_fields_c = _image_fields_c(widget, lines, id_c)
 
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {id_c}, "
@@ -307,7 +341,8 @@ def _widget_init(
         f".color = {color_c}, .bg_color = {bg_color_c}, "
         f".font_size = {font_size_c}, .font_scale = {widget.font_scale}, "
         f".children = {children_array_name}, .child_count = {child_count}, "
-        f".summary_children = {summary_array_name}, .summary_child_count = {summary_count} }}"
+        f".summary_children = {summary_array_name}, .summary_child_count = {summary_count}, "
+        f"{image_fields_c} }}"
     )
 
 

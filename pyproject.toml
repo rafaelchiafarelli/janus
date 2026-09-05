@@ -3,7 +3,7 @@ name = "janus"
 version = "0.0.1"
 description = "Pre-harpia GUI schema + code generator"
 requires-python = ">=3.10"
-dependencies = ["PyYAML"]
+dependencies = ["PyYAML", "Pillow>=10"]
 
 [project.scripts]
 janus-generate = "janus.cli:main"

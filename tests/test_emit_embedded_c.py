@@ -1,5 +1,8 @@
+import tempfile
 import unittest
 from pathlib import Path
+
+from PIL import Image
 
 from janus.stage1_parse.dsl_yaml import parse_screen
 from janus.stage3b_embedded_c.emit_embedded_c import emit_screen
@@ -349,6 +352,70 @@ class TestEmitEmbeddedCFocusOrder(unittest.TestCase):
         self.assertIn(".focus_order = 0", self._segment(out, "box1"))
         self.assertIn(".focus_order = 1", self._segment(out, "inner_btn"))
         self.assertIn(".focus_order = 2", self._segment(out, "after_btn"))
+
+
+class TestEmitImageWidget(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _emit(self, image_file: str) -> str:
+        screen = Screen(
+            name="Img",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="image", id="logo", size=(4, 4), image_file=image_file),
+            ]),
+        )
+        return emit_screen(layout_screen(screen))
+
+    def _segment(self, out: str, widget_id: str) -> str:
+        var = _find_flash_string_var(out, widget_id)
+        use_idx = out.index(f".id = {var}")
+        return out[use_idx: use_idx + 900]
+
+    def test_decoded_image_bakes_a_pixel_array_referenced_by_the_widget(self) -> None:
+        path = self.dir / "logo.png"
+        Image.new("RGB", (4, 4), (255, 0, 0)).save(path)
+        out = self._emit(str(path))
+
+        id_var = _find_flash_string_var(out, "logo")
+        arr = f"{id_var}_px"
+        self.assertIn(f"static const uint16_t {arr}[] JANUS_PROGMEM = {{", out)
+        # 16 red pixels
+        self.assertIn("0xf800, 0xf800", out)
+        seg = self._segment(out, "logo")
+        self.assertIn(f".image_pixels = {arr},", seg)
+        self.assertIn(".image_w = 4, .image_h = 4,", seg)
+        self.assertIn(".image_error = false", seg)
+        # array declared before the initializer that points at it
+        self.assertLess(
+            out.index(f"static const uint16_t {arr}[]"),
+            out.index(f".image_pixels = {arr},"),
+        )
+
+    def test_missing_file_bakes_image_error_not_a_hard_failure(self) -> None:
+        out = self._emit(str(self.dir / "does_not_exist.png"))
+        seg = self._segment(out, "logo")
+        self.assertIn(".image_pixels = NULL,", seg)
+        self.assertIn(".image_error = true", seg)
+        self.assertNotIn("static const uint16_t img_str1_px[]", out)
+
+    def test_undecodable_file_bakes_image_error(self) -> None:
+        junk = self.dir / "junk.png"
+        junk.write_bytes(b"not an image at all")
+        seg = self._segment(self._emit(str(junk)), "logo")
+        self.assertIn(".image_error = true", seg)
+
+    def test_plain_image_without_a_file_keeps_the_null_stub_fields(self) -> None:
+        screen = Screen(
+            name="Img",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="image", id="logo", size=(4, 4)),
+            ]),
+        )
+        seg = self._segment(emit_screen(layout_screen(screen)), "logo")
+        self.assertIn(".image_pixels = NULL, .image_w = 0, .image_h = 0, .image_error = false", seg)
 
 
 if __name__ == "__main__":
