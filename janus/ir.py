@@ -15,6 +15,7 @@ DisplayController = Literal[
 ]
 InputModality = Literal["touch", "encoder", "buttons"]
 RenderMode = Literal["blocking", "non_blocking"]
+FontSize = Literal["medium", "large"]
 
 
 @dataclass
@@ -62,6 +63,16 @@ class Widget:
     # no color at all keep generating unchanged.
     color: Optional[str] = None
     bg: Optional[str] = None
+    # Which runtime/embedded_c/include/janus_font.h table this widget's
+    # text renders from ("large" == today's only size before this field
+    # existed, so it's the default — see janus_font.h for why LARGE == 0
+    # matters at the C struct level too), and an integer multiplier on top
+    # of that table's native glyph size. Meaningless on a widget that never
+    # draws text (unrestricted here, same as color/bg). `font_scale` is
+    # capped in _validate_widget below at large's own 20x28 footprint —
+    # see that function's comment for why.
+    font_size: FontSize = "large"
+    font_scale: int = 1
     children: list["Widget"] = field(default_factory=list)
     # box only: leaf widgets always rendered inside the header strip,
     # collapsed OR expanded — distinct from `children`, which only render

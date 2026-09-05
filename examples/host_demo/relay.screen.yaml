@@ -4,7 +4,7 @@
 screen: Relay
 layout: column
 children:
-  - { kind: header, id: relay_header, text: "Output" }
+  - { kind: header, id: relay_header, text: "Output", font_size: medium, size: { w: 80, h: 20 } }
   - kind: navlist
     id: relay_list
     layout: column

@@ -29,10 +29,25 @@
  * (janus_render_screen) drives draw_area_sync directly; the non-blocking
  * path (janus_render_screen_async_start / janus_render_poll, further
  * below) drives draw_area_async/display_busy instead, one call per poll.
+ *
+ * draw_glyph blits a whole (post-font_scale) glyph in one shot (no
+ * tiling), so the buffer also has to hold one full scaled glyph's pixels
+ * — at `large`'s native 20x28 that's 560 pixels (1120 B), bigger than the
+ * 16x16 fill tile (256 px / 512 B), so it now governs this buffer's size
+ * instead. This is exactly why font_scale is capped at large's own
+ * footprint (janus_font.h) rather than left open-ended: an uncapped scale
+ * would need either an unbounded buffer (blows the ~2 KiB budget) or
+ * tiling the glyph blit itself (more moving parts than a v1 with two
+ * fixed sizes needs) — capping keeps this single fixed-size buffer
+ * sufficient for every combination Stage 1 allows.
  */
 #define JANUS_TILE_W 16
 #define JANUS_TILE_H 16
-static uint16_t g_tile_buffer[JANUS_TILE_W * JANUS_TILE_H];
+#define JANUS_TILE_PIXELS (JANUS_TILE_W * JANUS_TILE_H)
+#define JANUS_GLYPH_PIXELS (JANUS_FONT_LARGE_GLYPH_W * JANUS_FONT_LARGE_GLYPH_H)
+#define JANUS_TILE_BUFFER_PIXELS \
+    (JANUS_GLYPH_PIXELS > JANUS_TILE_PIXELS ? JANUS_GLYPH_PIXELS : JANUS_TILE_PIXELS)
+static uint16_t g_tile_buffer[JANUS_TILE_BUFFER_PIXELS];
 
 /* --------------------------------------------------- non-blocking render --
  * janus_render_screen_async_start builds this queue by running the exact
@@ -65,10 +80,13 @@ static uint16_t g_tile_buffer[JANUS_TILE_W * JANUS_TILE_H];
 typedef enum { JANUS_ASYNC_OP_FILL, JANUS_ASYNC_OP_GLYPH } janus_async_op_kind_t;
 typedef struct {
     janus_async_op_kind_t kind;
-    int16_t x, y, w, h;            /* GLYPH: w/h unused, always JANUS_FONT_GLYPH_W/H */
+    int16_t x, y, w, h;            /* GLYPH: w/h unused — recomputed at drain time from
+                                     * font_size/scale (font_metrics()), same as draw_glyph itself */
     uint16_t color;                /* FILL: the fill value. GLYPH: fg */
     uint16_t bg;                   /* GLYPH only */
     const uint8_t *glyph;          /* GLYPH only */
+    janus_font_size_t font_size;   /* GLYPH only */
+    uint8_t scale;                 /* GLYPH only */
 } janus_async_op_t;
 
 static janus_async_op_t g_async_ops[JANUS_MAX_ASYNC_OPS];
@@ -84,13 +102,17 @@ static void async_enqueue_fill(int16_t x, int16_t y, int16_t w, int16_t h, uint1
     op->color = value;
 }
 
-static void async_enqueue_glyph(int16_t x, int16_t y, const uint8_t *glyph, uint16_t fg, uint16_t bg) {
+static void async_enqueue_glyph(int16_t x, int16_t y, const uint8_t *glyph,
+                                 janus_font_size_t font_size, uint8_t scale,
+                                 uint16_t fg, uint16_t bg) {
     if (g_async_op_count >= JANUS_MAX_ASYNC_OPS) return;
     janus_async_op_t *op = &g_async_ops[g_async_op_count++];
     op->kind = JANUS_ASYNC_OP_GLYPH;
     op->x = x; op->y = y;
     op->color = fg; op->bg = bg;
     op->glyph = glyph;
+    op->font_size = font_size;
+    op->scale = scale;
 }
 
 static void fill_rect(janus_rect_t rect, uint16_t value) {
@@ -131,23 +153,59 @@ static void fill_rect_fraction(janus_rect_t rect, double fraction,
     fill_rect(empty, empty_value);
 }
 
+/* --------------------------------------------------------- font tables --
+ * Maps a widget's `.font_size` to the table it reads from and that
+ * table's native (unscaled) dimensions — the one place that knowledge
+ * lives, so draw_string/draw_glyph and the async drain path (further
+ * below) never duplicate a `medium` vs `large` branch. */
+typedef struct { int16_t w, h; uint8_t col_bytes; } janus_font_metrics_t;
+
+static janus_font_metrics_t font_metrics(janus_font_size_t font_size) {
+    if (font_size == JANUS_FONT_SIZE_MEDIUM) {
+        janus_font_metrics_t m = {
+            JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H, JANUS_FONT_MEDIUM_GLYPH_COL_BYTES
+        };
+        return m;
+    }
+    janus_font_metrics_t m = {
+        JANUS_FONT_LARGE_GLYPH_W, JANUS_FONT_LARGE_GLYPH_H, JANUS_FONT_LARGE_GLYPH_COL_BYTES
+    };
+    return m;
+}
+
+static const uint8_t *font_glyph(janus_font_size_t font_size, char c) {
+    return (font_size == JANUS_FONT_SIZE_MEDIUM) ? janus_font_glyph_medium(c) : janus_font_glyph_large(c);
+}
+
 /* -------------------------------------------------------------- glyphs --
- * Reuses g_tile_buffer for the 5x7 = 35 pixels a glyph needs (well inside
- * the 256-pixel tile, same "one shared static scratch buffer, no malloc"
- * discipline as fill_rect above — not a second buffer).
+ * Reuses g_tile_buffer for the scaled glyph's pixels (that's what sizes
+ * JANUS_TILE_BUFFER_PIXELS above — same "one shared static scratch
+ * buffer, no malloc" discipline as fill_rect above — not a second
+ * buffer); draw_string has already clamped `scale` so this never exceeds
+ * that buffer (janus_font.h's doc comment on the cap). Each glyph column
+ * is `col_bytes` bytes (rows packed 8-per-byte, row 0 = top) since a
+ * single byte can't hold every row at either size this runtime ships.
  */
-static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph, uint16_t fg, uint16_t bg) {
+static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph,
+                        janus_font_size_t font_size, uint8_t scale,
+                        uint16_t fg, uint16_t bg) {
     if (g_async_enqueue) {
-        async_enqueue_glyph(x, y, glyph, fg, bg);
+        async_enqueue_glyph(x, y, glyph, font_size, scale, fg, bg);
         return;
     }
-    for (int16_t row = 0; row < JANUS_FONT_GLYPH_H; row++) {
-        for (int16_t col = 0; col < JANUS_FONT_GLYPH_W; col++) {
-            g_tile_buffer[row * JANUS_FONT_GLYPH_W + col] =
-                (JANUS_PGM_READ_U8(&glyph[col]) & (1 << row)) ? fg : bg;
+    janus_font_metrics_t m = font_metrics(font_size);
+    int16_t scaled_w = (int16_t)(m.w * scale);
+    int16_t scaled_h = (int16_t)(m.h * scale);
+    for (int16_t row = 0; row < scaled_h; row++) {
+        int16_t src_row = (int16_t)(row / scale);
+        for (int16_t col = 0; col < scaled_w; col++) {
+            int16_t src_col = (int16_t)(col / scale);
+            uint8_t byte = JANUS_PGM_READ_U8(&glyph[src_col * m.col_bytes + src_row / 8]);
+            g_tile_buffer[row * scaled_w + col] =
+                (byte & (1 << (src_row % 8))) ? fg : bg;
         }
     }
-    draw_area_sync((uint16_t)x, (uint16_t)y, JANUS_FONT_GLYPH_W, JANUS_FONT_GLYPH_H, g_tile_buffer);
+    draw_area_sync((uint16_t)x, (uint16_t)y, (uint16_t)scaled_w, (uint16_t)scaled_h, g_tile_buffer);
 }
 
 /* Draws `text` left-aligned, vertically centered in `rect`, in `fg` over a
@@ -165,11 +223,28 @@ static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph, uint16_t fg, 
  * true) vs. a live bound string (read_bound_string, the vendor's own
  * mutable RAM struct — pass false). Reading a flash string with a plain
  * `*p` (or vice versa) is wrong on classic AVR, so callers must get this
- * right; off-AVR both paths behave identically either way. */
-static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16_t bg, bool from_flash) {
+ * right; off-AVR both paths behave identically either way.
+ *
+ * `font_size`/`scale` come straight from the widget desc. `scale` is
+ * clamped here (not trusted from the caller) to whatever keeps the
+ * scaled glyph within g_tile_buffer's fixed size — Stage 1 (dsl_yaml.py)
+ * already rejects an authored combination that would need clamping, but
+ * this runtime doesn't get to assume every widget desc it's ever handed
+ * went through that validation (hand-built test fixtures, a zero-
+ * initialized `.font_scale` — see janus_font.h), so it protects its own
+ * buffer regardless. */
+static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16_t bg, bool from_flash,
+                         janus_font_size_t font_size, uint8_t scale) {
     if (text == NULL) return;
+    if (scale < 1) scale = 1;
 
-    int16_t y = (int16_t)(rect.y + (rect.h - JANUS_FONT_GLYPH_H) / 2);
+    janus_font_metrics_t m = font_metrics(font_size);
+    while (scale > 1 && (int32_t)(m.w * scale) * (m.h * scale) > JANUS_TILE_BUFFER_PIXELS) scale--;
+
+    int16_t glyph_w = (int16_t)(m.w * scale);
+    int16_t glyph_h = (int16_t)(m.h * scale);
+
+    int16_t y = (int16_t)(rect.y + (rect.h - glyph_h) / 2);
     if (y < rect.y) y = rect.y;
     int16_t x = (int16_t)(rect.x + 1);
     int16_t right = (int16_t)(rect.x + rect.w);
@@ -177,10 +252,10 @@ static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16
     for (const char *p = text; ; p++) {
         char c = from_flash ? (char)JANUS_PGM_READ_U8(p) : *p;
         if (c == '\0') break;
-        if ((int16_t)(x + JANUS_FONT_GLYPH_W) > right) break;
-        const uint8_t *glyph = janus_font_glyph(c);
-        if (glyph != NULL) draw_glyph(x, y, glyph, fg, bg);
-        x = (int16_t)(x + JANUS_FONT_GLYPH_W + 1);
+        if ((int16_t)(x + glyph_w) > right) break;
+        const uint8_t *glyph = font_glyph(font_size, c);
+        if (glyph != NULL) draw_glyph(x, y, glyph, font_size, scale, fg, bg);
+        x = (int16_t)(x + glyph_w + scale);
     }
 }
 
@@ -312,19 +387,19 @@ static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
     fill_rect(lw.geometry, lw.bg_color);
     bool from_flash = lw.static_text != NULL;
     const char *text = from_flash ? lw.static_text : read_bound_string(&lw.bind, bound_struct);
-    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash);
+    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
 }
 static void draw_header(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
     bool from_flash = lw.static_text != NULL;
     const char *text = from_flash ? lw.static_text : read_bound_string(&lw.bind, bound_struct);
-    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash);
+    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
 }
 static void draw_button(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
-    draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true);
+    draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale);
     if (w == g_focused_widget) draw_focus_ring(lw.geometry);
 }
 static void draw_image(const janus_widget_desc_t *w) {
@@ -421,7 +496,7 @@ static bool bind_consume_dirty(const janus_bind_t *bind, void *bound_dirty) {
 static void draw_box_header(const janus_widget_desc_t *box, const void *bound_struct, void *bound_dirty) {
     janus_widget_desc_t lb = janus_widget_load(box);
     fill_rect(lb.geometry_collapsed, lb.bg_color);
-    draw_string(lb.geometry_collapsed, lb.static_text, lb.color, lb.bg_color, true);
+    draw_string(lb.geometry_collapsed, lb.static_text, lb.color, lb.bg_color, true, lb.font_size, lb.font_scale);
     /* summary widgets always render here, collapsed or expanded — unlike
      * lb.children, which only render when the box is actually expanded
      * (see the JANUS_WIDGET_BOX case below / janus_toggle_box). */
@@ -545,13 +620,19 @@ bool janus_render_poll(void) {
         for (size_t i = 0; i < JANUS_TILE_W * JANUS_TILE_H; i++) g_tile_buffer[i] = op->color;
         draw_area_async((uint16_t)op->x, (uint16_t)op->y, (uint16_t)op->w, (uint16_t)op->h, g_tile_buffer);
     } else {
-        for (int16_t row = 0; row < JANUS_FONT_GLYPH_H; row++) {
-            for (int16_t col = 0; col < JANUS_FONT_GLYPH_W; col++) {
-                g_tile_buffer[row * JANUS_FONT_GLYPH_W + col] =
-                    (JANUS_PGM_READ_U8(&op->glyph[col]) & (1 << row)) ? op->color : op->bg;
+        janus_font_metrics_t m = font_metrics(op->font_size);
+        int16_t scaled_w = (int16_t)(m.w * op->scale);
+        int16_t scaled_h = (int16_t)(m.h * op->scale);
+        for (int16_t row = 0; row < scaled_h; row++) {
+            int16_t src_row = (int16_t)(row / op->scale);
+            for (int16_t col = 0; col < scaled_w; col++) {
+                int16_t src_col = (int16_t)(col / op->scale);
+                uint8_t byte = JANUS_PGM_READ_U8(&op->glyph[src_col * m.col_bytes + src_row / 8]);
+                g_tile_buffer[row * scaled_w + col] =
+                    (byte & (1 << (src_row % 8))) ? op->color : op->bg;
             }
         }
-        draw_area_async((uint16_t)op->x, (uint16_t)op->y, JANUS_FONT_GLYPH_W, JANUS_FONT_GLYPH_H, g_tile_buffer);
+        draw_area_async((uint16_t)op->x, (uint16_t)op->y, (uint16_t)scaled_w, (uint16_t)scaled_h, g_tile_buffer);
     }
     g_async_cursor++;
     return g_async_cursor < g_async_op_count;

@@ -46,6 +46,11 @@ _FIELD_TYPE_ENUM = {
     "float": "JANUS_FIELD_FLOAT",
 }
 
+_FONT_SIZE_ENUM = {
+    "medium": "JANUS_FONT_SIZE_MEDIUM",
+    "large": "JANUS_FONT_SIZE_LARGE",
+}
+
 _DISPLAY_COLOR_MACRO = {
     "mono": "JANUS_DISPLAY_COLOR_MONO",
     "gray": "JANUS_DISPLAY_COLOR_GRAY",
@@ -288,6 +293,7 @@ def _widget_init(
     focus_order_c = str(focus_order_map.get(id(widget), FOCUS_ORDER_NONE))
     color_c = _color_c(widget.color, "JANUS_COLOR_DEFAULT_FG")
     bg_color_c = _color_c(widget.bg, "JANUS_COLOR_DEFAULT_BG")
+    font_size_c = _FONT_SIZE_ENUM[widget.font_size]
 
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {id_c}, "
@@ -299,6 +305,7 @@ def _widget_init(
         f".navigate_target = {navigate_target_c}, "
         f".focus_order = {focus_order_c}, "
         f".color = {color_c}, .bg_color = {bg_color_c}, "
+        f".font_size = {font_size_c}, .font_scale = {widget.font_scale}, "
         f".children = {children_array_name}, .child_count = {child_count}, "
         f".summary_children = {summary_array_name}, .summary_child_count = {summary_count} }}"
     )

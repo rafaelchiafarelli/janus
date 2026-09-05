@@ -85,7 +85,7 @@ static void test_async_draws_the_same_number_of_calls_as_blocking(void) {
      * number of times — async is a different delivery schedule for the
      * identical set of tile/glyph draws, not a different set of them. */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 14, 10 },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 42, 10 },
     };
     static const janus_screen_desc_t screen = {
         .name = "Compare", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
@@ -106,7 +106,8 @@ static void test_async_draws_the_same_number_of_calls_as_blocking(void) {
 
 static void test_async_glyph_color_matches_widget(void) {
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "A", .geometry = { 0, 0, 10, 10 },
+        /* w=24: comfortably fits one 20px-wide glyph (needs >= 21). */
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "A", .geometry = { 0, 0, 24, 10 },
         .color = 0x1234, .bg_color = 0x5678,
     };
     static const janus_screen_desc_t screen = {
@@ -117,7 +118,10 @@ static void test_async_glyph_color_matches_widget(void) {
     janus_render_screen_async_start(&screen);
     while (janus_render_poll()) { }
 
-    CHECK(mock_driver_log_count == 2);  /* background fill + one glyph */
+    /* w=24 exceeds JANUS_TILE_W (16), so the background itself splits into
+     * 2 horizontal tile fills — see test_label_with_text_draws_one_glyph_call_per_character
+     * (test_runtime.c) for the same tiling math. */
+    CHECK(mock_driver_log_count == 3);  /* 2 background tile fills + one glyph */
     CHECK(mock_driver_log[0].sample_pixel == 0x5678);  /* background */
 }
 

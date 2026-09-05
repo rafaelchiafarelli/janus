@@ -74,8 +74,8 @@ class TestEmitEmbeddedC(unittest.TestCase):
         self.assertIn("JANUS_FIELD_NONE", segment)
 
     def test_geometry_baked_in(self) -> None:
-        self.assertIn(".geometry = {0, 0, 60, 12}", self.out)  # name_label
-        self.assertIn(".geometry = {64, 16, 80, 12}", self.out)  # battery_bar
+        self.assertIn(".geometry = {0, 0, 110, 32}", self.out)  # name_label
+        self.assertIn(".geometry = {114, 36, 80, 12}", self.out)  # battery_bar
 
     def test_screen_desc_name(self) -> None:
         var = _find_flash_string_var(self.out, "UserProfile")
@@ -139,6 +139,28 @@ class TestEmitEmbeddedCColor(unittest.TestCase):
         out = emit_screen(screen)
         self.assertIn(".color = JANUS_COLOR_DEFAULT_FG,", out)
         self.assertIn(".bg_color = JANUS_COLOR_DEFAULT_BG,", out)
+
+
+class TestEmitEmbeddedCFontSize(unittest.TestCase):
+    def test_unauthored_widget_gets_the_large_default_and_scale_1(self) -> None:
+        screen = layout_screen(Screen(
+            name="Unsized",
+            root=Widget(kind="column", id="r", children=[
+                Widget(kind="label", id="l", text="hi"),
+            ]),
+        ))
+        out = emit_screen(screen)
+        self.assertIn(".font_size = JANUS_FONT_SIZE_LARGE, .font_scale = 1,", out)
+
+    def test_authored_medium_font_size_and_scale_baked_in(self) -> None:
+        screen = layout_screen(Screen(
+            name="Sized",
+            root=Widget(kind="column", id="r", children=[
+                Widget(kind="label", id="l", text="hi", font_size="medium", font_scale=2),
+            ]),
+        ))
+        out = emit_screen(screen)
+        self.assertIn(".font_size = JANUS_FONT_SIZE_MEDIUM, .font_scale = 2,", out)
 
 
 class TestEmitEmbeddedCBox(unittest.TestCase):

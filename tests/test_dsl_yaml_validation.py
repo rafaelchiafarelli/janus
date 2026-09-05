@@ -144,5 +144,53 @@ class TestBoxSummaryValidation(unittest.TestCase):
         self.assertEqual(screen.root.children[0].summary, [])
 
 
+class TestFontSizeValidation(unittest.TestCase):
+    def test_font_size_and_scale_omitted_default_to_large_and_1(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "hi"}])
+        widget = screen_from_dict(data).root.children[0]
+        self.assertEqual(widget.font_size, "large")
+        self.assertEqual(widget.font_scale, 1)
+
+    def test_invalid_font_size_rejected(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "hi", "font_size": "huge"}])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_valid_font_sizes_accepted(self) -> None:
+        for size in ("medium", "large"):
+            data = _screen([{"kind": "label", "id": "a", "text": "hi", "font_size": size}])
+            widget = screen_from_dict(data).root.children[0]
+            self.assertEqual(widget.font_size, size)
+
+    def test_non_positive_font_scale_rejected(self) -> None:
+        for scale in (0, -1):
+            data = _screen([{"kind": "label", "id": "a", "text": "hi", "font_scale": scale}])
+            with self.assertRaises(ValueError):
+                screen_from_dict(data)
+
+    def test_medium_font_scale_2_reaches_large_footprint_and_is_accepted(self) -> None:
+        # 10x14 * 2 == large's own 20x28 native size — exactly at the cap.
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "hi", "font_size": "medium", "font_scale": 2},
+        ])
+        widget = screen_from_dict(data).root.children[0]
+        self.assertEqual(widget.font_scale, 2)
+
+    def test_medium_font_scale_3_exceeds_large_footprint_and_is_rejected(self) -> None:
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "hi", "font_size": "medium", "font_scale": 3},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_large_font_scale_2_exceeds_its_own_footprint_and_is_rejected(self) -> None:
+        # large is already the cap -- it can't scale past its own native size.
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "hi", "font_size": "large", "font_scale": 2},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+
 if __name__ == "__main__":
     unittest.main()

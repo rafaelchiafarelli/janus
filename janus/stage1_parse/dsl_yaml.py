@@ -29,6 +29,14 @@ _VALID_RENDER_MODES = {"blocking", "non_blocking"}
 _REQUIRES_RANGE = {"progress", "gauge", "slider"}
 _CONTAINER_KINDS = {"column", "row", "box", "radiogroup", "navlist"}
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+# Native glyph dims per runtime/embedded_c/include/janus_font.h's two
+# tables. `large` is also the cap `font_scale` can't push a widget's
+# effective glyph size past — see _validate_widget's font_scale check for
+# why (it mirrors janus_runtime.c's g_tile_buffer, sized for large's own
+# 20x28 native footprint; scaling past that would need either a bigger
+# static buffer or a tiled glyph blit, neither of which this runtime does).
+_FONT_NATIVE_SIZE = {"medium": (10, 14), "large": (20, 28)}
+_FONT_SCALE_CAP_W, _FONT_SCALE_CAP_H = _FONT_NATIVE_SIZE["large"]
 _PY_TYPE_FOR_BIND_TYPE: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "int": int,
@@ -80,6 +88,24 @@ def _check_radiobutton_value(radiobutton: Widget, bind_type: str) -> None:
 def _validate_widget(widget: Widget) -> None:
     if widget.kind in _REQUIRES_RANGE and widget.range is None:
         raise ValueError(f"widget {widget.id!r} (kind={widget.kind!r}) requires `range`")
+    if widget.font_size not in _FONT_NATIVE_SIZE:
+        raise ValueError(
+            f"widget {widget.id!r} has invalid font_size {widget.font_size!r} — "
+            f"must be one of {sorted(_FONT_NATIVE_SIZE)}"
+        )
+    if not isinstance(widget.font_scale, int) or widget.font_scale < 1:
+        raise ValueError(
+            f"widget {widget.id!r}'s font_scale {widget.font_scale!r} must be a positive integer"
+        )
+    native_w, native_h = _FONT_NATIVE_SIZE[widget.font_size]
+    scaled_w, scaled_h = native_w * widget.font_scale, native_h * widget.font_scale
+    if scaled_w > _FONT_SCALE_CAP_W or scaled_h > _FONT_SCALE_CAP_H:
+        raise ValueError(
+            f"widget {widget.id!r}: font_size={widget.font_size!r} at font_scale="
+            f"{widget.font_scale} needs a {scaled_w}x{scaled_h} glyph, past the "
+            f"{_FONT_SCALE_CAP_W}x{_FONT_SCALE_CAP_H} cap (large's own native size — "
+            f"the runtime's glyph buffer is sized for it, see janus_font.h)"
+        )
     if widget.kind == "radiogroup" and widget.bind is not None:
         for child in widget.children:
             if child.kind == "radiobutton" and child.value is not None:
@@ -116,6 +142,8 @@ def _parse_widget(data: dict[str, Any]) -> Widget:
         fill=data.get("fill", False),
         color=_parse_color(data.get("color")),
         bg=_parse_color(data.get("bg")),
+        font_size=data.get("font_size", "large"),
+        font_scale=data.get("font_scale", 1),
         children=[_parse_widget(c) for c in data.get("children", [])],
         summary=[_parse_widget(c) for c in data.get("summary", [])],
     )

@@ -11,6 +11,7 @@
 #include <stddef.h>   /* offsetof()/NULL — every generated widget initializer needs these */
 #include <stdint.h>
 
+#include "janus_font.h"
 #include "janus_progmem.h"
 
 typedef enum {
@@ -109,6 +110,12 @@ typedef struct janus_widget_desc {
     uint8_t focus_order;               /* encoder/button traversal order, or JANUS_FOCUS_NONE; touch ignores this */
     uint16_t color;                    /* RGB565 ink/foreground/on-state fill — see JANUS_COLOR_DEFAULT_FG */
     uint16_t bg_color;                 /* RGB565 background/off-state fill — see JANUS_COLOR_DEFAULT_BG */
+    janus_font_size_t font_size;       /* which janus_font.h table draw_string reads this widget's
+                                         * text from; meaningless on a widget that never draws text */
+    uint8_t font_scale;                /* integer pixel-replication multiplier on top of font_size's
+                                         * native glyph size (1 == that table's native size, no
+                                         * scaling) — draw_glyph's job, see janus_runtime.c. Always
+                                         * >=1; emit_embedded_c.py never bakes 0. */
     const struct janus_widget_desc *children;
     uint16_t child_count;
     const struct janus_widget_desc *summary_children;  /* box only: always rendered in the

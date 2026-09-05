@@ -15,17 +15,17 @@ class TestLayoutUserProfile(unittest.TestCase):
 
     def test_leaf_with_default_size(self) -> None:
         name_label = self.screen.root.children[0]
-        self.assertEqual(name_label.geometry, Rect(x=0, y=0, w=60, h=12))
+        self.assertEqual(name_label.geometry, Rect(x=0, y=0, w=110, h=32))
 
     def test_row_and_its_children(self) -> None:
         row = self.screen.root.children[1]
         caption, bar = row.children
-        self.assertEqual(caption.geometry, Rect(x=0, y=16, w=60, h=12))
-        self.assertEqual(bar.geometry, Rect(x=64, y=16, w=80, h=12))  # 60 + GAP(4)
-        self.assertEqual(row.geometry, Rect(x=0, y=16, w=144, h=12))
+        self.assertEqual(caption.geometry, Rect(x=0, y=36, w=110, h=32))
+        self.assertEqual(bar.geometry, Rect(x=114, y=36, w=80, h=12))  # 110 + GAP(4)
+        self.assertEqual(row.geometry, Rect(x=0, y=36, w=194, h=32))
 
     def test_root_size_derived_from_children(self) -> None:
-        self.assertEqual(self.screen.root.geometry, Rect(x=0, y=0, w=144, h=28))
+        self.assertEqual(self.screen.root.geometry, Rect(x=0, y=0, w=194, h=68))
 
 
 class TestLayoutBox(unittest.TestCase):
@@ -65,12 +65,12 @@ class TestLayoutBoxSummary(unittest.TestCase):
         layout_screen(screen)
         box = screen.root.children[0]
         led, mode = box.summary
-        # box.w is derived from its (wider) detail child: label default 60px
-        self.assertEqual(box.geometry.w, 60)
+        # box.w is derived from its (wider) detail child: label default 110px
+        self.assertEqual(box.geometry.w, 110)
         # right-aligned: mode ends flush with the box's right edge, led sits
         # GAP(4) to its left
-        self.assertEqual(mode.geometry, Rect(x=40, y=2, w=20, h=12))  # (60-20)=40, (16-12)/2=2
-        self.assertEqual(led.geometry, Rect(x=26, y=3, w=10, h=10))  # 40-4-10=26, (16-10)/2=3
+        self.assertEqual(mode.geometry, Rect(x=90, y=2, w=20, h=12))  # (110-20)=90, (16-12)/2=2
+        self.assertEqual(led.geometry, Rect(x=76, y=3, w=10, h=10))  # 90-4-10=76, (16-10)/2=3
 
     def test_header_grows_to_fit_a_tall_summary_widget(self) -> None:
         from janus.ir import Screen, Widget
@@ -189,16 +189,16 @@ class TestLayoutFill(unittest.TestCase):
         screen = Screen(
             name="Fill",
             root=Widget(kind="column", id="root", children=[
-                Widget(kind="header", id="h", text="Title"),  # default 80x16
+                Widget(kind="header", id="h", text="Title"),  # default 140x32
                 Widget(kind="label", id="body", fill=True),
             ]),
         )
         layout_screen(screen, DisplayConfig(width=200, height=100, color="mono"))
         header, body = screen.root.children
-        self.assertEqual(header.geometry, Rect(x=0, y=0, w=80, h=16))
-        # 100 - 16 (header) - GAP(4) = 80 left over for the fill label
-        self.assertEqual(body.geometry, Rect(x=0, y=20, w=60, h=80))
-        self.assertEqual(screen.root.geometry, Rect(x=0, y=0, w=80, h=100))
+        self.assertEqual(header.geometry, Rect(x=0, y=0, w=140, h=32))
+        # 100 - 32 (header) - GAP(4) = 64 left over for the fill label
+        self.assertEqual(body.geometry, Rect(x=0, y=36, w=110, h=64))
+        self.assertEqual(screen.root.geometry, Rect(x=0, y=0, w=140, h=100))
 
     def test_two_fill_siblings_split_evenly_remainder_on_last(self) -> None:
         from janus.ir import Screen, Widget
@@ -234,7 +234,7 @@ class TestLayoutFill(unittest.TestCase):
         screen = Screen(
             name="Fill",
             root=Widget(kind="column", id="root", children=[
-                Widget(kind="header", id="h", text="Title"),  # default 80x16
+                Widget(kind="header", id="h", text="Title"),  # default 140x32
                 Widget(kind="label", id="body", fill=True),
             ]),
         )
@@ -250,7 +250,7 @@ class TestLayoutFill(unittest.TestCase):
                 Widget(
                     kind="row", id="middle", fill=True, children=[
                         Widget(kind="label", id="left", fill=True),
-                        Widget(kind="label", id="right"),  # default 60x12
+                        Widget(kind="label", id="right"),  # default 110x32
                     ],
                 ),
             ]),
@@ -260,9 +260,9 @@ class TestLayoutFill(unittest.TestCase):
         left, right = middle.children
         self.assertEqual(middle.geometry, Rect(x=0, y=0, w=200, h=90))
         # middle's own width (200) is now known -> left fills leftover width:
-        # 200 - 60 (right, default) - GAP(4) = 136
-        self.assertEqual(left.geometry, Rect(x=0, y=0, w=136, h=12))
-        self.assertEqual(right.geometry, Rect(x=140, y=0, w=60, h=12))
+        # 200 - 110 (right, default) - GAP(4) = 86
+        self.assertEqual(left.geometry, Rect(x=0, y=0, w=86, h=32))
+        self.assertEqual(right.geometry, Rect(x=90, y=0, w=110, h=32))
 
 
 class TestCheckFitsDisplay(unittest.TestCase):

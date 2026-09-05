@@ -17,9 +17,14 @@ _LEAF_KINDS = {
 }
 _REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led", "badge", "slider"}
 _DEFAULT_SIZE = {
-    "label": (60, 12),
-    "header": (80, 16),
-    "button": (64, 20),
+    # label/header/button draw glyph text (JANUS_FONT_GLYPH_W/H = 20x28 —
+    # runtime/embedded_c/include/janus_font.h), so their defaults must fit
+    # at least a few glyphs at 21px/char (20 + 1px inter-glyph gap) and
+    # 28px tall; checkbox/radiobutton/divider/toggle never draw text, so
+    # their sizes stay font-independent.
+    "label": (110, 32),
+    "header": (140, 32),
+    "button": (110, 32),
     "checkbox": (12, 12),
     "radiobutton": (12, 12),
     "divider": (60, 2),
