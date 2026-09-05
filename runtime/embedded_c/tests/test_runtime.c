@@ -608,6 +608,75 @@ static void test_widget_default_colors_are_the_runtime_constants(void) {
     CHECK(mock_driver_log[0].sample_pixel == JANUS_COLOR_DEFAULT_BG);
 }
 
+/* ---- fixture 9: image widget blits its baked RGB565 pixels ---- */
+static void test_image_widget_blits_its_pixels(void) {
+    /* 4x4, top-left pixel a known value — geometry matches the image, so
+     * one draw call, and its sample_pixel is that top-left. */
+    static const uint16_t pixels[16] = {
+        0x1234, 1, 2, 3,
+        4, 5, 6, 7,
+        8, 9, 10, 11,
+        12, 13, 14, 15,
+    };
+    static const janus_widget_desc_t image = {
+        .kind = JANUS_WIDGET_IMAGE, .id = "img", .geometry = { 0, 0, 4, 4 },
+        .color = 0xf800, /* would show if the stub fill path ran instead */
+        .image_pixels = pixels, .image_w = 4, .image_h = 4,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Img", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);
+    CHECK(mock_driver_log[0].w == 4 && mock_driver_log[0].h == 4);
+    CHECK(mock_driver_log[0].sample_pixel == 0x1234);
+}
+
+/* ---- fixture 9b: a `file:` that wouldn't decode -> magenta placeholder ---- */
+static void test_image_error_paints_magenta(void) {
+    static const janus_widget_desc_t image = {
+        .kind = JANUS_WIDGET_IMAGE, .id = "bad", .geometry = { 0, 0, 10, 10 },
+        .color = 0x07e0, /* green — must NOT be what draws */
+        .image_error = true,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Bad", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);
+    CHECK(mock_driver_log[0].sample_pixel == 0xf81f);   /* JANUS_COLOR_IMAGE_MISSING */
+}
+
+/* ---- fixture 9c: an image bigger than one tile splits, per-tile source
+ * offset stays correct (pixel value == column index here) ---- */
+static uint16_t g_big_pixels[20 * 18];
+static void test_image_larger_than_tile_splits_with_correct_offsets(void) {
+    for (int y = 0; y < 18; y++)
+        for (int x = 0; x < 20; x++)
+            g_big_pixels[y * 20 + x] = (uint16_t)x;
+
+    static const janus_widget_desc_t image = {
+        .kind = JANUS_WIDGET_IMAGE, .id = "big", .geometry = { 0, 0, 20, 18 },
+        .image_pixels = g_big_pixels, .image_w = 20, .image_h = 18,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Big", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    /* 20x18 over 16x16 tiles -> 2 cols x 2 rows = 4 calls, row-major */
+    CHECK(mock_driver_log_count == 4);
+    CHECK(mock_driver_log[0].sample_pixel == 0);    /* tile (0,0)  -> col 0  */
+    CHECK(mock_driver_log[1].sample_pixel == 16);   /* tile (16,0) -> col 16 */
+    CHECK(mock_driver_log[2].sample_pixel == 0);    /* tile (0,16) -> col 0  */
+    CHECK(mock_driver_log[3].sample_pixel == 16);   /* tile (16,16)-> col 16 */
+}
+
 int main(void) {
     test_traversal_reaches_every_widget();
     test_progress_fill_tracks_live_value();
@@ -635,6 +704,9 @@ int main(void) {
     test_box_header_draws_its_title_text();
     test_widget_authored_color_is_what_gets_drawn();
     test_widget_default_colors_are_the_runtime_constants();
+    test_image_widget_blits_its_pixels();
+    test_image_error_paints_magenta();
+    test_image_larger_than_tile_splits_with_correct_offsets();
 
     if (g_failures == 0) {
         printf("all tests passed\n");

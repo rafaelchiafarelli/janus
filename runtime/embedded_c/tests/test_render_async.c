@@ -125,12 +125,48 @@ static void test_async_glyph_color_matches_widget(void) {
     CHECK(mock_driver_log[0].sample_pixel == 0x5678);  /* background */
 }
 
+static uint16_t g_async_img[20 * 18];
+static void test_async_image_drains_tiles_with_correct_pixels(void) {
+    /* Same fixture/expectations as test_runtime.c's
+     * test_image_larger_than_tile_splits_with_correct_offsets, but via
+     * the enqueue -> poll path: proves JANUS_ASYNC_OP_IMAGE carries the
+     * per-tile source offset through the queue, not just the sync blit. */
+    for (int y = 0; y < 18; y++)
+        for (int x = 0; x < 20; x++)
+            g_async_img[y * 20 + x] = (uint16_t)x;
+
+    static const janus_widget_desc_t image = {
+        .kind = JANUS_WIDGET_IMAGE, .id = "img", .geometry = { 0, 0, 20, 18 },
+        .image_pixels = g_async_img, .image_w = 20, .image_h = 18,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "AsyncImg", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    uint16_t blocking_calls = mock_driver_log_count;
+
+    mock_driver_reset();
+    janus_render_screen_async_start(&screen);
+    CHECK(mock_driver_log_count == 0);   /* queue built, nothing drawn yet */
+    while (janus_render_poll()) { }
+
+    CHECK(blocking_calls == 4);
+    CHECK(mock_driver_log_count == 4);
+    CHECK(mock_driver_log[0].sample_pixel == 0);
+    CHECK(mock_driver_log[1].sample_pixel == 16);
+    CHECK(mock_driver_log[2].sample_pixel == 0);
+    CHECK(mock_driver_log[3].sample_pixel == 16);
+}
+
 int main(void) {
     test_async_start_makes_no_driver_calls();
     test_poll_drains_one_op_per_call_and_reports_completion();
     test_poll_does_not_advance_while_display_is_busy();
     test_async_draws_the_same_number_of_calls_as_blocking();
     test_async_glyph_color_matches_widget();
+    test_async_image_drains_tiles_with_correct_pixels();
 
     if (g_failures == 0) {
         printf("all tests passed\n");

@@ -126,6 +126,19 @@ typedef struct janus_widget_desc {
                                                           * every non-box widget and any box with
                                                           * no `summary:` authored. */
     uint16_t summary_child_count;
+    /* JANUS_WIDGET_IMAGE only (added 2026-09-05). `image_pixels` points at
+     * a JANUS_PROGMEM RGB565 buffer of exactly image_w * image_h pixels,
+     * row-major, row 0 first — the widget's `file:` image, decoded and
+     * rescaled to its geometry at generation time (emit_embedded_c.py /
+     * image_asset.py), so the device never decodes or resamples anything.
+     * NULL for a non-image widget, and for an `image` with no `file:`
+     * authored (that still renders the pre-image v1 stub — a `color`
+     * fill). `image_error` is baked true instead when a `file:` *was*
+     * authored but couldn't be found or decoded: draw_image then paints a
+     * magenta placeholder so the missing asset is obvious on-screen. */
+    const uint16_t *image_pixels;
+    uint16_t image_w, image_h;
+    bool image_error;
 } janus_widget_desc_t;
 
 typedef struct {

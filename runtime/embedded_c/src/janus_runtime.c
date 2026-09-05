@@ -77,16 +77,22 @@ static uint16_t g_tile_buffer[JANUS_TILE_BUFFER_PIXELS];
  * become while draining — same "snapshot, not live" property any queued
  * frame has. */
 #define JANUS_MAX_ASYNC_OPS 256
-typedef enum { JANUS_ASYNC_OP_FILL, JANUS_ASYNC_OP_GLYPH } janus_async_op_kind_t;
+typedef enum {
+    JANUS_ASYNC_OP_FILL, JANUS_ASYNC_OP_GLYPH, JANUS_ASYNC_OP_IMAGE
+} janus_async_op_kind_t;
 typedef struct {
     janus_async_op_kind_t kind;
     int16_t x, y, w, h;            /* GLYPH: w/h unused — recomputed at drain time from
-                                     * font_size/scale (font_metrics()), same as draw_glyph itself */
+                                     * font_size/scale (font_metrics()), same as draw_glyph itself.
+                                     * IMAGE: w/h are this tile's size (<= JANUS_TILE_W/H). */
     uint16_t color;                /* FILL: the fill value. GLYPH: fg */
     uint16_t bg;                   /* GLYPH only */
     const uint8_t *glyph;          /* GLYPH only */
     janus_font_size_t font_size;   /* GLYPH only */
     uint8_t scale;                 /* GLYPH only */
+    const uint16_t *img;           /* IMAGE only: the widget's full JANUS_PROGMEM RGB565 buffer */
+    int16_t img_stride;            /* IMAGE only: full image width, to step rows in `img` */
+    int16_t img_sx, img_sy;        /* IMAGE only: this tile's top-left offset within the image */
 } janus_async_op_t;
 
 static janus_async_op_t g_async_ops[JANUS_MAX_ASYNC_OPS];
@@ -113,6 +119,18 @@ static void async_enqueue_glyph(int16_t x, int16_t y, const uint8_t *glyph,
     op->glyph = glyph;
     op->font_size = font_size;
     op->scale = scale;
+}
+
+static void async_enqueue_image(int16_t x, int16_t y, int16_t w, int16_t h,
+                                 const uint16_t *img, int16_t stride,
+                                 int16_t sx, int16_t sy) {
+    if (g_async_op_count >= JANUS_MAX_ASYNC_OPS) return;
+    janus_async_op_t *op = &g_async_ops[g_async_op_count++];
+    op->kind = JANUS_ASYNC_OP_IMAGE;
+    op->x = x; op->y = y; op->w = w; op->h = h;
+    op->img = img;
+    op->img_stride = stride;
+    op->img_sx = sx; op->img_sy = sy;
 }
 
 static void fill_rect(janus_rect_t rect, uint16_t value) {
@@ -402,9 +420,59 @@ static void draw_button(const janus_widget_desc_t *w) {
     draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale);
     if (w == g_focused_widget) draw_focus_ring(lw.geometry);
 }
+/* "missing texture" magenta — a `file:` was authored on an image widget
+ * but Stage 3b couldn't find/decode it (widget.image_error). Janus-owned,
+ * not authorable, same spirit as JANUS_COLOR_FOCUS_RING. */
+#define JANUS_COLOR_IMAGE_MISSING ((uint16_t)0xf81f)
+
+/* Blits a pre-decoded RGB565 image (JANUS_PROGMEM `src`, src_w x src_h,
+ * row-major) into `rect` at 1:1 — the image was already rescaled to the
+ * widget's geometry at generation time, so src_w/src_h normally equal
+ * rect.w/rect.h; anything larger is clipped, anything smaller leaves the
+ * remainder untouched. Same tile loop / shared g_tile_buffer / async-flag
+ * split as fill_rect — a tile is <= JANUS_TILE_W x JANUS_TILE_H, so one
+ * tile's worth of pixels always fits g_tile_buffer. Each source row of a
+ * tile is one JANUS_MEMCPY_P (flash-safe on AVR, a plain memcpy on host).
+ */
+static void blit_image(janus_rect_t rect, const uint16_t *src,
+                        int16_t src_w, int16_t src_h) {
+    int16_t draw_w = rect.w < src_w ? rect.w : src_w;
+    int16_t draw_h = rect.h < src_h ? rect.h : src_h;
+    if (draw_w <= 0 || draw_h <= 0 || src == NULL) return;
+
+    for (int16_t ty = 0; ty < draw_h; ty += JANUS_TILE_H) {
+        int16_t th = (int16_t)(draw_h - ty);
+        if (th > JANUS_TILE_H) th = JANUS_TILE_H;
+        for (int16_t tx = 0; tx < draw_w; tx += JANUS_TILE_W) {
+            int16_t tw = (int16_t)(draw_w - tx);
+            if (tw > JANUS_TILE_W) tw = JANUS_TILE_W;
+            if (g_async_enqueue) {
+                async_enqueue_image((int16_t)(rect.x + tx), (int16_t)(rect.y + ty),
+                                    tw, th, src, src_w, tx, ty);
+                continue;
+            }
+            for (int16_t row = 0; row < th; row++) {
+                JANUS_MEMCPY_P(&g_tile_buffer[row * tw],
+                               &src[(ty + row) * src_w + tx],
+                               (size_t)tw * sizeof(uint16_t));
+            }
+            draw_area_sync((uint16_t)(rect.x + tx), (uint16_t)(rect.y + ty),
+                            (uint16_t)tw, (uint16_t)th, g_tile_buffer);
+        }
+    }
+}
+
 static void draw_image(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    fill_rect(lw.geometry, lw.color);
+    if (lw.image_error) {
+        fill_rect(lw.geometry, JANUS_COLOR_IMAGE_MISSING);
+        return;
+    }
+    if (lw.image_pixels == NULL) {
+        fill_rect(lw.geometry, lw.color);   /* no `file:` authored — pre-image v1 stub */
+        return;
+    }
+    blit_image(lw.geometry, lw.image_pixels, (int16_t)lw.image_w, (int16_t)lw.image_h);
 }
 static void draw_radiobutton(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
@@ -618,6 +686,13 @@ bool janus_render_poll(void) {
     const janus_async_op_t *op = &g_async_ops[g_async_cursor];
     if (op->kind == JANUS_ASYNC_OP_FILL) {
         for (size_t i = 0; i < JANUS_TILE_W * JANUS_TILE_H; i++) g_tile_buffer[i] = op->color;
+        draw_area_async((uint16_t)op->x, (uint16_t)op->y, (uint16_t)op->w, (uint16_t)op->h, g_tile_buffer);
+    } else if (op->kind == JANUS_ASYNC_OP_IMAGE) {
+        for (int16_t row = 0; row < op->h; row++) {
+            JANUS_MEMCPY_P(&g_tile_buffer[row * op->w],
+                           &op->img[(op->img_sy + row) * op->img_stride + op->img_sx],
+                           (size_t)op->w * sizeof(uint16_t));
+        }
         draw_area_async((uint16_t)op->x, (uint16_t)op->y, (uint16_t)op->w, (uint16_t)op->h, g_tile_buffer);
     } else {
         janus_font_metrics_t m = font_metrics(op->font_size);
