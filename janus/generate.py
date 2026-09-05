@@ -26,10 +26,15 @@ def write_project(app: App, out_dir: str | Path) -> list[Path]:
     """Writes, under `out_dir`: `{screen}_screen.gen.{h,c}` per screen,
     `janus_actions.gen.h`, `janus_app.gen.c`, `janus_bindings.gen.{h,c}`,
     `janus_generated.harpia`, and — only if `app.display` is set —
-    `janus_display_config.gen.h`. Returns the paths actually written —
-    content-diff-before-write means a no-op regeneration returns an
-    empty list."""
+    `janus_display_config.gen.h`. Every `.c` file goes under `out_dir/src/`
+    and every `.h` file under `out_dir/include/`, matching the layout the
+    vendored runtime library (Stage 4) already uses; `.harpia` isn't C, so
+    it stays directly under `out_dir`. Returns the paths actually
+    written — content-diff-before-write means a no-op regeneration returns
+    an empty list."""
     out_dir = Path(out_dir)
+    src_dir = out_dir / "src"
+    include_dir = out_dir / "include"
     index = screen_index_map(app)
     written: list[Path] = []
 
@@ -39,16 +44,16 @@ def write_project(app: App, out_dir: str | Path) -> list[Path]:
 
     for screen in app.screens:
         sv = screen_var(screen.name)
-        _write(out_dir / f"{sv}_screen.gen.h", render_screen_header(screen))
-        _write(out_dir / f"{sv}_screen.gen.c", render_screen_source(screen, index))
+        _write(include_dir / f"{sv}_screen.gen.h", render_screen_header(screen))
+        _write(src_dir / f"{sv}_screen.gen.c", render_screen_source(screen, index))
 
-    _write(out_dir / "janus_actions.gen.h", render_actions_header(app))
-    _write(out_dir / "janus_app.gen.c", render_app_source(app))
-    _write(out_dir / "janus_bindings.gen.h", render_bindings_header(app))
-    _write(out_dir / "janus_bindings.gen.c", render_bindings_source(app))
+    _write(include_dir / "janus_actions.gen.h", render_actions_header(app))
+    _write(src_dir / "janus_app.gen.c", render_app_source(app))
+    _write(include_dir / "janus_bindings.gen.h", render_bindings_header(app))
+    _write(src_dir / "janus_bindings.gen.c", render_bindings_source(app))
     _write(out_dir / "janus_generated.harpia", emit_harpia(app))
 
     if app.display is not None:
-        _write(out_dir / "janus_display_config.gen.h", render_display_config_header(app.display))
+        _write(include_dir / "janus_display_config.gen.h", render_display_config_header(app.display))
 
     return written

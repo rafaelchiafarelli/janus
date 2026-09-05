@@ -15,19 +15,20 @@ class TestGenerate(unittest.TestCase):
 
     def test_writes_every_expected_file_from_a_real_app_yaml(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
-        expected = {
+        expected_headers = {
             "userprofile_screen.gen.h",
-            "userprofile_screen.gen.c",
             "boxdemo_screen.gen.h",
-            "boxdemo_screen.gen.c",
             "janus_actions.gen.h",
-            "janus_app.gen.c",
             "janus_bindings.gen.h",
-            "janus_bindings.gen.c",
-            "janus_generated.harpia",
         }
-        actual = {p.name for p in self.target_dir.iterdir()}
-        self.assertEqual(expected, actual)
+        expected_sources = {
+            "userprofile_screen.gen.c",
+            "boxdemo_screen.gen.c",
+            "janus_app.gen.c",
+            "janus_bindings.gen.c",
+        }
+        self.assertEqual(expected_headers, {p.name for p in (self.target_dir / "include").iterdir()})
+        self.assertEqual(expected_sources, {p.name for p in (self.target_dir / "src").iterdir()})
 
     def test_second_run_with_no_changes_writes_nothing(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
@@ -53,25 +54,32 @@ class TestGenerate(unittest.TestCase):
 
     def test_display_config_written_when_app_yaml_declares_a_display(self) -> None:
         generate(FIXTURES / "app_with_display.yaml", self.target_dir)
-        self.assertTrue((self.target_dir / "janus_display_config.gen.h").exists())
+        self.assertTrue((self.target_dir / "include" / "janus_display_config.gen.h").exists())
 
-    def test_vendor_runtime_copies_the_fixed_library(self) -> None:
-        runtime_dir = Path(self._tmp.name) / "runtime"
-        written = generate(FIXTURES / "app.yaml", self.target_dir, vendor_runtime=runtime_dir)
+    def test_scaffold_src_also_vendors_the_fixed_runtime_library(self) -> None:
+        src_dir = Path(self._tmp.name) / "src"
+        written = generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
 
+        runtime_dir = self.target_dir / "runtime"
         repo_root = Path(__file__).resolve().parents[1]
         source_cmakelists = repo_root / "runtime" / "embedded_c" / "CMakeLists.txt"
         self.assertEqual((runtime_dir / "CMakeLists.txt").read_text(), source_cmakelists.read_text())
         self.assertTrue((runtime_dir / "include" / "janus_runtime.h").exists())
         self.assertTrue((runtime_dir / "src" / "janus_runtime.c").exists())
+        self.assertTrue((runtime_dir / "tests").exists())
+        self.assertTrue((runtime_dir / "host_mock").exists())
         self.assertFalse((runtime_dir / "build").exists())
         self.assertIn(runtime_dir / "CMakeLists.txt", written)
 
-    def test_vendor_runtime_second_run_with_no_changes_writes_nothing(self) -> None:
-        runtime_dir = Path(self._tmp.name) / "runtime"
-        generate(FIXTURES / "app.yaml", self.target_dir, vendor_runtime=runtime_dir)
-        written = generate(FIXTURES / "app.yaml", self.target_dir, vendor_runtime=runtime_dir)
+    def test_scaffold_src_vendoring_second_run_with_no_changes_writes_nothing(self) -> None:
+        src_dir = Path(self._tmp.name) / "src"
+        generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
+        written = generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
         self.assertEqual(written, [])
+
+    def test_without_scaffold_src_runtime_is_not_vendored(self) -> None:
+        generate(FIXTURES / "app.yaml", self.target_dir)
+        self.assertFalse((self.target_dir / "runtime").exists())
 
     def test_screen_too_big_for_declared_display_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

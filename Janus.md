@@ -19,12 +19,17 @@
 > size chain; see "v1 decisions" below and `architecture.md` Stage 2) so a
 > screen's containers can actually use the whole panel instead of
 > shrink-wrapping into a corner — applied to all three `examples/
-> host_demo` screens as the first real usage. **Not yet done:** the fixed
-> `fill`-using output hasn't been round-tripped back onto real ArduinoIHM
-> hardware yet — that's the next concrete step, not a formality, given
-> this same loop (generate → looks fine on host → real bug on real
-> hardware) is exactly how the PROGMEM issue was found in the first place.
-> Also still true from before: per-controller driver bodies once more
+> host_demo` screens as the first real usage. **Real-hardware validation —
+> done, same session (confirmed 2026-09-05 from ArduinoIHM's own repo):**
+> ArduinoIHM's `lib/GUI` bring-up (its commit `e29a3bb`, the same
+> PROGMEM-bug-finding session) generated `pwm_screen`/`bus_status_screen`/
+> `relay_screen` with `fill: true` used throughout (`pwm.screen.yaml` alone
+> has 7 uses), and after the PROGMEM fix `pwm_screen` "renders correctly"
+> on a real Mega2560 at ~41-42ms/blocking render (ArduinoIHM's
+> `CHANGELOG.md`/`NEXT-SESSION.md`, 2026-08-23 entry) — `fill`'s output was
+> never actually unverified on real hardware, it was verified in the exact
+> same bring-up as the PROGMEM fix; this doc's own "not yet done" note here
+> was simply never updated to reflect that. Also still true from before: per-controller driver bodies once more
 > real hardware is in hand (design already settled — see Open Questions),
 > and screen-size/resolution beyond the placeholder 240×320 default
 > (flagged, not yet scoped). This
@@ -522,6 +527,8 @@ Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new tem
 
 4. **Vendoring the fixed library into a generated project (2026-08-22).** Everything above assumes the fixed runtime library (item 1) is *available* to link against — until now that meant reaching into the Janus repo checkout by relative path (`examples/host_demo/CMakeLists.txt`'s `add_subdirectory(../../runtime/embedded_c)`), so a generated project was never usable standalone. `janus-generate --vendor-runtime DIR` copies the whole `runtime/embedded_c` tree (`CMakeLists.txt`, `include/`, `src/`, `tests/`, `host_mock/` — everything except the `build/` CMake-artifact directory) into `DIR`, one file at a time through the same content-diff-before-write writer as every other Janus output (`janus/writer.py`'s `copy_tree_if_changed`). A project does `add_subdirectory(runtime)` (or whatever `DIR` is named) against its own copy instead of the Janus checkout — for all intents and purposes that folder is now part of the project; Janus itself isn't a runtime dependency of it afterward.
 
+   **Merged into scaffold mode (2026-08-23).** `--vendor-runtime` no longer exists as its own flag: passing `--scaffold-src DIR` now vendors `runtime/embedded_c` into `target_dir/runtime` too, since neither `host_mock/`, `tests/`, nor `CMakeLists.txt` belong in output that isn't meant to be a standalone, buildable project. Without `--scaffold-src`, `target_dir` holds only the regenerated-every-run Janus output — no vendoring, no scaffolded `main.c`/`janus_actions.c`. Same pass also split `write_project`'s own output: `.c` files land under `target_dir/src`, `.h` under `target_dir/include`, mirroring the layout the vendored runtime library already used.
+
 **RESOLVED (2026-08-19), corrects the "Open question" below:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout. Two research passes the same day confirmed harpia can never be the source of it — `ZmqAdapter` only emits header-only C++ wrapping protobuf's own C++ classes, and one level deeper, `protoFile/ProtoCompiler.py` hardcodes `protoc --cpp_out` with no `--c_out`/nanopb/protobuf-c path anywhere in harpia. Structurally, no plain C struct exists in that pipeline for any message. So Janus generates its own: `emit_bindings_struct.py` (Stage 3b) walks the same `Binding`s `emit_harpia.py` already collects and emits `{message}_t` + a zero-initialized `{message}_instance` — `janus_bindings.gen.h`/`.gen.c`, replacing the hand-written `examples/host_demo/janus_bindings.h`/`.c` this doc originally described. See `architecture.md`'s Stage 3b/7 for the exact contract; the paragraph below is kept for the record of what was actually unresolved before this pass, not because it's still accurate.
 
 **Open question as it stood before the above:** a widget descriptor's `.bind.field_offset = offsetof(device_t, name)` assumes a real C struct `device_t` exists with that memory layout — and *what generates that struct* was unchecked. harpia's own C++ backend (protobuf/SOCI) is explicitly too heavy for this target (see "Why this isn't part of the harpia repo" above); the plan was harpia's `ZmqAdapter` for transport, but whether `ZmqAdapter` emits anything usable as a plain C struct (vs. C++-only protobuf classes) hadn't been checked. This was a real dependency for the doc's own step 2 ("DSL → harpia Include + working UI code for a trivial one-screen example") — needed a research pass into `harpia/ZmqAdapter/` before real generator code got written, not something to guess at.
@@ -578,13 +585,16 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   tile-and-blit driver contract at all. Not blocking anything today; expect
   one dedicated test file per controller/driver family whenever either
   becomes real, mirroring how per-kind test files are split today.
-- **Runtime library vendoring — RESOLVED (2026-08-22): copy-based.**
-  `janus-generate --vendor-runtime DIR` copies `runtime/embedded_c`
+- **Runtime library vendoring — RESOLVED (2026-08-22): copy-based, folded into scaffold mode (2026-08-23).**
+  `janus-generate --scaffold-src DIR` now vendors `runtime/embedded_c`
   (`CMakeLists.txt`/`include/`/`src/`/`tests/`/`host_mock/`, everything
-  except the `build/` artifact directory) into `DIR`, content-diffed like
-  every other Janus output — see "Embedded-C code generation architecture"
-  above. A generated project's own copy is, for all intents and purposes,
-  now part of that project; Janus itself is not a runtime dependency of it
+  except the `build/` artifact directory) into `target_dir/runtime`,
+  content-diffed like every other Janus output — see "Embedded-C code
+  generation architecture" above. There's no separate `--vendor-runtime`
+  flag any more: without `--scaffold-src`, `target_dir` holds only
+  regenerated output, no `host_mock/`/`tests/`/`CMakeLists.txt`. A
+  generated project's own copy is, for all intents and purposes, now part
+  of that project; Janus itself is not a runtime dependency of it
   afterward. Assumes Janus is run from a repo checkout (true today, see
   `pyproject.toml`'s `package-data`) — making `runtime/embedded_c`
   installable package data for a real distribution is packaging/infra
@@ -613,14 +623,17 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   would be a second boolean (`stretch`? mirroring flexbox's
   cross-axis-vs-main-axis split) — not attempted yet since the immediate
   "make the screen use the whole panel" need was solvable without it.
-- **`fill`'s real-hardware validation is still pending (open,
-  2026-08-23).** `examples/host_demo` regenerates and passes
-  `check_fits_display` cleanly with `fill` applied, and every layout unit
-  test + the host-only C build/run passes — but none of that would have
-  caught the PROGMEM bug either (see the Status line at top). The next
-  session that has ArduinoIHM hardware in hand should re-run the same
-  generate → vendor → build → flash loop before trusting `fill`'s output
-  is actually correct on a real panel, not just "didn't error."
+- **`fill`'s real-hardware validation — RESOLVED (confirmed 2026-09-05,
+  event itself was 2026-08-23).** This item's own premise was wrong: it
+  assumed the hardware bring-up that found the PROGMEM bug happened
+  *before* `fill`-using screens existed, so `fill` itself was still
+  unverified. In fact ArduinoIHM's `lib/GUI` (its commit `e29a3bb`) landed
+  Janus-generated, `fill`-heavy screens (`pwm.screen.yaml` alone: 7 uses)
+  *and* the PROGMEM bring-up in the same session — `pwm_screen` was
+  confirmed rendering correctly on a real Mega2560 after the fix
+  (~41-42ms/blocking render, ArduinoIHM's `CHANGELOG.md` 2026-08-23 entry).
+  `fill` has real-hardware backing; this was just never reflected back into
+  this doc until a later session read ArduinoIHM's own history directly.
 
 ## Suggested next steps for whoever picks this up
 

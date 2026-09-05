@@ -9,7 +9,7 @@ nav:
     - { screen: BusStatus, title: "SERIAL" }
     - { screen: Relay, title: "Output" }
 display:
-  size: { w: 320, h: 240 }
+  size: { w: 320, h: 480 }
   color: rgb565
   bus: parallel
 input:

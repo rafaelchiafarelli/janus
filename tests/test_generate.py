@@ -28,19 +28,21 @@ class TestWriteProject(unittest.TestCase):
 
     def test_writes_every_expected_file(self) -> None:
         write_project(self.app, self.out_dir)
-        expected = {
+        expected_headers = {
             "userprofile_screen.gen.h",
-            "userprofile_screen.gen.c",
             "boxdemo_screen.gen.h",
-            "boxdemo_screen.gen.c",
             "janus_actions.gen.h",
-            "janus_app.gen.c",
             "janus_bindings.gen.h",
-            "janus_bindings.gen.c",
-            "janus_generated.harpia",
         }
-        actual = {p.name for p in self.out_dir.iterdir()}
-        self.assertEqual(expected, actual)
+        expected_sources = {
+            "userprofile_screen.gen.c",
+            "boxdemo_screen.gen.c",
+            "janus_app.gen.c",
+            "janus_bindings.gen.c",
+        }
+        self.assertEqual(expected_headers, {p.name for p in (self.out_dir / "include").iterdir()})
+        self.assertEqual(expected_sources, {p.name for p in (self.out_dir / "src").iterdir()})
+        self.assertEqual({"janus_generated.harpia", "src", "include"}, {p.name for p in self.out_dir.iterdir()})
 
     def test_harpia_include_content_matches_emitter(self) -> None:
         from janus.stage3a_harpia.emit_harpia import emit_harpia
@@ -53,12 +55,12 @@ class TestWriteProject(unittest.TestCase):
 
     def test_screen_c_includes_own_header(self) -> None:
         write_project(self.app, self.out_dir)
-        content = (self.out_dir / "userprofile_screen.gen.c").read_text()
+        content = (self.out_dir / "src" / "userprofile_screen.gen.c").read_text()
         self.assertIn('#include "userprofile_screen.gen.h"', content)
 
     def test_second_run_with_no_changes_writes_nothing(self) -> None:
         write_project(self.app, self.out_dir)
-        paths = list(self.out_dir.iterdir())
+        paths = [p for p in self.out_dir.rglob("*") if p.is_file()]
         mtimes_before = {p: p.stat().st_mtime_ns for p in paths}
 
         written = write_project(self.app, self.out_dir)
@@ -73,12 +75,12 @@ class TestWriteProject(unittest.TestCase):
 
     def test_display_config_omitted_when_app_display_unset(self) -> None:
         write_project(self.app, self.out_dir)
-        self.assertFalse((self.out_dir / "janus_display_config.gen.h").exists())
+        self.assertFalse((self.out_dir / "include" / "janus_display_config.gen.h").exists())
 
     def test_display_config_written_when_app_display_set(self) -> None:
         self.app.display = DisplayConfig(width=240, height=320, color="mono")
         write_project(self.app, self.out_dir)
-        content = (self.out_dir / "janus_display_config.gen.h").read_text()
+        content = (self.out_dir / "include" / "janus_display_config.gen.h").read_text()
         self.assertIn("#define JANUS_DISPLAY_WIDTH 240", content)
         self.assertIn("#define JANUS_DISPLAY_HEIGHT 320", content)
 

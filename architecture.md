@@ -22,8 +22,9 @@ runtime speaks real `uint16_t` RGB565 throughout (driver contract, tile
 buffer, every `draw_<kind>`), colors are authored per-widget in YAML
 (`color`/`bg`) instead of hardcoded runtime placeholders, the font widened
 from space+A-Z to full occidental Latin coverage, `janus-generate
---vendor-runtime DIR` copies the fixed runtime library into a generated
-project instead of requiring a Janus repo checkout alongside it, and
+--scaffold-src DIR` now also vendors the fixed runtime library into
+`target_dir/runtime`, instead of requiring a Janus repo checkout alongside
+it, and
 non-blocking (polled) rendering is real (`display.render_mode:
 non_blocking`, Stage 4's draw-op queue). Still genuinely open:
 per-controller driver bodies, blocked on real hardware to build against
@@ -397,14 +398,16 @@ built by `emit_screen`, one initializer line per widget, exactly like
 ## Stage 4 — Runtime library (`runtime/embedded_c/`)
 
 **Receives:** nothing generated. Hand-written once, shipped with Janus.
-**Vendoring — RESOLVED (2026-08-22): copy-based.** `janus-generate
---vendor-runtime DIR` copies the whole `runtime/embedded_c` tree
-(`CMakeLists.txt`, `include/`, `src/`, `tests/`, `host_mock/` — everything
-except the `build/` CMake-artifact directory) into `DIR` via
-`janus/writer.py`'s `copy_tree_if_changed`, one file at a time through the
-same content-diff-before-write discipline as every other Janus output. A
-project's copy is, for all intents and purposes, now part of that
-project — Janus itself isn't a runtime dependency of it afterward.
+**Vendoring — RESOLVED (2026-08-22): copy-based, folded into scaffold mode
+(2026-08-23).** `janus-generate --scaffold-src DIR` copies the whole
+`runtime/embedded_c` tree (`CMakeLists.txt`, `include/`, `src/`, `tests/`,
+`host_mock/` — everything except the `build/` CMake-artifact directory)
+into `target_dir/runtime` via `janus/writer.py`'s `copy_tree_if_changed`,
+one file at a time through the same content-diff-before-write discipline
+as every other Janus output. There's no standalone `--vendor-runtime` flag
+any more — without `--scaffold-src`, none of this is copied. A project's
+copy is, for all intents and purposes, now part of that project — Janus
+itself isn't a runtime dependency of it afterward.
 
 **Produces — the stable C API every generated file and every human file
 compiles against** (`runtime/embedded_c/include/janus_runtime.h`, which
@@ -941,12 +944,12 @@ This is the "how does it all actually get compiled" question.
 |---|---|---|
 | `runtime/embedded_c/src/janus_runtime.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` / `janus_font.c` | Janus (fixed library) | no — only on Janus version upgrade |
-| `runtime/embedded_c/` itself, under a project — vendored via `janus-generate --vendor-runtime DIR` | Janus (fixed library, copied) | yes, every build (content-diffed — see Stage 4's vendoring note; unchanged files never touch mtime) |
-| `build/generated/{screen}_screen.gen.c` | Janus | yes, every build |
-| `build/generated/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
-| `build/generated/janus_app.gen.c` | Janus | yes, every build |
-| `build/generated/janus_bindings.gen.h/.c` | Janus | yes, every build (struct shape only — instance zero-inits; a human file populates real values at runtime) |
-| `build/generated/janus_display_config.gen.h` | Janus | yes, every build (only if `app.display` set — now also carries `JANUS_DISPLAY_RENDER_MODE`) |
+| `runtime/embedded_c/` itself, under a project — vendored via `janus-generate --scaffold-src DIR` into `target_dir/runtime` | Janus (fixed library, copied) | yes, every build (content-diffed — see Stage 4's vendoring note; unchanged files never touch mtime) |
+| `build/generated/src/{screen}_screen.gen.c` | Janus | yes, every build |
+| `build/generated/include/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
+| `build/generated/src/janus_app.gen.c` | Janus | yes, every build |
+| `build/generated/include/janus_bindings.gen.h`, `build/generated/src/janus_bindings.gen.c` | Janus | yes, every build (struct shape only — instance zero-inits; a human file populates real values at runtime) |
+| `build/generated/include/janus_display_config.gen.h` | Janus | yes, every build (only if `app.display` set — now also carries `JANUS_DISPLAY_RENDER_MODE`) |
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
 | `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`/`main_touch_async.c.tmpl`/`main_encoder_async.c.tmpl`/`main_buttons_async.c.tmpl`, picked by `app.input_modality` × `app.display.render_mode`) | no |
@@ -1006,14 +1009,14 @@ synchronous, tile-scoped, unaffected by render mode.
 | artifact | owner | regenerated? |
 |---|---|---|
 | `app.yaml`, `*.screen.yaml` | human | — (source of truth) |
-| `janus_generated.harpia` | Janus | every run |
+| `janus_generated.harpia` (`target_dir/`, not C — no src/include split) | Janus | every run |
 | human root `.harpia` | human | never |
-| `{screen}_screen.gen.c/.h` | Janus | every run |
-| `janus_actions.gen.h` | Janus | every run |
-| `janus_app.gen.c` | Janus | every run |
-| `janus_bindings.gen.h/.c` | Janus | every run (zero-init only — see Stage 8) |
-| `janus_display_config.gen.h` | Janus | every run (only if `app.display` set) |
-| `runtime/embedded_c/*` | Janus (fixed library) | on Janus upgrade only (or every run if vendored via `--vendor-runtime` — content-diffed, so an unchanged file's mtime is untouched) |
+| `{screen}_screen.gen.h` (`target_dir/include/`) / `.gen.c` (`target_dir/src/`) | Janus | every run |
+| `janus_actions.gen.h` (`target_dir/include/`) | Janus | every run |
+| `janus_app.gen.c` (`target_dir/src/`) | Janus | every run |
+| `janus_bindings.gen.h` (`target_dir/include/`) / `.gen.c` (`target_dir/src/`) | Janus | every run (zero-init only — see Stage 8) |
+| `janus_display_config.gen.h` (`target_dir/include/`) | Janus | every run (only if `app.display` set) |
+| `runtime/embedded_c/*` | Janus (fixed library) | on Janus upgrade only (or every run if vendored via `--scaffold-src` into `target_dir/runtime` — content-diffed, so an unchanged file's mtime is untouched) |
 | `src/janus_actions.c` | human | never |
 | `src/main.c` | human | never |
 | `src/display_driver.c` | human/vendor | never |

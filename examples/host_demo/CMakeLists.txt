@@ -9,11 +9,11 @@ set(JANUS_RUNTIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${RUNTIME_DIR} janus_runtime_build)
 
 set(GENERATED_SOURCES
-    build/generated/pwm_screen.gen.c
-    build/generated/busstatus_screen.gen.c
-    build/generated/relay_screen.gen.c
-    build/generated/janus_app.gen.c
-    build/generated/janus_bindings.gen.c
+    build/generated/src/pwm_screen.gen.c
+    build/generated/src/busstatus_screen.gen.c
+    build/generated/src/relay_screen.gen.c
+    build/generated/src/janus_app.gen.c
+    build/generated/src/janus_bindings.gen.c
 )
 set(COMMON_SOURCES
     ${GENERATED_SOURCES}
@@ -24,7 +24,7 @@ set(COMMON_SOURCES
 )
 set(COMMON_INCLUDES
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/build/generated
+    ${CMAKE_CURRENT_SOURCE_DIR}/build/generated/include
     ${RUNTIME_DIR}/host_mock
 )
 
