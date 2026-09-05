@@ -115,6 +115,11 @@ def _validate_widget(widget: Widget) -> None:
             f"widget {widget.id!r} (kind={widget.kind!r}) has `summary` — only `box` "
             f"widgets can have header-summary content"
         )
+    if widget.image_file is not None and widget.kind != "image":
+        raise ValueError(
+            f"widget {widget.id!r} (kind={widget.kind!r}) has `file` — only `image` "
+            f"widgets take a source image file"
+        )
     for child in widget.summary:
         if child.kind in _CONTAINER_KINDS:
             raise ValueError(
@@ -123,13 +128,27 @@ def _validate_widget(widget: Widget) -> None:
             )
 
 
-def _parse_widget(data: dict[str, Any]) -> Widget:
+def _resolve_image_file(value: str | None, base_dir: Path | None) -> str | None:
+    """Turn a widget's authored `file:` into an absolute path against the
+    declaring screen file's directory. No existence/format check here —
+    a missing or unreadable file is Stage 3b's problem to log and fall
+    back from, never a parse-time abort."""
+    if value is None:
+        return None
+    path = Path(value)
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return str(path)
+
+
+def _parse_widget(data: dict[str, Any], base_dir: Path | None = None) -> Widget:
     widget = Widget(
         kind=data["kind"],
         id=data.get("id", ""),
         bind=_parse_binding(data.get("bind")),
         text=data.get("text"),
         asset=data.get("asset"),
+        image_file=_resolve_image_file(data.get("file"), base_dir),
         value=data.get("value"),
         range=_parse_range(data.get("range")),
         states=data.get("states"),
@@ -144,26 +163,32 @@ def _parse_widget(data: dict[str, Any]) -> Widget:
         bg=_parse_color(data.get("bg")),
         font_size=data.get("font_size", "large"),
         font_scale=data.get("font_scale", 1),
-        children=[_parse_widget(c) for c in data.get("children", [])],
-        summary=[_parse_widget(c) for c in data.get("summary", [])],
+        children=[_parse_widget(c, base_dir) for c in data.get("children", [])],
+        summary=[_parse_widget(c, base_dir) for c in data.get("summary", [])],
     )
     _validate_widget(widget)
     return widget
 
 
-def screen_from_dict(data: dict[str, Any]) -> Screen:
+def screen_from_dict(data: dict[str, Any], base_dir: str | Path | None = None) -> Screen:
+    """`base_dir` is the directory the screen file lives in — what any
+    widget's `file:` image path is resolved against. `parse_screen`
+    passes it automatically; an in-memory caller only needs it when a
+    widget uses a relative `file:`."""
+    base = Path(base_dir) if base_dir is not None else None
     root = Widget(
         kind=data["layout"],
         id=f"{data['screen']}__root",
         layout=data["layout"],
-        children=[_parse_widget(c) for c in data.get("children", [])],
+        children=[_parse_widget(c, base) for c in data.get("children", [])],
     )
     return Screen(name=data["screen"], root=root)
 
 
 def parse_screen(path: str | Path) -> Screen:
-    data = yaml.safe_load(Path(path).read_text())
-    return screen_from_dict(data)
+    path = Path(path)
+    data = yaml.safe_load(path.read_text())
+    return screen_from_dict(data, base_dir=path.parent)
 
 
 def _check_navigate_targets(widget: Widget, screen_names: set[str]) -> None:

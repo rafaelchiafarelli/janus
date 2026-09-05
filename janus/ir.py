@@ -40,6 +40,15 @@ class Widget:
     bind: Optional[Binding] = None
     text: Optional[str] = None
     asset: Optional[str] = None
+    # kind == "image" only: filesystem path to a source image file (PNG,
+    # BMP, JPEG, GIF, TIFF, WebP, ...), resolved to an absolute path
+    # against the declaring .screen.yaml's own directory at parse time.
+    # Stage 3b decodes it, composites any alpha over black, rescales to
+    # this widget's `size`, and bakes an RGB565 pixel array into the
+    # generated screen source. A missing / unsupported / undecodable file
+    # is logged and the widget renders as a magenta placeholder rect —
+    # never fatal to generation.
+    image_file: Optional[str] = None
     value: Optional[Union[int, str]] = None
     range: Optional[tuple[float, float]] = None
     states: Optional[list[str]] = None

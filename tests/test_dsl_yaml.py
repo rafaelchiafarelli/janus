@@ -50,5 +50,51 @@ class TestParseScreen(unittest.TestCase):
         self.assertTrue(screen.root.children[1].fill)
 
 
+class TestImageFile(unittest.TestCase):
+    def _one_image(self, base_dir, file_value):
+        screen = screen_from_dict(
+            {
+                "screen": "Img",
+                "layout": "column",
+                "children": [
+                    {"kind": "image", "id": "logo", "file": file_value,
+                     "size": {"w": 16, "h": 16}},
+                ],
+            },
+            base_dir=base_dir,
+        )
+        return screen.root.children[0]
+
+    def test_relative_file_is_resolved_against_the_screen_dir(self) -> None:
+        img = self._one_image("/proj/screens", "art/logo.png")
+        self.assertEqual(img.image_file, "/proj/screens/art/logo.png")
+
+    def test_absolute_file_is_kept_as_is(self) -> None:
+        img = self._one_image("/proj/screens", "/assets/logo.png")
+        self.assertEqual(img.image_file, "/assets/logo.png")
+
+    def test_no_base_dir_leaves_a_relative_path_relative(self) -> None:
+        img = self._one_image(None, "art/logo.png")
+        self.assertEqual(img.image_file, "art/logo.png")
+
+    def test_no_file_key_means_none(self) -> None:
+        img = self._one_image("/proj/screens", None)
+        self.assertIsNone(img.image_file)
+
+    def test_parse_screen_uses_the_yaml_files_own_directory(self) -> None:
+        screen = parse_screen(FIXTURES / "user_profile.screen.yaml")
+        # nothing in that fixture uses `file:`, but the resolution path
+        # still has to run without error over a real on-disk screen.
+        self.assertEqual(screen.name, "UserProfile")
+
+    def test_file_on_a_non_image_widget_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            screen_from_dict({
+                "screen": "Bad",
+                "layout": "column",
+                "children": [{"kind": "label", "id": "x", "file": "logo.png"}],
+            })
+
+
 if __name__ == "__main__":
     unittest.main()
