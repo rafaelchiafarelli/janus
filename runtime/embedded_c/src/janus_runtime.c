@@ -385,22 +385,72 @@ static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) 
     fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
 }
 
+/* forward declaration: draw_box_header (below) renders `summary_children`
+ * via render_widget, and render_widget's JANUS_WIDGET_BOX case calls
+ * draw_box_header — genuine mutual recursion, one of the two needs a
+ * prototype ahead of its definition.
+ *
+ * `bound_dirty` (added 2026-09-05, threaded through both): NULL means
+ * "force draw regardless" (today's behavior, unchanged — every existing
+ * caller passes NULL); a real pointer means "skip a bound leaf whose
+ * field's dirty bit isn't set" — see bind_consume_dirty below and
+ * janus_render_widget_if_dirty/janus_render_screen_if_dirty. */
+static void render_widget(const janus_widget_desc_t *w, const void *bound_struct, void *bound_dirty);
+
+/* Checks (and, if set, clears) whether `bind`'s own field is marked dirty
+ * in `bound_dirty` — same offsetof-into-a-generated-struct mechanism
+ * read_bound_value already uses for the *value* struct, just a bool
+ * instead. Always "yes, draw" for an unbound widget or a NULL
+ * bound_dirty (the force-draw case) — nothing to check against, so the
+ * safe default is to draw. */
+static bool bind_consume_dirty(const janus_bind_t *bind, void *bound_dirty) {
+    if (bound_dirty == NULL || bind->field_type == JANUS_FIELD_NONE) return true;
+    bool *flag = (bool *)((uint8_t *)bound_dirty + bind->dirty_offset);
+    if (!*flag) return false;
+    *flag = false;
+    return true;
+}
+
 /* box's own content is just its header strip; children are separate
  * descriptors, drawn (or not) by the traversal below. Its title text is
  * `box.static_text` — box has no dedicated title field, it reuses the
  * generic Widget.text (Janus.md's widget catalog / architecture.md
- * Stage 2). */
-static void draw_box_header(const janus_widget_desc_t *box) {
+ * Stage 2). The header fill/title itself always draws when reached
+ * (box has no `bind` of its own to check dirty against) — only the
+ * individual summary_children below are dirty-checked. */
+static void draw_box_header(const janus_widget_desc_t *box, const void *bound_struct, void *bound_dirty) {
     janus_widget_desc_t lb = janus_widget_load(box);
     fill_rect(lb.geometry_collapsed, lb.bg_color);
     draw_string(lb.geometry_collapsed, lb.static_text, lb.color, lb.bg_color, true);
+    /* summary widgets always render here, collapsed or expanded — unlike
+     * lb.children, which only render when the box is actually expanded
+     * (see the JANUS_WIDGET_BOX case below / janus_toggle_box). */
+    for (uint16_t i = 0; i < lb.summary_child_count; i++) {
+        render_widget(&lb.summary_children[i], bound_struct, bound_dirty);
+    }
     if (box == g_focused_widget) draw_focus_ring(lb.geometry_collapsed);
 }
 
 /* ---------------------------------------------------------- traversal --
  */
-static void render_widget(const janus_widget_desc_t *w, const void *bound_struct) {
+static void render_widget(const janus_widget_desc_t *w, const void *bound_struct, void *bound_dirty) {
     janus_widget_desc_t lw = janus_widget_load(w);
+
+    /* every leaf kind below draws from *live* bound data (or none at
+     * all) — this one check covers all of them, same rule regardless of
+     * kind: unbound or dirty -> draw (and clear the bit); clean -> skip. */
+    switch (lw.kind) {
+        case JANUS_WIDGET_LABEL: case JANUS_WIDGET_HEADER: case JANUS_WIDGET_BUTTON:
+        case JANUS_WIDGET_IMAGE: case JANUS_WIDGET_RADIOBUTTON: case JANUS_WIDGET_PROGRESS:
+        case JANUS_WIDGET_GAUGE: case JANUS_WIDGET_CHECKBOX: case JANUS_WIDGET_LED:
+        case JANUS_WIDGET_DIVIDER: case JANUS_WIDGET_TOGGLE: case JANUS_WIDGET_BADGE:
+        case JANUS_WIDGET_SLIDER:
+            if (!bind_consume_dirty(&lw.bind, bound_dirty)) return;
+            break;
+        default:
+            break;
+    }
+
     switch (lw.kind) {
         case JANUS_WIDGET_LABEL: draw_label(w, bound_struct); return;
         case JANUS_WIDGET_HEADER: draw_header(w, bound_struct); return;
@@ -417,10 +467,10 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_SLIDER: draw_slider(w, bound_struct); return;
 
         case JANUS_WIDGET_BOX:
-            draw_box_header(w);
+            draw_box_header(w, bound_struct, bound_dirty);
             if (janus_box_is_expanded(w)) {
                 for (uint16_t i = 0; i < lw.child_count; i++) {
-                    render_widget(&lw.children[i], bound_struct);
+                    render_widget(&lw.children[i], bound_struct, bound_dirty);
                 }
             }
             return;
@@ -430,7 +480,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_ROW:
         case JANUS_WIDGET_RADIOGROUP:
             for (uint16_t i = 0; i < lw.child_count; i++) {
-                render_widget(&lw.children[i], bound_struct);
+                render_widget(&lw.children[i], bound_struct, bound_dirty);
             }
             return;
     }
@@ -441,11 +491,27 @@ const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t
     return JANUS_PGM_READ_PTR(&app->screens[index]);
 }
 
+void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_struct) {
+    render_widget(widget, bound_struct, NULL);
+}
+
+void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void *bound_struct, void *bound_dirty) {
+    render_widget(widget, bound_struct, bound_dirty);
+}
+
 void janus_render_screen(const janus_screen_desc_t *screen) {
     g_current_screen = screen;
     janus_screen_desc_t ls = janus_screen_load(screen);
     for (uint16_t i = 0; i < ls.widget_count; i++) {
-        render_widget(&ls.widgets[i], ls.bound_struct);
+        render_widget(&ls.widgets[i], ls.bound_struct, NULL);
+    }
+}
+
+void janus_render_screen_if_dirty(const janus_screen_desc_t *screen) {
+    g_current_screen = screen;
+    janus_screen_desc_t ls = janus_screen_load(screen);
+    for (uint16_t i = 0; i < ls.widget_count; i++) {
+        render_widget(&ls.widgets[i], ls.bound_struct, ls.bound_dirty);
     }
 }
 
@@ -504,8 +570,8 @@ void janus_set_focus(const janus_widget_desc_t *widget) {
 
     const void *bound_struct = g_current_screen != NULL ? janus_screen_load(g_current_screen).bound_struct : NULL;
     g_focused_widget = widget;
-    if (previous != NULL) render_widget(previous, bound_struct);
-    if (widget != NULL) render_widget(widget, bound_struct);
+    if (previous != NULL) render_widget(previous, bound_struct, NULL);
+    if (widget != NULL) render_widget(widget, bound_struct, NULL);
 }
 
 const janus_widget_desc_t *janus_get_focus(void) {
@@ -519,11 +585,20 @@ void janus_toggle_box(const janus_widget_desc_t *box) {
     }
 
     const void *bound_struct = g_current_screen != NULL ? janus_screen_load(g_current_screen).bound_struct : NULL;
-    draw_box_header(box);
     janus_widget_desc_t lb = janus_widget_load(box);
+    /* Clear the box's full (expanded-size) footprint before redrawing —
+     * draw_box_header only repaints the header strip, and .children only
+     * get redrawn when expanded, so collapsing would otherwise leave the
+     * previous render's child pixels on screen: nothing else ever repaints
+     * a rect a widget doesn't currently own. Found on real ArduinoIHM
+     * hardware, ported back 2026-09-05 (previously only a local,
+     * never-upstreamed fix — lost the first time this repo's runtime got
+     * vendored back over it). */
+    fill_rect(lb.geometry, lb.bg_color);
+    draw_box_header(box, bound_struct, NULL);
     if (janus_box_is_expanded(box)) {
         for (uint16_t i = 0; i < lb.child_count; i++) {
-            render_widget(&lb.children[i], bound_struct);
+            render_widget(&lb.children[i], bound_struct, NULL);
         }
     }
 }

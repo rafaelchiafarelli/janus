@@ -26,6 +26,8 @@ def collect_bindings(widget: Widget, out: dict[str, dict[str, Binding]]) -> None
         fields[widget.bind.field] = widget.bind
     for child in widget.children:
         collect_bindings(child, out)
+    for child in widget.summary:
+        collect_bindings(child, out)
 
 
 def emit_harpia(app: App) -> str:

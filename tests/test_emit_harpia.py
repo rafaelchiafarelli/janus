@@ -38,6 +38,20 @@ class TestEmitHarpia(unittest.TestCase):
         self.assertIn("message device{", out)
         self.assertIn("message settings{", out)
 
+    def test_box_summary_bindings_are_collected(self) -> None:
+        # regression: a box's `summary` bindings were silently dropped from
+        # both the harpia Include and the generated C struct (emit_harpia's
+        # collect_bindings only walked .children) until fixed 2026-09-05 —
+        # found authoring a real drawer screen, not a hypothetical.
+        box = Widget(
+            kind="box", id="drawer", layout="column",
+            summary=[Widget(kind="led", id="l", bind=Binding("pwm", "ch0_enabled", "int"))],
+            children=[Widget(kind="label", id="d")],
+        )
+        root = Widget(kind="column", id="root", children=[box])
+        out = emit_harpia(App(screens=[Screen(name="S", root=root)]))
+        self.assertIn("int ch0_enabled;", out)
+
     def test_conflicting_types_raise(self) -> None:
         widget_a = Widget(kind="label", id="a", bind=Binding("device", "name", "string"))
         widget_b = Widget(kind="progress", id="b", bind=Binding("device", "name", "int"), range=(0, 1))

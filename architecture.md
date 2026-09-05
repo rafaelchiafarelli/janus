@@ -261,6 +261,33 @@ Its content area is offset below a fixed-height header strip
 `geometry_collapsed` covers the header strip only, `geometry` covers
 header + body.
 
+**`box.summary` (added 2026-09-05):** an optional list of leaf widgets
+always rendered inside the header strip, regardless of collapse state —
+distinct from `children`, which only render when expanded. `_header_height`
+(`stage2_layout/layout.py`) grows the header past `BOX_HEADER_H` if the
+tallest summary widget needs more room (a box with no `summary` lays out
+byte-identical to before this existed). A box's own width also widens to
+`max(width its children derive, _summary_width(box))` — a summary row
+wider than the detail content alone (a real, expected shape: a compact
+toggle+label detail row next to a 5-widget "at a glance" summary) would
+otherwise leave the box too narrow for the right-aligned summary to fit,
+pushing it to a negative x (off-panel) — found while actually authoring
+a drawer-shaped screen, not a hypothetical. `_layout_summary_row` positions
+them *after* the box's own final width is known (unlike `children`, whose
+position only depends on things already known top-down) — right-aligned
+within the header row, each vertically centered, packed with the usual
+`GAP` between them; the title (drawn separately, left-aligned by the
+runtime) isn't collision-checked against them, same "no auto-sizing text,
+overflow is an expected v1 case" tradeoff `draw_string`'s own clipping
+already accepts elsewhere. Only leaf kinds are allowed in `summary` (Stage
+1 rejects a container kind there) — no nested containers in v1. Summary
+widgets can `bind:` to live data like any other widget (that's the whole
+point — an LED/label showing live state "at a glance"); `on_press`/
+`navigate` are accepted but never actually dispatched, since a tap
+anywhere in the header always resolves to `TOGGLE_BOX` (Stage 6) —
+summary content is read-only by construction, not by a separate touch
+carve-out. See Stage 4 below for the runtime side.
+
 **Display bounds check (`check_fits_display`, added 2026-08-20):** a
 separate function from `layout_screen` — `layout_screen` itself stays a
 pure per-`Screen` function with no `App`/display access, unchanged. Called
@@ -448,6 +475,8 @@ typedef struct {
 
 typedef struct {
     uint16_t field_offset;         /* offsetof() into bound_struct; 0 if unbound */
+    uint16_t dirty_offset;         /* offsetof() into bound_dirty (added 2026-09-05);
+                                     * meaningless when field_type == JANUS_FIELD_NONE */
     janus_field_type_t field_type;
     float range_min, range_max;    /* progress/gauge only */
 } janus_bind_t;
@@ -475,6 +504,11 @@ typedef struct janus_widget_desc {
     uint16_t bg_color;                 /* RGB565 background/off-state fill — authored per-widget (`bg:`) */
     const struct janus_widget_desc *children;
     uint16_t child_count;
+    const struct janus_widget_desc *summary_children;  /* box only (added 2026-09-05): always
+                                                          * rendered in the header strip, collapsed
+                                                          * or expanded — NULL/0 for every non-box
+                                                          * widget and any box with no `summary:`. */
+    uint16_t summary_child_count;
 } janus_widget_desc_t;
 
 typedef struct {
@@ -482,6 +516,9 @@ typedef struct {
     const janus_widget_desc_t *widgets;
     uint16_t widget_count;
     const void *bound_struct;   /* e.g. &device_t instance — see open question below */
+    void *bound_dirty;          /* e.g. &device_dirty (added 2026-09-05); mutable,
+                                  * NULL wherever bound_struct is NULL — see janus_bind_t
+                                  * .dirty_offset and janus_render_*_if_dirty above */
 } janus_screen_desc_t;
 
 typedef struct {
@@ -504,6 +541,34 @@ void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus first */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads the state above; Stage 6 hit-testing needs it */
+
+/* janus_render_widget (added 2026-09-05): redraws exactly one already-known
+ * widget (its `summary` and, if expanded, `children`, same as any other
+ * traversal reaching it) — for a caller that wants to refresh one subtree
+ * on its own cadence (a persistent header's live fields, redrawn every
+ * tick) without a full janus_render_screen sweep repainting the whole
+ * screen along with it. Thin wrapper over the same internal render_widget
+ * every other entry point above already uses. */
+void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_struct);
+
+/* Dirty-aware variants (added 2026-09-05): same traversal, but a bound
+ * leaf only actually redraws (and clears the bit) if its own field's
+ * dirty flag is set. Per-*field*, not per-widget-instance — the dirty
+ * flag lives in a Stage 3b-generated `{message}_dirty_t` companion to
+ * `{message}_t` (`emit_bindings_struct.py`), one `bool` per bound field,
+ * same names; `janus_bind_t.dirty_offset` is `offsetof()` into it, the
+ * exact same mechanism `field_offset` already uses for the value struct.
+ * Firmware sets `{message}_dirty.{field} = true` whenever it writes a
+ * fresh value into `{message}_instance.{field}` — the runtime does no
+ * value comparison itself, it only trusts what firmware reports changed.
+ * Unbound (static) leaves and containers always draw regardless (nothing
+ * ever marks them dirty, and a one-shot static repaint is cheap) — this
+ * is purely about skipping *unchanged bound data* on a repeated sweep.
+ * `janus_toggle_box`/`janus_set_focus` are untouched by any of this —
+ * collapse/focus state changing is its own reason to force a redraw,
+ * unrelated to whether any field's dirty bit happens to be set. */
+void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void *bound_struct, void *bound_dirty);
+void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
 
 /* Stage 6: encoder/button focus highlight — see Stage 6 below. */
 void janus_set_focus(const janus_widget_desc_t *widget);   /* NULL clears it */

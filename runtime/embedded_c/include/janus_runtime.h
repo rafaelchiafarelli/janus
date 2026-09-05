@@ -40,6 +40,8 @@ typedef struct { int16_t x, y, w, h; } janus_rect_t;
 
 typedef struct {
     uint16_t field_offset;         /* offsetof() into bound_struct; 0 if unbound */
+    uint16_t dirty_offset;         /* offsetof() into bound_dirty (added 2026-09-05);
+                                     * meaningless when field_type == JANUS_FIELD_NONE */
     janus_field_type_t field_type;
     float range_min, range_max;    /* progress/gauge only */
 } janus_bind_t;
@@ -109,6 +111,14 @@ typedef struct janus_widget_desc {
     uint16_t bg_color;                 /* RGB565 background/off-state fill — see JANUS_COLOR_DEFAULT_BG */
     const struct janus_widget_desc *children;
     uint16_t child_count;
+    const struct janus_widget_desc *summary_children;  /* box only: always rendered in the
+                                                          * header strip, collapsed or expanded
+                                                          * — view-only "at a glance" content,
+                                                          * distinct from `children` (detail
+                                                          * content, expanded-only). NULL/0 for
+                                                          * every non-box widget and any box with
+                                                          * no `summary:` authored. */
+    uint16_t summary_child_count;
 } janus_widget_desc_t;
 
 typedef struct {
@@ -117,6 +127,9 @@ typedef struct {
     const janus_widget_desc_t *widgets;
     uint16_t widget_count;
     const void *bound_struct;   /* e.g. &device_instance; NULL if the screen binds nothing */
+    void *bound_dirty;          /* e.g. &device_dirty (added 2026-09-05); mutable — see
+                                  * janus_bind_t.dirty_offset and janus_render_*_if_dirty below.
+                                  * NULL wherever bound_struct is NULL. */
 } janus_screen_desc_t;
 
 typedef struct {
@@ -178,6 +191,33 @@ const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t
 void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
+
+/* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its
+ * always-visible `summary` plus its `children` if currently expanded,
+ * same as any other traversal reaching it. The entry point for a caller
+ * that wants to refresh one already-known widget on its own cadence
+ * (e.g. a persistent header's live fields, redrawn every tick) without a
+ * full janus_render_screen sweep repainting the whole screen along with
+ * it. `bound_struct` is whatever that widget's screen uses
+ * (janus_screen_desc_t.bound_struct) — pass NULL if it has no live
+ * bindings anywhere in its subtree. */
+void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_struct);
+
+/* Dirty-aware variants (added 2026-09-05) — same traversal as
+ * janus_render_screen/janus_render_widget, but a bound leaf is only
+ * actually redrawn if its own field's dirty bit (bound_dirty +
+ * bind.dirty_offset) is set; the bit is cleared right after that redraw.
+ * Firmware sets a field's bit (e.g. `pwm_dirty.ch0_frequency = true`)
+ * whenever it writes a new value into the matching `bound_struct` field
+ * — nothing here does value comparison, it only trusts what firmware
+ * reports changed. Unbound (static) leaves and containers always draw
+ * regardless (nothing ever marks them dirty, and they're cheap/one-shot
+ * by nature) — this is purely about skipping *unchanged bound data* on a
+ * repeated sweep, e.g. a header redrawn on a timer. `janus_toggle_box`/
+ * `janus_set_focus` are unaffected — collapse/focus state changing is
+ * its own reason to redraw regardless of any field's dirty bit. */
+void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void *bound_struct, void *bound_dirty);
+void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
 
 /* Non-blocking (polled) rendering — app.yaml's `display.render_mode:
  * non_blocking` (default `blocking`). `janus_render_screen_async_start`

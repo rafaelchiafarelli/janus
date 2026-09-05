@@ -64,6 +64,45 @@ def _resolve_leaf_size(widget: Widget) -> tuple[int, int]:
     return _DEFAULT_SIZE[widget.kind]
 
 
+def _header_height(widget: Widget) -> int:
+    """`box`'s header strip is normally `BOX_HEADER_H`, but grows to fit
+    the tallest `summary` widget if any are taller than that (a box with
+    no `summary` lays out byte-identical to before this existed)."""
+    if not widget.summary:
+        return BOX_HEADER_H
+    tallest = max(_resolve_leaf_size(c)[1] for c in widget.summary)
+    return max(BOX_HEADER_H, tallest)
+
+
+def _summary_width(widget: Widget) -> int:
+    """Total width `widget.summary` needs, packed with `GAP` between
+    entries — used to widen a `box` past whatever its `children` alone
+    would derive, so the (right-aligned) summary row never starts left of
+    the box's own x (see `_layout_summary_row`). 0 if there's no summary,
+    same zero-cost-when-unused shape as `_distribute_fill`."""
+    if not widget.summary:
+        return 0
+    sizes = [_resolve_leaf_size(c)[0] for c in widget.summary]
+    return sum(sizes) + GAP * max(len(sizes) - 1, 0)
+
+
+def _layout_summary_row(widget: Widget, box_x: int, box_y: int, box_w: int, header_h: int) -> None:
+    """Positions `widget.summary` right-aligned within the header strip,
+    each vertically centered — the title (drawn separately by the
+    runtime, left-aligned) and this row share the same strip. No
+    collision check against the title's width — same "no auto-sizing
+    text, overflow is an expected v1 case" tradeoff `draw_string`'s own
+    clipping already accepts elsewhere."""
+    if not widget.summary:
+        return
+    sizes = [_resolve_leaf_size(c) for c in widget.summary]
+    total_w = sum(w for w, _ in sizes) + GAP * max(len(sizes) - 1, 0)
+    cursor_x = box_x + box_w - total_w
+    for child, (cw, ch) in zip(widget.summary, sizes):
+        child.geometry = Rect(x=cursor_x, y=box_y + (header_h - ch) // 2, w=cw, h=ch)
+        cursor_x += cw + GAP
+
+
 def _direction_of(widget: Widget) -> str:
     if widget.layout in ("column", "row"):
         return widget.layout
@@ -145,7 +184,7 @@ def _layout_widget(
     own_avail_h = forced_h if forced_h is not None else avail_h
 
     direction = _direction_of(widget)
-    header_h = BOX_HEADER_H if widget.kind == "box" else 0
+    header_h = _header_height(widget) if widget.kind == "box" else 0
 
     body_avail_w = own_avail_w
     body_avail_h = None if own_avail_h is None else own_avail_h - header_h
@@ -191,6 +230,8 @@ def _layout_widget(
         body_h = max((c.geometry.h for c in widget.children), default=0)
 
     w, h = body_w, header_h + body_h
+    if widget.kind == "box":
+        w = max(w, _summary_width(widget))
     if forced_w is not None:
         w = forced_w
     if forced_h is not None:
@@ -199,3 +240,4 @@ def _layout_widget(
     widget.geometry = Rect(x=x, y=y, w=w, h=h)
     if widget.kind == "box":
         widget.geometry_collapsed = Rect(x=x, y=y, w=w, h=header_h)
+        _layout_summary_row(widget, x, y, w, header_h)

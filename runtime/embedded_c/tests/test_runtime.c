@@ -92,11 +92,172 @@ static void test_box_collapse_and_toggle(void) {
 
     mock_driver_reset();
     janus_toggle_box(&box_widget);         /* flips to expanded */
-    CHECK(mock_driver_log_count == 2);     /* header + child */
+    /* clear (2 tiles: {0,0,10,26} splits at the 16px tile boundary) +
+     * header (1) + child (1) — the clear is the vacated-body-area fix
+     * (fixture 3a below), not specific to this fixture's own concern. */
+    CHECK(mock_driver_log_count == 4);
 
     mock_driver_reset();
     janus_render_screen(&screen);          /* state persists across renders */
     CHECK(mock_driver_log_count == 2);
+}
+
+/* ---- fixture 2b: janus_render_widget draws exactly one widget, not the
+ * whole screen — the entry point for redrawing a known subtree (e.g. a
+ * header) on its own cadence. ---- */
+static void test_render_widget_draws_only_that_widget(void) {
+    static const janus_widget_desc_t widgets[] = {
+        { .kind = JANUS_WIDGET_LABEL, .id = "a", .geometry = { 0, 0, 10, 10 } },
+        { .kind = JANUS_WIDGET_LABEL, .id = "b", .geometry = { 0, 10, 10, 10 } },
+    };
+
+    mock_driver_reset();
+    janus_render_widget(&widgets[1], NULL);
+    CHECK(mock_driver_log_count == 1);
+    CHECK(mock_driver_log[0].y == 10);   /* widgets[1], not widgets[0] */
+}
+
+/* ---- fixture 2c: dirty-aware rendering — a bound leaf only redraws when
+ * firmware has actually marked its field's bit dirty; the bit is
+ * consumed (cleared) on that redraw. Unbound (static) leaves always
+ * draw regardless — nothing ever marks them dirty, by design. ---- */
+typedef struct { int level; } dirty_demo_t;
+typedef struct { bool level; } dirty_demo_dirty_t;
+
+static void test_render_widget_if_dirty_skips_unchanged_field(void) {
+    static dirty_demo_t data = { .level = 5 };
+    static dirty_demo_dirty_t dirty = { .level = false };
+    static const janus_widget_desc_t w = {
+        .kind = JANUS_WIDGET_LABEL, .id = "p", .geometry = { 0, 0, 10, 10 },
+        .bind = {
+            .field_offset = offsetof(dirty_demo_t, level),
+            .dirty_offset = offsetof(dirty_demo_dirty_t, level),
+            .field_type = JANUS_FIELD_INT,
+        },
+    };
+
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, &data, &dirty);
+    CHECK(mock_driver_log_count == 0);   /* not dirty -- skipped entirely */
+
+    dirty.level = true;
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, &data, &dirty);
+    CHECK(mock_driver_log_count == 1);   /* dirty -- drawn */
+    CHECK(dirty.level == false);         /* ...and the bit is consumed */
+
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, &data, &dirty);
+    CHECK(mock_driver_log_count == 0);   /* clean again -- skipped */
+}
+
+static void test_unbound_widget_always_draws_via_if_dirty(void) {
+    static const janus_widget_desc_t w = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "hi", .geometry = { 0, 0, 20, 10 },
+    };
+
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, NULL, NULL);
+    CHECK(mock_driver_log_count > 0);
+
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, NULL, NULL);
+    CHECK(mock_driver_log_count > 0);    /* still draws every time -- nothing ever marks it clean */
+}
+
+static void test_render_screen_if_dirty_respects_the_bit(void) {
+    static dirty_demo_t data = { .level = 5 };
+    static dirty_demo_dirty_t dirty = { .level = false };
+    static const janus_widget_desc_t widget = {
+        .kind = JANUS_WIDGET_LABEL, .id = "p", .geometry = { 0, 0, 10, 10 },
+        .bind = {
+            .field_offset = offsetof(dirty_demo_t, level),
+            .dirty_offset = offsetof(dirty_demo_dirty_t, level),
+            .field_type = JANUS_FIELD_INT,
+        },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Dirty", .widgets = &widget, .widget_count = 1,
+        .bound_struct = &data, .bound_dirty = &dirty,
+    };
+
+    mock_driver_reset();
+    janus_render_screen_if_dirty(&screen);
+    CHECK(mock_driver_log_count == 0);
+
+    dirty.level = true;
+    mock_driver_reset();
+    janus_render_screen_if_dirty(&screen);
+    CHECK(mock_driver_log_count == 1);
+
+    /* janus_render_screen (the non-dirty-aware entry point) is unaffected
+     * -- always forces a real redraw regardless of the bit's state. */
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(mock_driver_log_count == 1);
+}
+
+/* ---- fixture 3a: collapsing a box must clear the vacated body area, not
+ * just repaint the header — otherwise the previous render's child pixels
+ * (drawn below the header, now no longer part of the collapsed layout)
+ * stay on screen forever, since nothing else ever repaints a rect a
+ * widget doesn't currently own. Regression: found independently on real
+ * ArduinoIHM hardware before this fix was ported back here. ---- */
+static void test_toggle_box_clears_vacated_body_on_collapse(void) {
+    static const janus_widget_desc_t box_child = {
+        .kind = JANUS_WIDGET_LABEL, .id = "child", .geometry = { 0, 16, 10, 10 },
+    };
+    static const janus_widget_desc_t box_widget = {
+        .kind = JANUS_WIDGET_BOX, .id = "box1",
+        .geometry = { 0, 0, 10, 26 }, .geometry_collapsed = { 0, 0, 10, 16 },
+        .initial_expanded = true,
+        .children = &box_child, .child_count = 1,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "BoxCollapse", .widgets = &box_widget, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    janus_render_screen(&screen);          /* seeds box state as expanded */
+
+    mock_driver_reset();
+    janus_toggle_box(&box_widget);         /* flips to collapsed */
+
+    uint16_t max_bottom = 0;
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        uint16_t bottom = mock_driver_log[i].y + mock_driver_log[i].h;
+        if (bottom > max_bottom) max_bottom = bottom;
+    }
+    CHECK(max_bottom >= 26);   /* clears past the 16px header into the vacated body */
+}
+
+/* ---- fixture 3b: box.summary — always drawn, collapsed or expanded,
+ * unlike .children (expanded-only, see fixture 3 above) ---- */
+static void test_box_summary_renders_when_collapsed_and_expanded(void) {
+    static const janus_widget_desc_t summary_led = {
+        .kind = JANUS_WIDGET_LED, .id = "status_led", .geometry = { 0, 0, 10, 10 },
+    };
+    static const janus_widget_desc_t box_child = {
+        .kind = JANUS_WIDGET_LABEL, .id = "child", .geometry = { 0, 16, 10, 10 },
+    };
+    static const janus_widget_desc_t box_widget = {
+        .kind = JANUS_WIDGET_BOX, .id = "box1",
+        .geometry = { 0, 0, 10, 26 }, .geometry_collapsed = { 0, 0, 10, 16 },
+        .initial_expanded = false,
+        .children = &box_child, .child_count = 1,
+        .summary_children = &summary_led, .summary_child_count = 1,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "BoxSummary", .widgets = &box_widget, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);          /* collapsed: header + summary, no detail child */
+    CHECK(mock_driver_log_count == 2);
+
+    mock_driver_reset();
+    janus_toggle_box(&box_widget);         /* expanded: header + summary + detail child */
+    /* + the 2-tile vacated-body clear (fixture 3a) ahead of header/summary/child */
+    CHECK(mock_driver_log_count == 5);
 }
 
 /* ---- fixture 4: only the active screen ever gets drawn ---- */
@@ -377,7 +538,13 @@ static void test_widget_default_colors_are_the_runtime_constants(void) {
 int main(void) {
     test_traversal_reaches_every_widget();
     test_progress_fill_tracks_live_value();
+    test_render_widget_draws_only_that_widget();
+    test_render_widget_if_dirty_skips_unchanged_field();
+    test_unbound_widget_always_draws_via_if_dirty();
+    test_render_screen_if_dirty_respects_the_bit();
     test_box_collapse_and_toggle();
+    test_toggle_box_clears_vacated_body_on_collapse();
+    test_box_summary_renders_when_collapsed_and_expanded();
     test_switch_screen_draws_only_the_new_screen();
     test_divider_always_draws_unconditionally();
     test_toggle_fill_tracks_live_value();

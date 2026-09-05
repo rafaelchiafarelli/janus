@@ -149,6 +149,8 @@ def _collect_on_press(widget: Widget, seen: dict[str, None]) -> None:
         seen[widget.on_press] = None
     for child in widget.children:
         _collect_on_press(child, seen)
+    for child in widget.summary:
+        _collect_on_press(child, seen)
 
 
 def collect_on_press_actions(app: App) -> list[str]:
@@ -174,6 +176,8 @@ def _collect_bound_messages(widget: Widget, seen: dict[str, None]) -> None:
     if widget.bind is not None:
         seen[widget.bind.message] = None
     for child in widget.children:
+        _collect_bound_messages(child, seen)
+    for child in widget.summary:
         _collect_bound_messages(child, seen)
 
 
@@ -242,6 +246,8 @@ def _widget_init(
     widget: Widget,
     children_array_name: str,
     child_count: int,
+    summary_array_name: str,
+    summary_count: int,
     screen_index_by_name: dict[str, int] | None,
     focus_order_map: dict[int, int],
     lines: list[str],
@@ -250,9 +256,11 @@ def _widget_init(
 ) -> str:
     if widget.bind is not None:
         struct_type = f"{widget.bind.message}_t"
+        dirty_type = f"{widget.bind.message}_dirty_t"
         range_min, range_max = widget.range if widget.range is not None else (0, 0)
         bind_c = (
             f".field_offset = offsetof({struct_type}, {widget.bind.field}), "
+            f".dirty_offset = offsetof({dirty_type}, {widget.bind.field}), "
             f".field_type = {_FIELD_TYPE_ENUM[widget.bind.type]}, "
             f".range_min = {range_min}, .range_max = {range_max}"
         )
@@ -291,7 +299,8 @@ def _widget_init(
         f".navigate_target = {navigate_target_c}, "
         f".focus_order = {focus_order_c}, "
         f".color = {color_c}, .bg_color = {bg_color_c}, "
-        f".children = {children_array_name}, .child_count = {child_count} }}"
+        f".children = {children_array_name}, .child_count = {child_count}, "
+        f".summary_children = {summary_array_name}, .summary_child_count = {summary_count} }}"
     )
 
 
@@ -324,9 +333,25 @@ def _emit_widget(
         lines.append(
             f"static const janus_widget_desc_t {children_array_name}[] JANUS_PROGMEM = {{\n{body}\n}};"
         )
+
+    summary_array_name = "NULL"
+    summary_count = 0
+    if widget.summary:
+        summary_inits = [
+            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map, str_counter)
+            for c in widget.summary
+        ]
+        counter[0] += 1
+        summary_array_name = f"{sv}_arr{counter[0]}"
+        summary_count = len(summary_inits)
+        body = ",\n".join(f"    {si}" for si in summary_inits)
+        lines.append(
+            f"static const janus_widget_desc_t {summary_array_name}[] JANUS_PROGMEM = {{\n{body}\n}};"
+        )
+
     return _widget_init(
-        widget, children_array_name, child_count, screen_index_by_name, focus_order_map,
-        lines, sv, str_counter,
+        widget, children_array_name, child_count, summary_array_name, summary_count,
+        screen_index_by_name, focus_order_map, lines, sv, str_counter,
     )
 
 
@@ -356,6 +381,7 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
             f"screen (see architecture.md Stage 3b/7)"
         )
     bound_struct_c = f"&{messages[0]}_instance" if messages else "NULL"
+    bound_dirty_c = f"&{messages[0]}_dirty" if messages else "NULL"
     name_c = _emit_flash_string(lines, sv, str_counter, screen.name)
 
     lines.append(
@@ -364,6 +390,7 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
         f"    .widgets = {widgets_array},\n"
         f"    .widget_count = {len(top_inits)},\n"
         f"    .bound_struct = {bound_struct_c},\n"
+        f"    .bound_dirty = {bound_dirty_c},\n"
         f"}};"
     )
     return "\n\n".join(lines) + "\n"

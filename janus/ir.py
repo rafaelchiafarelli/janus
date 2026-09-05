@@ -63,6 +63,14 @@ class Widget:
     color: Optional[str] = None
     bg: Optional[str] = None
     children: list["Widget"] = field(default_factory=list)
+    # box only: leaf widgets always rendered inside the header strip,
+    # collapsed OR expanded — distinct from `children`, which only render
+    # when expanded. View-only "at a glance" content (an icon, an LED, a
+    # status label...); the header tap always toggles collapse regardless
+    # of what's here, so on_press/navigate on a summary widget is never
+    # actually dispatched. See stage2_layout/layout.py for how these are
+    # positioned (right-aligned within the header row).
+    summary: list["Widget"] = field(default_factory=list)
     # filled in later by the layout pass; always empty coming out of the parser
     geometry: Optional[Rect] = None
     geometry_collapsed: Optional[Rect] = None

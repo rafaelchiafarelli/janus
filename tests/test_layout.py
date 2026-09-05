@@ -45,6 +45,90 @@ class TestLayoutBox(unittest.TestCase):
         self.assertEqual(led.geometry, Rect(x=0, y=16, w=10, h=10))
 
 
+class TestLayoutBoxSummary(unittest.TestCase):
+    def test_summary_widgets_right_aligned_in_header(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Summary",
+            root=Widget(kind="column", id="root", children=[
+                Widget(
+                    kind="box", id="drawer", layout="column",
+                    summary=[
+                        Widget(kind="led", id="led", size=(10, 10)),
+                        Widget(kind="label", id="mode", size=(20, 12)),
+                    ],
+                    children=[Widget(kind="label", id="detail")],
+                ),
+            ]),
+        )
+        layout_screen(screen)
+        box = screen.root.children[0]
+        led, mode = box.summary
+        # box.w is derived from its (wider) detail child: label default 60px
+        self.assertEqual(box.geometry.w, 60)
+        # right-aligned: mode ends flush with the box's right edge, led sits
+        # GAP(4) to its left
+        self.assertEqual(mode.geometry, Rect(x=40, y=2, w=20, h=12))  # (60-20)=40, (16-12)/2=2
+        self.assertEqual(led.geometry, Rect(x=26, y=3, w=10, h=10))  # 40-4-10=26, (16-10)/2=3
+
+    def test_header_grows_to_fit_a_tall_summary_widget(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="TallSummary",
+            root=Widget(kind="column", id="root", children=[
+                Widget(
+                    kind="box", id="drawer", layout="column",
+                    summary=[Widget(kind="image", id="icon", size=(24, 24))],
+                    children=[Widget(kind="label", id="detail")],
+                ),
+            ]),
+        )
+        layout_screen(screen)
+        box = screen.root.children[0]
+        self.assertEqual(box.geometry_collapsed.h, 24)  # taller than BOX_HEADER_H(16)
+        # the detail child starts right below the grown header, not at 16
+        self.assertEqual(box.children[0].geometry.y, 24)
+
+    def test_box_widens_to_fit_a_summary_row_wider_than_its_children(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="WideSummary",
+            root=Widget(kind="column", id="root", children=[
+                Widget(
+                    kind="box", id="drawer", layout="column",
+                    summary=[
+                        Widget(kind="led", id="led", size=(20, 12)),
+                        Widget(kind="label", id="state", size=(50, 12)),
+                        Widget(kind="label", id="freq", size=(50, 12)),
+                    ],  # 20+50+50 + GAP(4)*2 = 128
+                    children=[Widget(kind="label", id="detail", size=(30, 12))],  # narrower
+                ),
+            ]),
+        )
+        layout_screen(screen)
+        box = screen.root.children[0]
+        self.assertEqual(box.geometry.w, 128)  # widened past the 30px children would derive
+        # right-aligned summary still starts on-screen, not negative
+        self.assertGreaterEqual(box.summary[0].geometry.x, box.geometry.x)
+
+    def test_box_with_no_summary_lays_out_unchanged(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="NoSummary",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="drawer", layout="column", children=[
+                    Widget(kind="label", id="detail"),
+                ]),
+            ]),
+        )
+        layout_screen(screen)
+        self.assertEqual(screen.root.children[0].geometry_collapsed.h, 16)
+
+
 class TestLayoutSizeEnforcement(unittest.TestCase):
     def test_progress_without_size_raises(self) -> None:
         from janus.ir import Screen, Widget

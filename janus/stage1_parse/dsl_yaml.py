@@ -27,6 +27,7 @@ _VALID_DISPLAY_CONTROLLERS = {
 _VALID_INPUT_MODALITIES = {"touch", "encoder", "buttons"}
 _VALID_RENDER_MODES = {"blocking", "non_blocking"}
 _REQUIRES_RANGE = {"progress", "gauge", "slider"}
+_CONTAINER_KINDS = {"column", "row", "box", "radiogroup", "navlist"}
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _PY_TYPE_FOR_BIND_TYPE: dict[str, type | tuple[type, ...]] = {
     "string": str,
@@ -83,6 +84,17 @@ def _validate_widget(widget: Widget) -> None:
         for child in widget.children:
             if child.kind == "radiobutton" and child.value is not None:
                 _check_radiobutton_value(child, widget.bind.type)
+    if widget.summary and widget.kind != "box":
+        raise ValueError(
+            f"widget {widget.id!r} (kind={widget.kind!r}) has `summary` — only `box` "
+            f"widgets can have header-summary content"
+        )
+    for child in widget.summary:
+        if child.kind in _CONTAINER_KINDS:
+            raise ValueError(
+                f"box {widget.id!r}'s summary widget {child.id!r} is a container "
+                f"(kind={child.kind!r}) — summary only holds leaf widgets, no nesting"
+            )
 
 
 def _parse_widget(data: dict[str, Any]) -> Widget:
@@ -105,6 +117,7 @@ def _parse_widget(data: dict[str, Any]) -> Widget:
         color=_parse_color(data.get("color")),
         bg=_parse_color(data.get("bg")),
         children=[_parse_widget(c) for c in data.get("children", [])],
+        summary=[_parse_widget(c) for c in data.get("summary", [])],
     )
     _validate_widget(widget)
     return widget
@@ -132,6 +145,8 @@ def _check_navigate_targets(widget: Widget, screen_names: set[str]) -> None:
             f"one of the screens listed in app.yaml ({sorted(screen_names)})"
         )
     for child in widget.children:
+        _check_navigate_targets(child, screen_names)
+    for child in widget.summary:
         _check_navigate_targets(child, screen_names)
 
 

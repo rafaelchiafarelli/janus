@@ -169,6 +169,41 @@ class TestEmitEmbeddedCBox(unittest.TestCase):
         self.assertIn(".initial_expanded = true", segment)
 
 
+class TestEmitEmbeddedCBoxSummary(unittest.TestCase):
+    def setUp(self) -> None:
+        screen = layout_screen(Screen(
+            name="Drawer",
+            root=Widget(kind="column", id="r", children=[
+                Widget(
+                    kind="box", id="ch0_box", layout="column", collapsible=True,
+                    summary=[
+                        Widget(kind="led", id="ch0_led", size=(10, 10),
+                               bind=Binding(message="pwm", field="ch0_active", type="int")),
+                        Widget(kind="label", id="ch0_mode", size=(20, 12),
+                               bind=Binding(message="pwm", field="ch0_mode", type="string")),
+                    ],
+                    children=[Widget(kind="label", id="ch0_detail", text="detail")],
+                ),
+            ]),
+        ))
+        self.out = emit_screen(screen)
+
+    def test_braces_balance(self) -> None:
+        self.assertTrue(_balanced_braces(self.out))
+
+    def test_box_references_a_summary_array_with_correct_count(self) -> None:
+        segment = _widget_segment(self.out, "ch0_box", 500)
+        self.assertRegex(segment, r"\.summary_children = \w+_arr\d+, \.summary_child_count = 2")
+
+    def test_summary_widgets_carry_their_own_bind(self) -> None:
+        self.assertIn("offsetof(pwm_t, ch0_active)", self.out)
+        self.assertIn("offsetof(pwm_t, ch0_mode)", self.out)
+
+    def test_non_box_widget_has_null_summary(self) -> None:
+        segment = _widget_segment(self.out, "ch0_detail", 500)
+        self.assertIn(".summary_children = NULL, .summary_child_count = 0", segment)
+
+
 class TestEmitEmbeddedCBoxCollapsedByDefault(unittest.TestCase):
     def setUp(self) -> None:
         screen = layout_screen(Screen(

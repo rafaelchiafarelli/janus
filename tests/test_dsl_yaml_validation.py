@@ -105,5 +105,44 @@ class TestColorValidation(unittest.TestCase):
         screen_from_dict(data)  # must not raise
 
 
+class TestBoxSummaryValidation(unittest.TestCase):
+    def test_summary_on_non_box_rejected(self) -> None:
+        data = _screen([
+            {"kind": "column", "id": "c", "summary": [{"kind": "led", "id": "l", "size": {"w": 10, "h": 10}}]},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_container_kind_in_summary_rejected(self) -> None:
+        data = _screen([
+            {"kind": "box", "id": "b", "layout": "column",
+             "summary": [{"kind": "row", "id": "r", "children": []}],
+             "children": [{"kind": "label", "id": "d"}]},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_valid_summary_on_box_accepted(self) -> None:
+        data = _screen([
+            {"kind": "box", "id": "b", "layout": "column",
+             "summary": [
+                 {"kind": "led", "id": "l", "size": {"w": 10, "h": 10}},
+                 {"kind": "label", "id": "m", "bind": {"message": "m", "field": "mode", "type": "string"}},
+             ],
+             "children": [{"kind": "label", "id": "d"}]},
+        ])
+        screen = screen_from_dict(data)  # must not raise
+        box = screen.root.children[0]
+        self.assertEqual(len(box.summary), 2)
+        self.assertEqual(box.summary[0].kind, "led")
+
+    def test_box_with_no_summary_defaults_to_empty(self) -> None:
+        data = _screen([
+            {"kind": "box", "id": "b", "layout": "column", "children": [{"kind": "label", "id": "d"}]},
+        ])
+        screen = screen_from_dict(data)
+        self.assertEqual(screen.root.children[0].summary, [])
+
+
 if __name__ == "__main__":
     unittest.main()
