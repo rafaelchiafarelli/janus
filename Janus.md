@@ -324,7 +324,7 @@ Leaves:
 | `label` | `string`, or static `text` | |
 | `header` | `string`, or static `text` | same bind shape as `label`, section-title render |
 | `button` | unbound | `on_press: <action name>` and/or `navigate: <screen name>` (see nav + action-dispatch sections below) |
-| `image` | `string` (asset key), or static `asset` | binds to an asset key, not raw bytes — matches the doc's pre-rotated-asset model |
+| `image` | static `file: <path>` (an image file); `size` **required** | `file:` is a real PNG/BMP/JPEG/GIF/TIFF/WebP/… on disk, resolved relative to the screen `.yaml`. Decoded, alpha-composited over black (alpha isn't otherwise supported), rescaled to `size`, and baked as an RGB565 array at generation time — the device never decodes anything. A missing/unsupported/undecodable `file:` is logged (non-fatal) and the widget renders as a magenta placeholder rect. No `file:` → a solid `color` fill (v1 stub). (`string` asset-key binding is still just the dormant `asset:` field — not wired.) |
 | `progress` | numeric + `range: {min, max}` | linear bar |
 | `gauge` | numeric + `range: {min, max}` | arc/dial; identical bind shape to `progress`, different render only |
 | `checkbox` | `int` (0/nonzero convention) | bound per-widget. **harpia has no `bool` type** (confirmed against `LexicalAnalizer/LexicalAnalyzer.py` — only `int`/`int64`/`float`/`string`/`map`), so this is a deliberate mapping, not an oversight |

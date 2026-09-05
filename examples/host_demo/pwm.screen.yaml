@@ -21,7 +21,13 @@
 screen: PWM
 layout: column
 children:
-  - { kind: header, id: pwm_header, text: "PWM", font_size: medium, size: { w: 50, h: 20 } }
+  - kind: row
+    children:
+      # `file:` is resolved relative to this screen file's directory; the
+      # source PNG's alpha composites over black at generation time and it
+      # is rescaled to this widget's size before being baked as RGB565.
+      - { kind: image, id: pwm_icon, file: "assets/pwm_icon.png", size: { w: 20, h: 20 } }
+      - { kind: header, id: pwm_header, text: "PWM", font_size: medium, size: { w: 50, h: 20 } }
 
   - kind: box
     id: pwm_ch0_box

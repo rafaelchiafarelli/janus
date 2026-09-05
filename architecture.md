@@ -149,7 +149,9 @@ class Widget:
     id: str
     bind: Binding | None = None
     text: str | None = None                    # static label/header/button
-    asset: str | None = None                   # static image
+    asset: str | None = None                   # static image (asset key — dormant, see image_file)
+    image_file: str | None = None              # image only: path to a source PNG/BMP/JPEG/... ,
+                                               # resolved absolute against the screen file's dir
     value: int | str | None = None             # radiobutton only
     range: tuple[float, float] | None = None   # progress/gauge only
     states: list[str] | None = None            # led only
@@ -253,6 +255,26 @@ widget catalog):
   optional; if omitted, a fixed per-kind v1 placeholder default is used
   (e.g. `label` → 60×12, `button` → 64×20, `checkbox`/`radiobutton` →
   12×12). Authors can still override with an explicit `size`.
+
+**`image` assets (`file:`, Stage 1 + Stage 3b, added 2026-09-05):** an
+`image` widget may carry `file: <path>` — a real image file (PNG, BMP,
+JPEG/JPG, GIF, TIFF, WebP, PPM/PGM, anything Pillow decodes). Stage 1
+(`dsl_yaml._resolve_image_file`) only resolves it to an absolute path
+against the declaring `.screen.yaml`'s own directory — no existence or
+format check, so a bad path never aborts a parse. Stage 3b
+(`image_asset.load_rgb565`, called from `emit_embedded_c._image_fields_c`)
+opens it, composites any alpha over opaque black (alpha is not otherwise
+supported), rescales to the widget's authored `size` with LANCZOS, packs
+to RGB565, and bakes a `static const uint16_t <id>_px[] JANUS_PROGMEM`
+array into the screen source that the descriptor's `.image_pixels` points
+at (`.image_w`/`.image_h` alongside). A missing / unreadable / undecodable
+file is logged at WARNING and baked as `.image_error = true` instead — the
+runtime then paints the widget's rect magenta (`JANUS_COLOR_IMAGE_MISSING`,
+`0xf81f`) so the gap is visible on-device. An `image` with no `file:`
+keeps the pre-2026-09-05 stub (a solid `color` fill). Blitting (sync and
+non-blocking `JANUS_ASYNC_OP_IMAGE`) is tiled through the shared
+`g_tile_buffer`, one `JANUS_MEMCPY_P` per source row — no new runtime
+buffer, no on-device decode or resample.
 
 **`box` header:** `box` has no dedicated title field — it reuses the
 generic `Widget.text` field already shared by `label`/`header`/`button`.
