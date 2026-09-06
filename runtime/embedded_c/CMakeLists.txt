@@ -13,6 +13,17 @@ add_library(janus_runtime STATIC
 target_include_directories(janus_runtime PUBLIC include)
 target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
 
+# channel_icons task 4: force the baked-image `.janus_img` section past
+# `.text` so near-read flash data (fonts, descriptors, strings) stays
+# below AVR's 64 KiB window. INTERFACE so it reaches the consumer's link
+# with no edit on their side. Only for an AVR cross-build — `-Wl,-T` is a
+# GNU-ld extension a host linker (notably macOS ld64) would reject, and
+# the host suites don't need it (the section is empty off-AVR anyway).
+if(CMAKE_C_COMPILER MATCHES "avr")
+    target_link_options(janus_runtime INTERFACE
+        "-Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/janus_img.ld")
+endif()
+
 option(JANUS_RUNTIME_BUILD_TESTS "Build janus_runtime's own host-side tests" ON)
 if(JANUS_RUNTIME_BUILD_TESTS)
     # The host test suite exercises the polled/async render path

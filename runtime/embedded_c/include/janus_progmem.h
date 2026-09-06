@@ -55,4 +55,30 @@ typedef const uint16_t *janus_farptr_t;
 #define JANUS_MEMCPY_PF(dst, far, n)   memcpy((dst), (const void *)(far), (n))
 #endif
 
+/* --------------------------------------------------- baked-image storage --
+ * The generated RGB565 image arrays (`<id>_px`) use this, *not*
+ * JANUS_PROGMEM. On AVR they go into their own `.janus_img` flash
+ * section so the linker places the whole lot after `.text` — which keeps
+ * the font glyph tables, widget descriptors and flash strings (all read
+ * with *near* `pgm_read_*` / `memcpy_P`) below the 64 KiB near-flash
+ * window (channel_icons task 4). `runtime/embedded_c/janus_img.ld`
+ * pins that placement (`INSERT AFTER .text`); with no linker script the
+ * linker's orphan-section rule already trails a read-only section after
+ * `.text`, so a bare `avr-gcc` link works too.
+ *
+ * Deliberately not `__progmem__`: avr-gcc silently drops a `section`
+ * attribute when `__progmem__` is also present. The arrays are still
+ * flash-only — a `const` in a read-only section the linker maps into the
+ * text region, no RAM shadow — and every read of them goes through
+ * `JANUS_FAR_ADDR` + `JANUS_MEMCPY_PF` (the descriptor carries a slot
+ * index, never a pointer, so nothing ever near-derefs one). `used` keeps
+ * `-fdata-sections` + `--gc-sections` from dropping an array whose only
+ * reference is the generated `resolve_images()`. Off-AVR it is just
+ * JANUS_PROGMEM (i.e. nothing), so host builds/tests are unchanged. */
+#if defined(__AVR__)
+#define JANUS_IMG_SECTION __attribute__((used, section(".janus_img")))
+#else
+#define JANUS_IMG_SECTION JANUS_PROGMEM
+#endif
+
 #endif /* JANUS_PROGMEM_H */

@@ -1,8 +1,9 @@
 # Task 4: near-progmem-budget
 
-Status: **spike done (2026-09-06) — approach chosen: "link image arrays
-last". Awaiting Rafael's OK on the finalized contract below before a
-branch is cut.**
+Status: ✅ **DONE** (2026-09-06) — "link image arrays last" implemented
+per the contract below. Python 221 · `ctest` 7/7 · `scripts/avr_gate.sh`
+PASS (every near-read symbol `< 0x10000`; fonts back at `0x530c`, `_px`
+arrays at `0x6d16+`). Merged `4-near-progmem-budget → tasks`.
 
 ## Problem
 
@@ -29,7 +30,7 @@ After this task, `avr-gcc -mmcu=atmega2560` links `examples/host_demo`
 `_px` arrays stay above it (read far, per task 2). Host suite + `ctest`
 unchanged.
 
-### Proposed finalized contract (post-spike — for Rafael's OK)
+### Finalized contract (approved 2026-09-06) — as delivered
 
 **Approach: "link image arrays last" + a generation-time budget guard.**
 No runtime read changes; no consumer build-config edit.
@@ -54,10 +55,11 @@ Delivered:
   builds rely on avr-ld orphan placement (spike-verified) and can add
   `-Wl,-T .../janus_img.ld` by hand if a real board ever needs it —
   documented in the scaffold README + `Janus.md`.
-- **Generation-time budget guard** — `image_asset` / a Stage 3b check
-  sums baked-image bytes across all screens; `log.warning` (not fatal —
-  matches the existing per-image warn) if the non-image near-`.progmem`
-  estimate would still plausibly cross ~56 KiB. Legibility backstop only.
+- **Generation-time budget guard** — `emit_embedded_c.warn_if_image_flash_heavy`
+  (called from `generate.write_project`) sums `w·h·2` over every `file:`
+  image widget across all screens and `log.warning`s (not fatal — matches
+  the existing per-image warn) if the total exceeds 128 KiB. Legibility
+  backstop only; the section move is what actually fixes the bug.
 - **`scripts/avr_gate.sh`** — extend step 4 with the `avr-nm` VMA
   assertion: every near-read symbol (`janus_font_glyph_*`, `*_widgets`,
   `*_arr*`, `*_str*` that isn't `*_px`, `janus_app_screens`, nav titles)
@@ -130,19 +132,25 @@ string, or screen-table above the near window.
 Font-far-safing and descriptor-graph-far-safing are **not needed** and
 drop off the candidate list.
 
-## Tests
+## Tests — as delivered
 
-- A script (`ctest` fixture or standalone) that `avr-nm`s the linked
-  `host_demo` `.elf` and asserts the near-read symbol set is all
-  `< 0x10000`.
-- If font reads change: `test_font.c` stays green on host; add an
-  AVR-only note/verification that the far path is taken.
-- `avr-gcc -mmcu=atmega2560` link of `host_demo` — the concrete gate,
-  combined with task 3's SRAM gate = the **epic acceptance gate**.
+- `scripts/avr_gate.sh` step 5: `avr-nm`s the linked `host_demo` `.elf`
+  (blocking, `-mmcu=atmega2560`, **no** linker script — exercises orphan
+  placement) and fails if any text/rodata symbol `≥ 0x10000` isn't a
+  `_px` array. Also confirmed by hand with the explicit `-Wl,-T
+  janus_img.ld` fragment: fonts at `0x530c`, `_px` at `0x6d16+`.
+- Font reads unchanged (approach didn't touch them) — `test_font.c`
+  stays green as-is.
+- `tests/test_emit_embedded_c.py`: `_px` arrays emit `JANUS_IMG_SECTION`;
+  `estimate_baked_image_bytes` sums `w·h·2` over `file:` image widgets.
+- `tests/test_cli.py`: `janus_img.ld` is vendored in scaffold mode.
 
-## DoD
+## DoD — met
 
-Spike done + approach chosen + this file finalized · contract delivered ·
-Python suite green · `ctest` green · the `avr-nm` VMA assertion passes ·
-docs updated (`architecture.md` Stage 3b/4) · this file marked done ·
-commit + merge `4-near-progmem-budget → tasks`.
+Spike done + approach chosen + file finalized · contract delivered ·
+Python suite green (221) · `ctest` green (7/7) · `avr_gate.sh` VMA
+assertion passes · docs updated (`architecture.md` Stage 3b "Near-flash
+budget" + Stage 8 table, `Janus.md` `image` row) · this file marked
+done · commit + merge `4-near-progmem-budget → tasks`, then walk
+`tasks → channel_icons` (epic acceptance gate) `→ epics →
+embedded_rendering → features → dev`.

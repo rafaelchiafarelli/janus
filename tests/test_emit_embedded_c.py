@@ -5,9 +5,12 @@ from pathlib import Path
 from PIL import Image
 
 from janus.stage1_parse.dsl_yaml import parse_screen
-from janus.stage3b_embedded_c.emit_embedded_c import emit_screen
+from janus.stage3b_embedded_c.emit_embedded_c import (
+    emit_screen,
+    estimate_baked_image_bytes,
+)
 from janus.stage2_layout.layout import layout_screen
-from janus.ir import Binding, Screen, Widget
+from janus.ir import App, Binding, Screen, Widget
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -381,7 +384,10 @@ class TestEmitImageWidget(unittest.TestCase):
 
         id_var = _find_flash_string_var(out, "logo")
         arr = f"{id_var}_px"
-        self.assertIn(f"static const uint16_t {arr}[] JANUS_PROGMEM = {{", out)
+        # JANUS_IMG_SECTION, not JANUS_PROGMEM — on AVR the baked arrays
+        # link into their own `.janus_img` section past .text so they
+        # don't displace the near-read tables (channel_icons task 4).
+        self.assertIn(f"static const uint16_t {arr}[] JANUS_IMG_SECTION = {{", out)
         # 16 red pixels
         self.assertIn("0xf800, 0xf800", out)
         seg = self._segment(out, "logo")
@@ -445,6 +451,23 @@ class TestEmitImageWidget(unittest.TestCase):
         self.assertEqual(out.count("JANUS_FAR_ADDR("), 2)
         self.assertIn("two_image_far[0] = JANUS_FAR_ADDR(", out)
         self.assertIn("two_image_far[1] = JANUS_FAR_ADDR(", out)
+
+
+class TestEstimateBakedImageBytes(unittest.TestCase):
+    def _app(self, *widgets: Widget) -> App:
+        return App(screens=[Screen(name="S", root=Widget(kind="column", id="r", children=list(widgets)))])
+
+    def test_sums_w_times_h_times_two_over_image_widgets_with_a_file(self) -> None:
+        app = self._app(
+            Widget(kind="image", id="a", size=(10, 20), image_file="a.png"),
+            Widget(kind="image", id="b", size=(4, 4), image_file="b.png"),
+            Widget(kind="image", id="c", size=(99, 99)),          # no file: -> stub fill, not baked
+            Widget(kind="label", id="d", text="hi"),
+        )
+        self.assertEqual(estimate_baked_image_bytes(app), (10 * 20 + 4 * 4) * 2)
+
+    def test_zero_when_no_baked_images(self) -> None:
+        self.assertEqual(estimate_baked_image_bytes(self._app(Widget(kind="label", id="l", text="x"))), 0)
 
 
 if __name__ == "__main__":
