@@ -6,6 +6,7 @@ from janus.stage3b_embedded_c.emit_files import (
     render_bindings_header,
     render_bindings_source,
     render_display_config_header,
+    render_render_config_header,
     render_screen_header,
     render_screen_source,
 )
@@ -171,6 +172,17 @@ class TestEmitFiles(unittest.TestCase):
         )
         self.assertIn("#define JANUS_DISPLAY_BUS JANUS_DISPLAY_BUS_SPI", out)
         self.assertIn("#define JANUS_DISPLAY_CONTROLLER JANUS_DISPLAY_CONTROLLER_ST7789V", out)
+
+    def test_render_config_header_defines_nonblocking_only_for_non_blocking(self) -> None:
+        nb = render_render_config_header("non_blocking")
+        self.assertIn("#ifndef JANUS_GEN_RENDER_CONFIG_H", nb)
+        self.assertIn("#define JANUS_RENDER_NONBLOCKING 1", nb)
+        self.assertTrue(_balanced_braces(nb))
+
+        bl = render_render_config_header("blocking")
+        self.assertIn("#ifndef JANUS_GEN_RENDER_CONFIG_H", bl)
+        self.assertNotIn("JANUS_RENDER_NONBLOCKING", bl)
+        self.assertTrue(_balanced_braces(bl))
 
 
 if __name__ == "__main__":

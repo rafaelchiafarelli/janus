@@ -608,23 +608,31 @@ static void test_widget_default_colors_are_the_runtime_constants(void) {
     CHECK(mock_driver_log[0].sample_pixel == JANUS_COLOR_DEFAULT_BG);
 }
 
-/* ---- fixture 9: image widget blits its baked RGB565 pixels ---- */
+/* ---- fixture 9: image widget blits its baked RGB565 pixels ----
+ * The pixel data + the per-screen far-address table + resolver mirror
+ * what emit_screen generates: the descriptor carries a 1-based slot, the
+ * runtime calls resolve_images() on screen-enter to fill the table, blit
+ * reads through JANUS_MEMCPY_PF. */
+static const uint16_t g_img_pixels[16] = {
+    0x1234, 1, 2, 3,
+    4, 5, 6, 7,
+    8, 9, 10, 11,
+    12, 13, 14, 15,
+};
+static janus_farptr_t g_img_far[1];
+static void resolve_img(void) { g_img_far[0] = JANUS_FAR_ADDR(g_img_pixels); }
+
 static void test_image_widget_blits_its_pixels(void) {
     /* 4x4, top-left pixel a known value — geometry matches the image, so
      * one draw call, and its sample_pixel is that top-left. */
-    static const uint16_t pixels[16] = {
-        0x1234, 1, 2, 3,
-        4, 5, 6, 7,
-        8, 9, 10, 11,
-        12, 13, 14, 15,
-    };
     static const janus_widget_desc_t image = {
         .kind = JANUS_WIDGET_IMAGE, .id = "img", .geometry = { 0, 0, 4, 4 },
         .color = 0xf800, /* would show if the stub fill path ran instead */
-        .image_pixels = pixels, .image_w = 4, .image_h = 4,
+        .image_slot = 1, .image_w = 4, .image_h = 4,
     };
     static const janus_screen_desc_t screen = {
         .name = "Img", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+        .resolve_images = resolve_img, .image_far = g_img_far,
     };
 
     mock_driver_reset();
@@ -654,6 +662,8 @@ static void test_image_error_paints_magenta(void) {
 /* ---- fixture 9c: an image bigger than one tile splits, per-tile source
  * offset stays correct (pixel value == column index here) ---- */
 static uint16_t g_big_pixels[20 * 18];
+static janus_farptr_t g_big_far[1];
+static void resolve_big(void) { g_big_far[0] = JANUS_FAR_ADDR(g_big_pixels); }
 static void test_image_larger_than_tile_splits_with_correct_offsets(void) {
     for (int y = 0; y < 18; y++)
         for (int x = 0; x < 20; x++)
@@ -661,10 +671,11 @@ static void test_image_larger_than_tile_splits_with_correct_offsets(void) {
 
     static const janus_widget_desc_t image = {
         .kind = JANUS_WIDGET_IMAGE, .id = "big", .geometry = { 0, 0, 20, 18 },
-        .image_pixels = g_big_pixels, .image_w = 20, .image_h = 18,
+        .image_slot = 1, .image_w = 20, .image_h = 18,
     };
     static const janus_screen_desc_t screen = {
         .name = "Big", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+        .resolve_images = resolve_big, .image_far = g_big_far,
     };
 
     mock_driver_reset();
