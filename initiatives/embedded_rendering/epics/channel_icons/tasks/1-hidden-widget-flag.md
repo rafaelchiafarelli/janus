@@ -1,6 +1,6 @@
 # Task 1: hidden-widget-flag
 
-Status: **ready** (planning complete, not yet implemented)
+Status: **done** (implemented on `1-hidden-widget-flag`, merged to `tasks`)
 
 ## Contract
 

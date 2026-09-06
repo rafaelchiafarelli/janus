@@ -64,6 +64,16 @@ class Widget:
     # False (default) keeps today's pure intrinsic-size behavior
     # unchanged; the cross axis is never affected by this.
     fill: bool = False
+    # Static visibility (v1). `hidden: true` in the DSL makes Stage 1
+    # drop this widget *and its whole subtree* from the parsed tree — no
+    # geometry, no render, no harpia field, no baked image asset. It
+    # exists only so two widgets (an enabled + a disabled icon, say) can
+    # occupy one authored slot with exactly one kept. Because the prune
+    # happens in the parser, nothing downstream ever sees a hidden node,
+    # so this field is always False on any Widget that leaves Stage 1.
+    # A field-bound `hidden` that toggles on-device is deliberately out
+    # of scope here (that one needs a real baked rect + a runtime check).
+    hidden: bool = False
     # "#RRGGBB" hex, packed to RGB565 at Stage 3b emission time — not
     # authored on-device, same "push work to build time" spirit as
     # geometry. `color` is the ink/foreground/on-state fill; `bg` is the

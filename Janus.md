@@ -305,6 +305,19 @@ Original scoping, for the record:
     back to a screen with `app.display` set; using it without that raises
     at generation time rather than silently doing nothing. See
     `architecture.md` Stage 2 for the exact algorithm.
+  - **`hidden: true` (added 2026-09-06)** on any widget makes Stage 1
+    drop it *and its whole subtree* from the parsed tree — before layout,
+    before harpia emit, before embedded-C emit. A hidden widget therefore
+    has no geometry, never renders, is never hit-tested or focusable,
+    contributes no field to `janus_generated.harpia`, and (for an
+    `image`) bakes no pixel array. It exists so two widgets can be
+    authored in one slot — an enabled and a disabled icon variant, say —
+    with exactly one kept; the survivor lays out exactly as if the hidden
+    node were never in the file. v1 is **static only** (a literal
+    `true`/`false`); a field-bound `hidden` that toggles on-device is a
+    separate future increment (it would need a real baked rect and a
+    runtime check, neither of which a pruned node has). A whole screen
+    can't be `hidden` — drop it from `app.yaml` instead.
 
 ## v1 widget catalog
 

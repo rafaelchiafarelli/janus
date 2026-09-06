@@ -100,6 +100,20 @@ required-vs-defaulted split actually gets enforced (it needs to know each
 widget's `kind`, and defaulting is a layout-policy decision, not a parse
 one).
 
+**`hidden: true` prune (added 2026-09-06)** — a widget authored
+`hidden: true` (must be a literal bool, else a parse error) is dropped by
+the parser *with its entire subtree*, right after it's parsed and
+validated, from both `children` and `summary` at every level
+(`_drop_hidden`). This is the whole feature: nothing past Stage 1 ever
+sees a hidden node, so it gets no geometry, no render, no focus/hit-test
+entry, no `janus_generated.harpia` field, and (for an `image`) no baked
+RGB565 array — all for free, no downstream code. Its purpose is letting
+two widgets be authored in one slot (an enabled + a disabled icon) with
+one kept; the survivor lays out identically to the hidden node being
+absent. Static only in v1 — a field-bound `hidden` would instead need to
+survive to Stage 2/3b with a real rect and a runtime check. A screen
+dict with top-level `hidden` is a parse error (`screen_from_dict`).
+
 **`display:` (optional, added 2026-08-20; `bus`/`controller` added same
 day)** — `app.yaml`'s `size: {w, h}` + `color: mono|gray|rgb565` (default
 `mono`) + optional `bus: spi|i2c|parallel` + optional `controller:` one of
@@ -161,6 +175,8 @@ class Widget:
     collapsible: bool = False                  # box only
     default_expanded: bool = True              # box only
     layout: Literal["column", "row"] | None = None   # containers only
+    hidden: bool = False        # `hidden: true` -> pruned in Stage 1, subtree and all;
+                                # always False on any Widget that leaves the parser
     children: list["Widget"] = field(default_factory=list)
     # --- filled in by the layout pass, empty after parsing ---
     geometry: Rect | None = None
