@@ -23,6 +23,14 @@ log = logging.getLogger("janus.image")
 # authored choice — just worth a line in the build log.
 _WARN_PIXELS = 8192
 
+# avr-gcc rejects a single object of >= 32768 bytes ("size of variable is
+# too large"), independent of near/far placement — so a baked RGB565
+# array can't exceed 16383 pixels (~128x128 square) on a classic-AVR
+# target. Still just a warning here: another target (or a future tiled
+# multi-array bake) may not have the limit, and generation never aborts
+# on an image.
+_AVR_MAX_PIXELS = 16383
+
 
 class ImageAssetError(Exception):
     """Lookup / format / decode failure. The caller logs it and renders
@@ -79,7 +87,14 @@ def load_rgb565(path: str, width: int, height: int) -> list[int]:
         raise ImageAssetError(
             f"{path}: decoded {len(raw)} bytes for a {width}x{height} RGB image, expected {count * 3}"
         )
-    if count > _WARN_PIXELS:
+    if count > _AVR_MAX_PIXELS:
+        log.warning(
+            "%s scaled to %dx%d = %d px (%d bytes): a single baked array this big "
+            "won't compile for a classic-AVR target (avr-gcc caps one object at "
+            "32768 bytes) — cap the widget `size` near 128x128",
+            path, width, height, count, count * 2,
+        )
+    elif count > _WARN_PIXELS:
         log.warning(
             "%s scaled to %dx%d = %d px (~%d KiB of flash); a smaller `size` would cost less",
             path, width, height, count, count * 2 // 1024,
