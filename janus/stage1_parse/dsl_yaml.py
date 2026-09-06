@@ -97,6 +97,10 @@ def _validate_widget(widget: Widget) -> None:
         raise ValueError(
             f"widget {widget.id!r}'s font_scale {widget.font_scale!r} must be a positive integer"
         )
+    if not isinstance(widget.hidden, bool):
+        raise ValueError(
+            f"widget {widget.id!r}'s `hidden` must be true or false, got {widget.hidden!r}"
+        )
     native_w, native_h = _FONT_NATIVE_SIZE[widget.font_size]
     scaled_w, scaled_h = native_w * widget.font_scale, native_h * widget.font_scale
     if scaled_w > _FONT_SCALE_CAP_W or scaled_h > _FONT_SCALE_CAP_H:
@@ -163,11 +167,19 @@ def _parse_widget(data: dict[str, Any], base_dir: Path | None = None) -> Widget:
         bg=_parse_color(data.get("bg")),
         font_size=data.get("font_size", "large"),
         font_scale=data.get("font_scale", 1),
-        children=[_parse_widget(c, base_dir) for c in data.get("children", [])],
-        summary=[_parse_widget(c, base_dir) for c in data.get("summary", [])],
+        hidden=data.get("hidden", False),
+        # A `hidden` child is parsed (so its own subtree is still
+        # validated) and then dropped here — nothing past Stage 1 ever
+        # sees it. A hidden container takes its whole subtree with it.
+        children=_drop_hidden(_parse_widget(c, base_dir) for c in data.get("children", [])),
+        summary=_drop_hidden(_parse_widget(c, base_dir) for c in data.get("summary", [])),
     )
     _validate_widget(widget)
     return widget
+
+
+def _drop_hidden(widgets) -> list[Widget]:
+    return [w for w in widgets if not w.hidden]
 
 
 def screen_from_dict(data: dict[str, Any], base_dir: str | Path | None = None) -> Screen:
@@ -176,11 +188,16 @@ def screen_from_dict(data: dict[str, Any], base_dir: str | Path | None = None) -
     passes it automatically; an in-memory caller only needs it when a
     widget uses a relative `file:`."""
     base = Path(base_dir) if base_dir is not None else None
+    if data.get("hidden"):
+        raise ValueError(
+            f"screen {data['screen']!r} has `hidden` at the top level — a whole "
+            f"screen can't be hidden; drop it from app.yaml instead"
+        )
     root = Widget(
         kind=data["layout"],
         id=f"{data['screen']}__root",
         layout=data["layout"],
-        children=[_parse_widget(c, base) for c in data.get("children", [])],
+        children=_drop_hidden(_parse_widget(c, base) for c in data.get("children", [])),
     )
     return Screen(name=data["screen"], root=root)
 

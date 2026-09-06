@@ -126,6 +126,8 @@ static void test_async_glyph_color_matches_widget(void) {
 }
 
 static uint16_t g_async_img[20 * 18];
+static janus_farptr_t g_async_img_far[1];
+static void resolve_async_img(void) { g_async_img_far[0] = JANUS_FAR_ADDR(g_async_img); }
 static void test_async_image_drains_tiles_with_correct_pixels(void) {
     /* Same fixture/expectations as test_runtime.c's
      * test_image_larger_than_tile_splits_with_correct_offsets, but via
@@ -137,10 +139,11 @@ static void test_async_image_drains_tiles_with_correct_pixels(void) {
 
     static const janus_widget_desc_t image = {
         .kind = JANUS_WIDGET_IMAGE, .id = "img", .geometry = { 0, 0, 20, 18 },
-        .image_pixels = g_async_img, .image_w = 20, .image_h = 18,
+        .image_slot = 1, .image_w = 20, .image_h = 18,
     };
     static const janus_screen_desc_t screen = {
         .name = "AsyncImg", .widgets = &image, .widget_count = 1, .bound_struct = NULL,
+        .resolve_images = resolve_async_img, .image_far = g_async_img_far,
     };
 
     mock_driver_reset();

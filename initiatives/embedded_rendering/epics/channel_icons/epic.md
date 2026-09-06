@@ -6,14 +6,20 @@ slot, and image data that can live anywhere in the 256 KiB flash.
 
 ## Tasks
 
-| # | file | contract (one line) |
-|---|---|---|
-| 1 | `tasks/1-hidden-widget-flag.md` | `hidden: true` widget flag — hidden widget + subtree pruned at generation time (no geometry, no render, no schema, no baked asset) |
-| 2 | `tasks/2-far-progmem-images.md` | baked RGB565 image arrays addressed via `const __memx` (24-bit) pointers so they clear AVR's 64 KiB near-`PROGMEM` window |
+| # | file | status | contract (one line) |
+|---|---|---|---|
+| 1 | `tasks/1-hidden-widget-flag.md` | ✅ **done** | `hidden: true` widget flag — hidden widget + subtree pruned at generation time |
+| 2 | `tasks/2-far-progmem-images.md` | ✅ **done** | baked RGB565 arrays reachable past 64 KiB via a per-screen resolver + `image_far[]` table + `image_slot` index |
+| 3 | `tasks/3-async-path-behind-render-mode.md` | ✅ **done** | whole async path behind `JANUS_RENDER_NONBLOCKING`; scaffold-written `janus_render_config.gen.h` (mechanism A) sets it iff `non_blocking` — `blocking` `host_demo` now links for atmega2560 (`.bss` 19.2%) |
+| 4 | `tasks/4-near-progmem-budget.md` | ✅ **done** | baked `_px` arrays emitted `JANUS_IMG_SECTION` into their own `.janus_img` flash section (linked after `.text` via `janus_img.ld` / orphan placement) — near-read fonts/descriptors/strings stay `< 0x10000`; no consumer build edit |
 
-The two tasks are independent in mechanism; the epic goal needs both
-(task 1 lets you author two icons in one slot, task 2 lets those icons be
-big).
+All four tasks are done and merged to `tasks`. Bringing up big icons on
+the real board surfaced two walls — **3** (SRAM: the always-linked async
+op buffer) and **4** (flash: image data displacing near-read tables) —
+both now closed. `scripts/avr_gate.sh` is the concrete gate runner: it
+regenerates `examples/host_demo`, links it for `-mmcu=atmega2560` in
+`blocking` mode, and asserts `.bss` fits *and* every near-read symbol is
+`< 0x10000`.
 
 ## Acceptance gate
 

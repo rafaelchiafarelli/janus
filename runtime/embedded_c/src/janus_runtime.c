@@ -75,7 +75,15 @@ static uint16_t g_tile_buffer[JANUS_TILE_BUFFER_PIXELS];
  * with no stack or continuation needed. Trade-off: the queue reflects
  * bound values as of janus_render_screen_async_start, not whatever they
  * become while draining — same "snapshot, not live" property any queued
- * frame has. */
+ * frame has.
+ *
+ * The whole path here is behind JANUS_RENDER_NONBLOCKING (see
+ * janus_runtime.h): a `render_mode: blocking` project links none of it,
+ * so `g_async_ops` (6912 B) costs it 0 bytes of .bss — the reason this
+ * guard exists (channel_icons task 3). The `#else` gives the one
+ * un-guarded reader below (`fill_rect`'s tile-buffer prefill) a constant
+ * to test, so it always takes the draw path. */
+#if defined(JANUS_RENDER_NONBLOCKING)
 #define JANUS_MAX_ASYNC_OPS 256
 typedef enum {
     JANUS_ASYNC_OP_FILL, JANUS_ASYNC_OP_GLYPH, JANUS_ASYNC_OP_IMAGE
@@ -90,8 +98,10 @@ typedef struct {
     const uint8_t *glyph;          /* GLYPH only */
     janus_font_size_t font_size;   /* GLYPH only */
     uint8_t scale;                 /* GLYPH only */
-    const uint16_t *img;           /* IMAGE only: the widget's full JANUS_PROGMEM RGB565 buffer */
-    int16_t img_stride;            /* IMAGE only: full image width, to step rows in `img` */
+    uint16_t img_slot;             /* IMAGE only: 1-based index into g_image_far, resolved at drain
+                                     * time (kept as the small slot, not the 4-byte far address, so
+                                     * this op struct — x256 — doesn't grow on AVR) */
+    int16_t img_stride;            /* IMAGE only: full image width, to step rows in the image */
     int16_t img_sx, img_sy;        /* IMAGE only: this tile's top-left offset within the image */
 } janus_async_op_t;
 
@@ -122,16 +132,19 @@ static void async_enqueue_glyph(int16_t x, int16_t y, const uint8_t *glyph,
 }
 
 static void async_enqueue_image(int16_t x, int16_t y, int16_t w, int16_t h,
-                                 const uint16_t *img, int16_t stride,
+                                 uint16_t img_slot, int16_t stride,
                                  int16_t sx, int16_t sy) {
     if (g_async_op_count >= JANUS_MAX_ASYNC_OPS) return;
     janus_async_op_t *op = &g_async_ops[g_async_op_count++];
     op->kind = JANUS_ASYNC_OP_IMAGE;
     op->x = x; op->y = y; op->w = w; op->h = h;
-    op->img = img;
+    op->img_slot = img_slot;
     op->img_stride = stride;
     op->img_sx = sx; op->img_sy = sy;
 }
+#else
+#define g_async_enqueue 0
+#endif  /* JANUS_RENDER_NONBLOCKING */
 
 static void fill_rect(janus_rect_t rect, uint16_t value) {
     if (rect.w <= 0 || rect.h <= 0) return;
@@ -145,12 +158,14 @@ static void fill_rect(janus_rect_t rect, uint16_t value) {
         for (int16_t tx = 0; tx < rect.w; tx += JANUS_TILE_W) {
             int16_t tw = (int16_t)(rect.w - tx);
             if (tw > JANUS_TILE_W) tw = JANUS_TILE_W;
+#if defined(JANUS_RENDER_NONBLOCKING)
             if (g_async_enqueue) {
                 async_enqueue_fill((int16_t)(rect.x + tx), (int16_t)(rect.y + ty), tw, th, value);
-            } else {
-                draw_area_sync((uint16_t)(rect.x + tx), (uint16_t)(rect.y + ty),
-                                (uint16_t)tw, (uint16_t)th, g_tile_buffer);
+                continue;
             }
+#endif
+            draw_area_sync((uint16_t)(rect.x + tx), (uint16_t)(rect.y + ty),
+                            (uint16_t)tw, (uint16_t)th, g_tile_buffer);
         }
     }
 }
@@ -207,10 +222,12 @@ static const uint8_t *font_glyph(janus_font_size_t font_size, char c) {
 static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph,
                         janus_font_size_t font_size, uint8_t scale,
                         uint16_t fg, uint16_t bg) {
+#if defined(JANUS_RENDER_NONBLOCKING)
     if (g_async_enqueue) {
         async_enqueue_glyph(x, y, glyph, font_size, scale, fg, bg);
         return;
     }
+#endif
     janus_font_metrics_t m = font_metrics(font_size);
     int16_t scaled_w = (int16_t)(m.w * scale);
     int16_t scaled_h = (int16_t)(m.h * scale);
@@ -342,6 +359,11 @@ bool janus_box_is_expanded(const janus_widget_desc_t *box) {
  * pointer, still finds the right bound_struct for re-rendering any
  * bound children inside it. */
 static const janus_screen_desc_t *g_current_screen = NULL;
+/* The current screen's resolved image far-address table (janus_screen_desc_t
+ * .image_far, populated by its .resolve_images). Set on every screen-enter
+ * alongside g_current_screen; a widget's image_slot is a 1-based index
+ * into it. NULL for a screen that bakes no images. */
+static const janus_farptr_t *g_image_far = NULL;
 
 /* --------------------------------------------------------- bound reads --
  */
@@ -432,13 +454,18 @@ static void draw_button(const janus_widget_desc_t *w) {
  * remainder untouched. Same tile loop / shared g_tile_buffer / async-flag
  * split as fill_rect — a tile is <= JANUS_TILE_W x JANUS_TILE_H, so one
  * tile's worth of pixels always fits g_tile_buffer. Each source row of a
- * tile is one JANUS_MEMCPY_P (flash-safe on AVR, a plain memcpy on host).
+ * tile is one JANUS_MEMCPY_PF — a far copy (memcpy_PF) on AVR so the
+ * source can live past the 64 KiB near-flash window, a plain memcpy on
+ * host. `image_slot` (1-based) indexes g_image_far for the source's far
+ * address; the async path carries the slot, not the address, and
+ * re-resolves at drain (keeps the op struct small).
  */
-static void blit_image(janus_rect_t rect, const uint16_t *src,
+static void blit_image(janus_rect_t rect, uint16_t image_slot,
                         int16_t src_w, int16_t src_h) {
     int16_t draw_w = rect.w < src_w ? rect.w : src_w;
     int16_t draw_h = rect.h < src_h ? rect.h : src_h;
-    if (draw_w <= 0 || draw_h <= 0 || src == NULL) return;
+    if (draw_w <= 0 || draw_h <= 0 || image_slot == 0 || g_image_far == NULL) return;
+    janus_farptr_t src = g_image_far[image_slot - 1];
 
     for (int16_t ty = 0; ty < draw_h; ty += JANUS_TILE_H) {
         int16_t th = (int16_t)(draw_h - ty);
@@ -446,15 +473,18 @@ static void blit_image(janus_rect_t rect, const uint16_t *src,
         for (int16_t tx = 0; tx < draw_w; tx += JANUS_TILE_W) {
             int16_t tw = (int16_t)(draw_w - tx);
             if (tw > JANUS_TILE_W) tw = JANUS_TILE_W;
+#if defined(JANUS_RENDER_NONBLOCKING)
             if (g_async_enqueue) {
                 async_enqueue_image((int16_t)(rect.x + tx), (int16_t)(rect.y + ty),
-                                    tw, th, src, src_w, tx, ty);
+                                    tw, th, image_slot, src_w, tx, ty);
                 continue;
             }
+#endif
             for (int16_t row = 0; row < th; row++) {
-                JANUS_MEMCPY_P(&g_tile_buffer[row * tw],
-                               &src[(ty + row) * src_w + tx],
-                               (size_t)tw * sizeof(uint16_t));
+                JANUS_MEMCPY_PF(&g_tile_buffer[row * tw],
+                                JANUS_FAR_ADD(src, ((size_t)(ty + row) * src_w + tx)
+                                                       * sizeof(uint16_t)),
+                                (size_t)tw * sizeof(uint16_t));
             }
             draw_area_sync((uint16_t)(rect.x + tx), (uint16_t)(rect.y + ty),
                             (uint16_t)tw, (uint16_t)th, g_tile_buffer);
@@ -468,11 +498,14 @@ static void draw_image(const janus_widget_desc_t *w) {
         fill_rect(lw.geometry, JANUS_COLOR_IMAGE_MISSING);
         return;
     }
-    if (lw.image_pixels == NULL) {
-        fill_rect(lw.geometry, lw.color);   /* no `file:` authored — pre-image v1 stub */
+    if (lw.image_slot == 0 || g_image_far == NULL) {
+        /* no `file:` authored (pre-image v1 stub — a `color` fill), or an
+         * image widget refreshed on its own before any full screen render
+         * populated g_image_far for its screen. */
+        fill_rect(lw.geometry, lw.color);
         return;
     }
-    blit_image(lw.geometry, lw.image_pixels, (int16_t)lw.image_w, (int16_t)lw.image_h);
+    blit_image(lw.geometry, lw.image_slot, (int16_t)lw.image_w, (int16_t)lw.image_h);
 }
 static void draw_radiobutton(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
@@ -642,17 +675,28 @@ void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void 
     render_widget(widget, bound_struct, bound_dirty);
 }
 
-void janus_render_screen(const janus_screen_desc_t *screen) {
+/* Every screen-enter routes through one of these two (switch_screen and
+ * render_screen_async_start both call janus_render_screen) — the single
+ * place to (re)resolve the screen's image far-addresses and point
+ * g_image_far at them before any draw_image can run. */
+static void enter_screen(const janus_screen_desc_t *screen, janus_screen_desc_t *ls_out) {
     g_current_screen = screen;
-    janus_screen_desc_t ls = janus_screen_load(screen);
+    *ls_out = janus_screen_load(screen);
+    if (ls_out->resolve_images != NULL) ls_out->resolve_images();
+    g_image_far = ls_out->image_far;
+}
+
+void janus_render_screen(const janus_screen_desc_t *screen) {
+    janus_screen_desc_t ls;
+    enter_screen(screen, &ls);
     for (uint16_t i = 0; i < ls.widget_count; i++) {
         render_widget(&ls.widgets[i], ls.bound_struct, NULL);
     }
 }
 
 void janus_render_screen_if_dirty(const janus_screen_desc_t *screen) {
-    g_current_screen = screen;
-    janus_screen_desc_t ls = janus_screen_load(screen);
+    janus_screen_desc_t ls;
+    enter_screen(screen, &ls);
     for (uint16_t i = 0; i < ls.widget_count; i++) {
         render_widget(&ls.widgets[i], ls.bound_struct, ls.bound_dirty);
     }
@@ -671,6 +715,7 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     janus_render_screen(janus_app_get_screen(app, screen_index));
 }
 
+#if defined(JANUS_RENDER_NONBLOCKING)
 void janus_render_screen_async_start(const janus_screen_desc_t *screen) {
     g_async_op_count = 0;
     g_async_cursor = 0;
@@ -688,10 +733,13 @@ bool janus_render_poll(void) {
         for (size_t i = 0; i < JANUS_TILE_W * JANUS_TILE_H; i++) g_tile_buffer[i] = op->color;
         draw_area_async((uint16_t)op->x, (uint16_t)op->y, (uint16_t)op->w, (uint16_t)op->h, g_tile_buffer);
     } else if (op->kind == JANUS_ASYNC_OP_IMAGE) {
+        janus_farptr_t src = (g_image_far != NULL && op->img_slot != 0)
+                             ? g_image_far[op->img_slot - 1] : (janus_farptr_t)0;
         for (int16_t row = 0; row < op->h; row++) {
-            JANUS_MEMCPY_P(&g_tile_buffer[row * op->w],
-                           &op->img[(op->img_sy + row) * op->img_stride + op->img_sx],
-                           (size_t)op->w * sizeof(uint16_t));
+            JANUS_MEMCPY_PF(&g_tile_buffer[row * op->w],
+                            JANUS_FAR_ADD(src, ((size_t)(op->img_sy + row) * op->img_stride
+                                                    + op->img_sx) * sizeof(uint16_t)),
+                            (size_t)op->w * sizeof(uint16_t));
         }
         draw_area_async((uint16_t)op->x, (uint16_t)op->y, (uint16_t)op->w, (uint16_t)op->h, g_tile_buffer);
     } else {
@@ -719,6 +767,7 @@ void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index) {
     app->active_screen = screen_index;
     janus_render_screen_async_start(janus_app_get_screen(app, screen_index));
 }
+#endif  /* JANUS_RENDER_NONBLOCKING */
 
 void janus_set_focus(const janus_widget_desc_t *widget) {
     const janus_widget_desc_t *previous = g_focused_widget;

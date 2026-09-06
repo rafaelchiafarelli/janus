@@ -9,7 +9,11 @@ from pathlib import Path
 
 from .ir import App
 from .stage3a_harpia.emit_harpia import emit_harpia
-from .stage3b_embedded_c.emit_embedded_c import screen_index_map, screen_var
+from .stage3b_embedded_c.emit_embedded_c import (
+    screen_index_map,
+    screen_var,
+    warn_if_image_flash_heavy,
+)
 from .stage3b_embedded_c.emit_files import (
     render_actions_header,
     render_app_source,
@@ -37,6 +41,8 @@ def write_project(app: App, out_dir: str | Path) -> list[Path]:
     include_dir = out_dir / "include"
     index = screen_index_map(app)
     written: list[Path] = []
+
+    warn_if_image_flash_heavy(app)
 
     def _write(path: Path, content: str) -> None:
         if write_if_changed(path, content):

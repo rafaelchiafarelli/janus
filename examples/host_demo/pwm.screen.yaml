@@ -14,8 +14,11 @@
 #   * CH2 / CH3 -- the two "big" rows. `fill: true`, so after the header
 #     row and the two small rows take their heights, the ~284px left over
 #     on the 320x480 panel is split evenly -> 142px each. The icon is
-#     142x142 to match that exact row height (retune if the panel size or
-#     the fixed rows above change).
+#     120x120 (top-aligned, ~22px short of the row): a 142x142 RGB565
+#     array is ~40 KB and avr-gcc caps a single object at ~32 KB, so
+#     ~128px square is the ceiling for a baked icon on the Mega2560
+#     regardless of the far-PROGMEM plumbing (which handles *placement*
+#     past 64 KB, not single-object size).
 #
 # Icons: `file:` is resolved relative to this screen file; the source JPEG
 # composites over black and is rescaled to the widget size (no aspect lock
@@ -83,7 +86,7 @@ children:
               - { kind: label, id: pwm_ch1_inverting_label, text: "Inverting", font_size: medium, size: { w: 100, h: 18 } }
       - { kind: image, id: pwm_ch1_icon, file: "assets/variable_single.jpg", size: { w: 80, h: 80 } }
 
-  # ---- CH2 -- big row (fill -> 142px). Icon 142x142 matches row height -
+  # ---- CH2 -- big row (fill -> 142px). Icon 120x120 (AVR 32 KB/object cap) -
   - kind: row
     id: pwm_ch2_row
     fill: true
@@ -110,9 +113,9 @@ children:
               - { kind: toggle, id: pwm_ch2_c_enabled, bind: { message: pwm, field: ch2_c_enabled, type: int }, size: { w: 28, h: 18 } }
               - { kind: label, id: pwm_ch2_c_label, text: "C", font_size: medium, size: { w: 18, h: 18 } }
               - { kind: progress, id: pwm_ch2_c_duty, bind: { message: pwm, field: ch2_c_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 90, h: 14 } }
-      - { kind: image, id: pwm_ch2_icon, file: "assets/variable_multiple.jpg", size: { w: 142, h: 142 } }
+      - { kind: image, id: pwm_ch2_icon, file: "assets/variable_multiple.jpg", size: { w: 120, h: 120 } }
 
-  # ---- CH3 -- big row (fill -> 142px) --------------------------------
+  # ---- CH3 -- big row (fill -> 142px) -- icon 120x120, see CH2 --------
   - kind: row
     id: pwm_ch3_row
     fill: true
@@ -139,4 +142,4 @@ children:
               - { kind: toggle, id: pwm_ch3_c_enabled, bind: { message: pwm, field: ch3_c_enabled, type: int }, size: { w: 28, h: 18 } }
               - { kind: label, id: pwm_ch3_c_label, text: "C", font_size: medium, size: { w: 18, h: 18 } }
               - { kind: progress, id: pwm_ch3_c_duty, bind: { message: pwm, field: ch3_c_duty_percent, type: int }, range: { min: 0, max: 100 }, size: { w: 90, h: 14 } }
-      - { kind: image, id: pwm_ch3_icon, file: "assets/variable_multiple.jpg", size: { w: 142, h: 142 } }
+      - { kind: image, id: pwm_ch3_icon, file: "assets/variable_multiple.jpg", size: { w: 120, h: 120 } }
