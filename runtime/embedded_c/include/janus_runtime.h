@@ -14,6 +14,29 @@
 #include "janus_font.h"
 #include "janus_progmem.h"
 
+/* Per-project render mode (app.yaml's `display.render_mode`). Stage 8
+ * scaffold mode writes a one-line `janus_render_config.gen.h` into the
+ * vendored runtime's own include/ (see architecture.md Stage 8): it
+ * `#define`s JANUS_RENDER_NONBLOCKING for a `non_blocking` project and
+ * leaves it undefined for a `blocking` one. A build with no generated
+ * header at all — the in-repo runtime's own ctest / AVR builds, or any
+ * consumer that never ran scaffold mode — is treated as `blocking`.
+ *
+ * When the macro is absent, the entire polled/async render path (its
+ * declarations just below, and its whole implementation in
+ * janus_runtime.c) compiles out, so a `blocking` project links none of
+ * it — in particular not the 6912-byte `g_async_ops` buffer, which
+ * otherwise overflows the 8 KiB SRAM of an ATmega2560 as soon as any
+ * `image` widget pulls `blit_image` in (channel_icons task 3). Define it
+ * on the command line (`-DJANUS_RENDER_NONBLOCKING`) to force the async
+ * path in without the generated header — that's what the runtime's own
+ * async test target does. */
+#if defined(__has_include)
+#  if __has_include("janus_render_config.gen.h")
+#    include "janus_render_config.gen.h"
+#  endif
+#endif
+
 typedef enum {
     JANUS_WIDGET_LABEL, JANUS_WIDGET_HEADER, JANUS_WIDGET_BUTTON,
     JANUS_WIDGET_IMAGE, JANUS_WIDGET_PROGRESS, JANUS_WIDGET_GAUGE,
@@ -126,17 +149,20 @@ typedef struct janus_widget_desc {
                                                           * every non-box widget and any box with
                                                           * no `summary:` authored. */
     uint16_t summary_child_count;
-    /* JANUS_WIDGET_IMAGE only (added 2026-09-05). `image_pixels` points at
-     * a JANUS_PROGMEM RGB565 buffer of exactly image_w * image_h pixels,
-     * row-major, row 0 first — the widget's `file:` image, decoded and
-     * rescaled to its geometry at generation time (emit_embedded_c.py /
-     * image_asset.py), so the device never decodes or resamples anything.
-     * NULL for a non-image widget, and for an `image` with no `file:`
-     * authored (that still renders the pre-image v1 stub — a `color`
-     * fill). `image_error` is baked true instead when a `file:` *was*
-     * authored but couldn't be found or decoded: draw_image then paints a
-     * magenta placeholder so the missing asset is obvious on-screen. */
-    const uint16_t *image_pixels;
+    /* JANUS_WIDGET_IMAGE only. `image_slot` is a **1-based** index into
+     * the current screen's `image_far` table (janus_screen_desc_t), which
+     * the runtime resolves to a real flash address once per screen-enter
+     * — the baked RGB565 arrays can link past AVR's 64 KiB near-flash
+     * window, so a plain pointer here wouldn't reach them (see
+     * janus_progmem.h). 0 means "not an image, or an `image` with no
+     * `file:`" — the latter still renders the pre-image v1 stub, a
+     * `color` fill — so a zero-initialised descriptor is safe.
+     * `image_error` (checked first by draw_image) is baked true instead
+     * when a `file:` was authored but couldn't be found/decoded: a
+     * magenta placeholder is painted so the gap is obvious on-screen.
+     * `image_w`/`image_h` are the baked pixel dims (== the widget
+     * geometry, normally). */
+    uint16_t image_slot;
     uint16_t image_w, image_h;
     bool image_error;
 } janus_widget_desc_t;
@@ -150,6 +176,14 @@ typedef struct {
     void *bound_dirty;          /* e.g. &device_dirty (added 2026-09-05); mutable — see
                                   * janus_bind_t.dirty_offset and janus_render_*_if_dirty below.
                                   * NULL wherever bound_struct is NULL. */
+    /* Image far-address plumbing (added 2026-09-06). `resolve_images`
+     * fills `image_far` with `pgm_get_far_address` of each baked RGB565
+     * array (a far address can't be a static initializer — see
+     * janus_progmem.h); the runtime calls it on every screen-enter and a
+     * widget's `image_slot` then indexes `image_far` (1-based). Both NULL
+     * for a screen that bakes no images. */
+    void (*resolve_images)(void);
+    const janus_farptr_t *image_far;
 } janus_screen_desc_t;
 
 typedef struct {
@@ -220,7 +254,14 @@ void janus_toggle_box(const janus_widget_desc_t *box);               /* re-rende
  * full janus_render_screen sweep repainting the whole screen along with
  * it. `bound_struct` is whatever that widget's screen uses
  * (janus_screen_desc_t.bound_struct) — pass NULL if it has no live
- * bindings anywhere in its subtree. */
+ * bindings anywhere in its subtree.
+ *
+ * An `image` widget refreshed this way only blits if a full
+ * janus_render_screen / janus_switch_screen for its screen has run at
+ * least once (that's what resolves the screen's image far-addresses);
+ * otherwise it falls back to the `color` stub fill — graceful, never a
+ * crash. In practice a screen is always rendered whole on entry before
+ * anything refreshes a single widget on it, so this is a non-issue. */
 void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_struct);
 
 /* Dirty-aware variants (added 2026-09-05) — same traversal as
@@ -249,10 +290,16 @@ void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
  * (e.g. once per event-loop iteration) until it returns false, meaning
  * the screen is fully drawn. `janus_switch_screen_async_start` is
  * `janus_switch_screen`'s non-blocking counterpart, for the same
- * `navigate` handling under `render_mode: non_blocking`. */
+ * `navigate` handling under `render_mode: non_blocking`.
+ *
+ * Declared (and defined) only when JANUS_RENDER_NONBLOCKING is set — see
+ * the note at the top of this header. A `blocking` project neither calls
+ * nor links these. */
+#if defined(JANUS_RENDER_NONBLOCKING)
 void janus_render_screen_async_start(const janus_screen_desc_t *screen);
 bool janus_render_poll(void);
 void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index);
+#endif
 
 /* box's current expand/collapse bit, from the runtime-owned state table
  * (the descriptor itself is static const — see janus_runtime.c). Exposed

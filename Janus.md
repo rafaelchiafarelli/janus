@@ -305,6 +305,19 @@ Original scoping, for the record:
     back to a screen with `app.display` set; using it without that raises
     at generation time rather than silently doing nothing. See
     `architecture.md` Stage 2 for the exact algorithm.
+  - **`hidden: true` (added 2026-09-06)** on any widget makes Stage 1
+    drop it *and its whole subtree* from the parsed tree — before layout,
+    before harpia emit, before embedded-C emit. A hidden widget therefore
+    has no geometry, never renders, is never hit-tested or focusable,
+    contributes no field to `janus_generated.harpia`, and (for an
+    `image`) bakes no pixel array. It exists so two widgets can be
+    authored in one slot — an enabled and a disabled icon variant, say —
+    with exactly one kept; the survivor lays out exactly as if the hidden
+    node were never in the file. v1 is **static only** (a literal
+    `true`/`false`); a field-bound `hidden` that toggles on-device is a
+    separate future increment (it would need a real baked rect and a
+    runtime check, neither of which a pruned node has). A whole screen
+    can't be `hidden` — drop it from `app.yaml` instead.
 
 ## v1 widget catalog
 
@@ -324,7 +337,7 @@ Leaves:
 | `label` | `string`, or static `text` | |
 | `header` | `string`, or static `text` | same bind shape as `label`, section-title render |
 | `button` | unbound | `on_press: <action name>` and/or `navigate: <screen name>` (see nav + action-dispatch sections below) |
-| `image` | static `file: <path>` (an image file); `size` **required** | `file:` is a real PNG/BMP/JPEG/GIF/TIFF/WebP/… on disk, resolved relative to the screen `.yaml`. Decoded, alpha-composited over black (alpha isn't otherwise supported), rescaled to `size`, and baked as an RGB565 array at generation time — the device never decodes anything. A missing/unsupported/undecodable `file:` is logged (non-fatal) and the widget renders as a magenta placeholder rect. No `file:` → a solid `color` fill (v1 stub). (`string` asset-key binding is still just the dormant `asset:` field — not wired.) |
+| `image` | static `file: <path>` (an image file); `size` **required** | `file:` is a real PNG/BMP/JPEG/GIF/TIFF/WebP/… on disk, resolved relative to the screen `.yaml`. Decoded, alpha-composited over black (alpha isn't otherwise supported), rescaled to `size`, and baked as an RGB565 array at generation time — the device never decodes anything. The array is emitted `JANUS_IMG_SECTION` (its own `.janus_img` flash section, linked after `.text` — *not* `JANUS_PROGMEM`), so heavy image data can't push the near-read font / descriptor / string tables past AVR's 64 KiB window (`architecture.md` Stage 3b "Near-flash budget"). The descriptor carries a 1-based `image_slot`, not a pointer: baked arrays can link past AVR's 64 KiB near-flash window and a far address isn't a static-initializer constant, so each screen emits a `resolve_images()` that fills a small RAM `image_far[]` table the runtime indexes (see `architecture.md` Stage 3b "Far-flash addressing"). A single baked array can't exceed ~128×128 (avr-gcc's 32 KiB per-object limit; `image_asset` warns past that). A missing/unsupported/undecodable `file:` is logged (non-fatal) and the widget renders as a magenta placeholder rect. No `file:` → a solid `color` fill (v1 stub). (`string` asset-key binding is still just the dormant `asset:` field — not wired.) |
 | `progress` | numeric + `range: {min, max}` | linear bar |
 | `gauge` | numeric + `range: {min, max}` | arc/dial; identical bind shape to `progress`, different render only |
 | `checkbox` | `int` (0/nonzero convention) | bound per-widget. **harpia has no `bool` type** (confirmed against `LexicalAnalizer/LexicalAnalyzer.py` — only `int`/`int64`/`float`/`string`/`map`), so this is a deliberate mapping, not an oversight |
@@ -408,13 +421,24 @@ overflow against (see `architecture.md` Stage 2 for the exact check).
   poll — see `architecture.md` Stage 4 for the queue-based design (a
   draw-op queue built once per screen entry, drained one driver call at a
   time, backing off while `display_busy()`). Declared, not baked into
-  every project unconditionally — same "input.modality" precedent.
+  every project unconditionally — same "input.modality" precedent. Since
+  2026-09-06 (channel_icons task 3) it also drives a **compile gate** in
+  the fixed runtime: scaffold mode writes `janus_render_config.gen.h`
+  into the vendored `runtime/include/` and `janus_runtime.c` puts its
+  entire polled/async path (including the 6912-byte `g_async_ops` buffer)
+  behind `JANUS_RENDER_NONBLOCKING`, so a `blocking` project links none
+  of it — required to fit an ATmega2560's 8 KiB SRAM once any real baked
+  `image` pulls `blit_image` in.
 
 **What "implemented" means here, precisely:** all five fields are parsed,
 validated, and emitted as plain data in `janus_display_config.gen.h`
 (`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`)
 — consumed by hand-written vendor driver code (except `render_mode`, which
-Stage 8's scaffold itself consumes), never by the fixed runtime library,
+Stage 8's scaffold consumes to pick a `main.c`, *and* — since
+channel_icons task 3 — re-emits as a separate one-line
+`janus_render_config.gen.h` inside the vendored `runtime/include/` that
+the fixed runtime `#include`s via `__has_include` to compile-gate its
+async path). The rest is never read by the fixed runtime library,
 which stays display-size-agnostic. **The driver bodies themselves are not
 generated and stay human-owned** (settled 2026-08-20, see Open Questions)
 — `bus`/`controller` are a hardware *selection* a human's driver code can
