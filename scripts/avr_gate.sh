@@ -11,11 +11,17 @@
 #      8 KiB SRAM region ("section `.bss' is not within region `data'")
 #   4. assert avr-nm shows NONE of the async render path was linked
 #      (g_async_ops, janus_render_poll, async_enqueue_*) — task 3
-#   5. print avr-size so the SRAM / flash margin is visible
+#   5. assert every near-read flash symbol (fonts, descriptors, strings,
+#      screen tables — everything the runtime reads with near pgm_read_*)
+#      links below 0x10000; only the baked-image `_px` arrays may sit
+#      above it (read far, per task 2) — task 4
+#   6. print avr-size so the SRAM / flash margin is visible
 #
-# Task 4 will extend step 4 with an avr-nm VMA assertion (near-read
-# symbols < 0x10000). Not wired into CI — run it by hand alongside the
-# host suites when touching the embedded_rendering initiative.
+# Step 5 links with NO linker script, so it exercises avr-ld's orphan
+# placement of `.janus_img` (the weaker guarantee); janus_img.ld +
+# CMakeLists.txt pin it explicitly for a CMake consumer. Not wired into
+# CI — run it by hand alongside the host suites when touching the
+# embedded_rendering initiative.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -77,6 +83,21 @@ if avr-nm "$WORK/host_demo.elf" \
     exit 1
 fi
 echo "  ok — none linked"
+
+echo "== near-read flash data must stay < 0x10000 (task 4) =="
+# text/rodata/data symbols (not RAM at 0x80xxxx, not undefined) whose VMA
+# is >= 64 KiB and whose name is not a baked-image `_px` array.
+viol="$(avr-nm "$WORK/host_demo.elf" | awk '
+    NF == 3 && $2 ~ /^[tTrRdD]$/ {
+        addr = strtonum("0x" $1)
+        if (addr >= 0x10000 && addr < 0x800000 && $3 !~ /_px$/) print $1, $2, $3
+    }')"
+if [ -n "$viol" ]; then
+    echo "FAIL: near-read symbol(s) linked past AVR's 64 KiB near window:" >&2
+    echo "$viol" | sed 's/^/  /' >&2
+    exit 1
+fi
+echo "  ok — all near-read data below 0x10000"
 
 echo "== avr-size =="
 avr-size -C --mcu=atmega2560 "$WORK/host_demo.elf"

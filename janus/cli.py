@@ -30,11 +30,14 @@ _RUNTIME_EMBEDDED_C = Path(__file__).resolve().parents[1] / "runtime" / "embedde
 _VENDORED_SUBDIRS = ("include", "src", "tests", "host_mock")
 
 
+_VENDORED_ROOT_FILES = ("CMakeLists.txt", "janus_img.ld")
+
+
 def _vendor_runtime(dest_dir: Path, render_mode: str) -> list[Path]:
     written = []
-    cmakelists = _RUNTIME_EMBEDDED_C / "CMakeLists.txt"
-    if write_if_changed(dest_dir / "CMakeLists.txt", cmakelists.read_text()):
-        written.append(dest_dir / "CMakeLists.txt")
+    for fname in _VENDORED_ROOT_FILES:
+        if write_if_changed(dest_dir / fname, (_RUNTIME_EMBEDDED_C / fname).read_text()):
+            written.append(dest_dir / fname)
     for subdir in _VENDORED_SUBDIRS:
         written.extend(copy_tree_if_changed(_RUNTIME_EMBEDDED_C / subdir, dest_dir / subdir))
 

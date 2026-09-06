@@ -70,6 +70,10 @@ class TestGenerate(unittest.TestCase):
         self.assertTrue((runtime_dir / "host_mock").exists())
         self.assertFalse((runtime_dir / "build").exists())
         self.assertIn(runtime_dir / "CMakeLists.txt", written)
+        # the image-placement linker fragment ships with the library
+        source_ld = repo_root / "runtime" / "embedded_c" / "janus_img.ld"
+        self.assertEqual((runtime_dir / "janus_img.ld").read_text(), source_ld.read_text())
+        self.assertIn(runtime_dir / "janus_img.ld", written)
 
     def test_scaffold_src_writes_render_config_into_the_vendored_runtime(self) -> None:
         src_dir = Path(self._tmp.name) / "src"

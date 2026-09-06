@@ -127,17 +127,23 @@ def _rect(r) -> str:
 def _image_fields_c(widget: Widget, lines: list[str], id_var: str, image_pxs: list[str]) -> str:
     """`.image_slot / .image_w / .image_h / .image_error` for a widget.
     Only an `image` with a `file:` does any work: it decodes + rescales
-    the file and emits (via `lines`) a `JANUS_PROGMEM` RGB565 array —
-    named after this widget's own id flash-string var (`{id_var}_px`) so
-    it needs no counter of its own. The array name is appended to
-    `image_pxs`; `.image_slot` is its **1-based** position there (0 =
-    not an image / no file). `emit_screen` turns `image_pxs` into the
-    screen's `resolve_images()` + `image_far[]` table — the array itself
-    is never pointed at from a flash descriptor, because a far flash
-    address isn't a link-time constant on AVR (see janus_progmem.h). A
-    decode/lookup failure is logged (never raised) and baked as
-    `.image_error = true` (slot 0), which makes the runtime paint a
-    magenta placeholder over the widget's rect."""
+    the file and emits (via `lines`) an RGB565 array — named after this
+    widget's own id flash-string var (`{id_var}_px`) so it needs no
+    counter of its own. The array name is appended to `image_pxs`;
+    `.image_slot` is its **1-based** position there (0 = not an image /
+    no file). `emit_screen` turns `image_pxs` into the screen's
+    `resolve_images()` + `image_far[]` table — the array itself is never
+    pointed at from a flash descriptor, because a far flash address isn't
+    a link-time constant on AVR (see janus_progmem.h). A decode/lookup
+    failure is logged (never raised) and baked as `.image_error = true`
+    (slot 0), which makes the runtime paint a magenta placeholder over
+    the widget's rect.
+
+    The array is emitted `JANUS_IMG_SECTION`, not `JANUS_PROGMEM`: on AVR
+    that lands it in the `.janus_img` flash section the linker places
+    after `.text`, so heavy image data never pushes the near-read font /
+    descriptor / string tables past 0x10000 (channel_icons task 4).
+    Off-AVR the two macros are identical."""
     if widget.kind != "image" or widget.image_file is None:
         return ".image_slot = 0, .image_w = 0, .image_h = 0, .image_error = false"
 
@@ -153,7 +159,7 @@ def _image_fields_c(widget: Widget, lines: list[str], id_var: str, image_pxs: li
 
     name = f"{id_var}_px"
     body = ", ".join(f"0x{value:04x}" for value in pixels)
-    lines.append(f"static const uint16_t {name}[] JANUS_PROGMEM = {{ {body} }};")
+    lines.append(f"static const uint16_t {name}[] JANUS_IMG_SECTION = {{ {body} }};")
     image_pxs.append(name)
     return f".image_slot = {len(image_pxs)}, .image_w = {tw}, .image_h = {th}, .image_error = false"
 
@@ -172,6 +178,52 @@ def _color_c(hex_color: str | None, default_macro: str) -> str:
     if hex_color is None:
         return default_macro
     return f"0x{_pack_rgb565(hex_color):04x}"
+
+
+# Past this, baked image data is a big enough share of a classic-AVR's
+# 256 KiB flash to warrant an explicit "does it still link?" line in the
+# build log. Not fatal — same "log, don't stop" contract image_asset
+# uses. Since channel_icons task 4 the arrays live in their own
+# `.janus_img` section after `.text`, so they no longer push the
+# near-read font / descriptor / string tables past 0x10000 on their own;
+# this guard is only a legibility backstop for total-flash pressure.
+_IMAGE_FLASH_WARN_BYTES = 128 * 1024
+
+
+def _iter_image_widgets(widget: Widget):
+    if widget.kind == "image" and widget.image_file is not None:
+        yield widget
+    for child in (*widget.children, *widget.summary):
+        yield from _iter_image_widgets(child)
+
+
+def estimate_baked_image_bytes(app: App) -> int:
+    """Sum of `w * h * 2` over every `image` widget with a `file:` — the
+    flash the baked RGB565 arrays occupy (2 bytes/pixel). Uses the
+    authored `size`, falling back to geometry once Stage 2 has run."""
+    total = 0
+    for screen in app.screens:
+        for widget in _iter_image_widgets(screen.root):
+            if widget.size is not None:
+                bw, bh = widget.size
+            elif widget.geometry is not None:
+                bw, bh = widget.geometry.w, widget.geometry.h
+            else:
+                continue
+            total += int(bw) * int(bh) * 2
+    return total
+
+
+def warn_if_image_flash_heavy(app: App) -> None:
+    total = estimate_baked_image_bytes(app)
+    if total > _IMAGE_FLASH_WARN_BYTES:
+        log.warning(
+            "baked image data is ~%d KiB across all screens; it links into its "
+            "own .janus_img flash section after code (channel_icons task 4), so "
+            "it won't push the near-read font/descriptor/string tables past "
+            "0x10000 — but confirm code + data still fit the target's flash",
+            total // 1024,
+        )
 
 
 def screen_var(name: str) -> str:

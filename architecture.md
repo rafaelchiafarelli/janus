@@ -281,9 +281,11 @@ format check, so a bad path never aborts a parse. Stage 3b
 (`image_asset.load_rgb565`, called from `emit_embedded_c._image_fields_c`)
 opens it, composites any alpha over opaque black (alpha is not otherwise
 supported), rescales to the widget's authored `size` with LANCZOS, packs
-to RGB565, and bakes a `static const uint16_t <id>_px[] JANUS_PROGMEM`
+to RGB565, and bakes a `static const uint16_t <id>_px[] JANUS_IMG_SECTION`
 array into the screen source (`.image_w`/`.image_h` on the descriptor
-alongside). A missing / unreadable / undecodable
+alongside) — `JANUS_IMG_SECTION`, not `JANUS_PROGMEM`, so on AVR the
+arrays land in their own `.janus_img` flash section past `.text` (see
+"Near-flash budget" below). A missing / unreadable / undecodable
 file is logged at WARNING and baked as `.image_error = true` instead — the
 runtime then paints the widget's rect magenta (`JANUS_COLOR_IMAGE_MISSING`,
 `0xf81f`) so the gap is visible on-device. An `image` with no `file:`
@@ -313,10 +315,31 @@ image-using project — even `render_mode: blocking` — via
 `blit_image → async_enqueue_image`, overflowing an ATmega2560's 8 KiB
 SRAM. The whole polled/async render path is now behind
 `JANUS_RENDER_NONBLOCKING` (see "Non-blocking rendering" below), so a
-`blocking` build links none of it. **Known-unmet on real AVR
-(2026-09-06):** ~80 KiB of icon arrays still displaces the font glyph
-tables (read with *near* `pgm_read_byte`) past 0x10000 — channel_icons
-task 4.
+`blocking` build links none of it.
+
+**Near-flash budget (channel_icons task 4, done 2026-09-06).** Baked
+image arrays are large (tens of KiB) and, left in `.progmem.data` with
+everything else, pushed the font glyph tables, widget descriptors and
+flash strings — all read with *near* `pgm_read_byte` / `memcpy_P` /
+`pgm_read_ptr` — past AVR's 64 KiB near-flash window, where those reads
+return garbage. Fix: the `<id>_px` arrays are emitted `JANUS_IMG_SECTION`
+(`janus_progmem.h`) instead of `JANUS_PROGMEM` — `__attribute__((used,
+section(".janus_img")))` on AVR, nothing off-AVR. avr-gcc silently drops
+a `section` attribute when `__progmem__` is also present, so these are
+deliberately *not* `PROGMEM`; they stay flash-only anyway (a `const` in a
+read-only section the linker maps into the text region, no RAM shadow)
+and every read still goes through `JANUS_FAR_ADDR` + `JANUS_MEMCPY_PF`
+(the descriptor carries a slot index, never a pointer, so nothing
+near-derefs one). `runtime/embedded_c/janus_img.ld` — a one-line
+`SECTIONS { .janus_img : { *(.janus_img*) } } INSERT AFTER .text;`
+fragment — pins the section after `.text`; the vendored `CMakeLists.txt`
+passes it via `target_link_options(janus_runtime INTERFACE -Wl,-T,…)` for
+an AVR CMake consumer with no edit on their side, and a bare `avr-gcc`
+link gets the same placement from the linker's orphan-section rule (a
+read-only alloc section trails `.text`). `emit_embedded_c.warn_if_image_flash_heavy`
+logs a non-fatal line if total baked image bytes exceed 128 KiB.
+`scripts/avr_gate.sh` asserts (via `avr-nm`) that every near-read symbol
+links `< 0x10000`, `_px` arrays excepted.
 
 **`box` header:** `box` has no dedicated title field — it reuses the
 generic `Widget.text` field already shared by `label`/`header`/`button`.
@@ -1094,6 +1117,7 @@ This is the "how does it all actually get compiled" question.
 | `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` / `janus_font.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `runtime/embedded_c/` itself, under a project — vendored via `janus-generate --scaffold-src DIR` into `target_dir/runtime` | Janus (fixed library, copied) | yes, every build (content-diffed — see Stage 4's vendoring note; unchanged files never touch mtime) |
 | `target_dir/runtime/include/janus_render_config.gen.h` | Janus | yes, scaffold mode only — the one generated file written *inside* the vendored library; `#define JANUS_RENDER_NONBLOCKING 1` iff `render_mode: non_blocking`, so `janus_runtime.c` compiles the polled/async path in only then (see Stage 4 "Compile-gated") |
+| `runtime/embedded_c/janus_img.ld` | Janus (fixed library, vendored verbatim) | no — the `INSERT AFTER .text` fragment that keeps baked images out of the near-flash window (Stage 3b "Near-flash budget"); applied for a CMake consumer by the vendored `CMakeLists.txt` |
 | `build/generated/src/{screen}_screen.gen.c` | Janus | yes, every build |
 | `build/generated/include/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
 | `build/generated/src/janus_app.gen.c` | Janus | yes, every build |
