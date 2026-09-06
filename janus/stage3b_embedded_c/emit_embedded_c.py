@@ -124,17 +124,22 @@ def _rect(r) -> str:
     return f"{{{r.x}, {r.y}, {r.w}, {r.h}}}" if r is not None else "{0, 0, 0, 0}"
 
 
-def _image_fields_c(widget: Widget, lines: list[str], id_var: str) -> str:
-    """`.image_pixels / .image_w / .image_h / .image_error` for a widget.
+def _image_fields_c(widget: Widget, lines: list[str], id_var: str, image_pxs: list[str]) -> str:
+    """`.image_slot / .image_w / .image_h / .image_error` for a widget.
     Only an `image` with a `file:` does any work: it decodes + rescales
     the file and emits (via `lines`) a `JANUS_PROGMEM` RGB565 array —
     named after this widget's own id flash-string var (`{id_var}_px`) so
-    it needs no counter of its own — for `.image_pixels` to point at. A
+    it needs no counter of its own. The array name is appended to
+    `image_pxs`; `.image_slot` is its **1-based** position there (0 =
+    not an image / no file). `emit_screen` turns `image_pxs` into the
+    screen's `resolve_images()` + `image_far[]` table — the array itself
+    is never pointed at from a flash descriptor, because a far flash
+    address isn't a link-time constant on AVR (see janus_progmem.h). A
     decode/lookup failure is logged (never raised) and baked as
-    `.image_error = true`, which makes the runtime paint a magenta
-    placeholder over the widget's rect."""
+    `.image_error = true` (slot 0), which makes the runtime paint a
+    magenta placeholder over the widget's rect."""
     if widget.kind != "image" or widget.image_file is None:
-        return ".image_pixels = NULL, .image_w = 0, .image_h = 0, .image_error = false"
+        return ".image_slot = 0, .image_w = 0, .image_h = 0, .image_error = false"
 
     target = widget.size or (
         (widget.geometry.w, widget.geometry.h) if widget.geometry is not None else (0, 0)
@@ -144,12 +149,13 @@ def _image_fields_c(widget: Widget, lines: list[str], id_var: str) -> str:
         pixels = load_rgb565(widget.image_file, tw, th)
     except ImageAssetError as exc:
         log.warning("image %r: %s — baking a magenta placeholder", widget.id or "<unnamed>", exc)
-        return ".image_pixels = NULL, .image_w = 0, .image_h = 0, .image_error = true"
+        return ".image_slot = 0, .image_w = 0, .image_h = 0, .image_error = true"
 
     name = f"{id_var}_px"
     body = ", ".join(f"0x{value:04x}" for value in pixels)
     lines.append(f"static const uint16_t {name}[] JANUS_PROGMEM = {{ {body} }};")
-    return f".image_pixels = {name}, .image_w = {tw}, .image_h = {th}, .image_error = false"
+    image_pxs.append(name)
+    return f".image_slot = {len(image_pxs)}, .image_w = {tw}, .image_h = {th}, .image_error = false"
 
 
 def _pack_rgb565(hex_color: str) -> int:
@@ -291,6 +297,7 @@ def _widget_init(
     lines: list[str],
     sv: str,
     str_counter: list[int],
+    image_pxs: list[str],
 ) -> str:
     if widget.bind is not None:
         struct_type = f"{widget.bind.message}_t"
@@ -327,7 +334,7 @@ def _widget_init(
     color_c = _color_c(widget.color, "JANUS_COLOR_DEFAULT_FG")
     bg_color_c = _color_c(widget.bg, "JANUS_COLOR_DEFAULT_BG")
     font_size_c = _FONT_SIZE_ENUM[widget.font_size]
-    image_fields_c = _image_fields_c(widget, lines, id_c)
+    image_fields_c = _image_fields_c(widget, lines, id_c, image_pxs)
 
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {id_c}, "
@@ -354,6 +361,7 @@ def _emit_widget(
     screen_index_by_name: dict[str, int] | None,
     focus_order_map: dict[int, int],
     str_counter: list[int],
+    image_pxs: list[str],
 ) -> str:
     """Emits (via `lines`) this widget's own children array, if it has
     any — children first, so a container's array is only ever referenced
@@ -365,7 +373,8 @@ def _emit_widget(
     child_count = 0
     if widget.children:
         child_inits = [
-            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map, str_counter)
+            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map,
+                         str_counter, image_pxs)
             for c in widget.children
         ]
         counter[0] += 1
@@ -380,7 +389,8 @@ def _emit_widget(
     summary_count = 0
     if widget.summary:
         summary_inits = [
-            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map, str_counter)
+            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map,
+                         str_counter, image_pxs)
             for c in widget.summary
         ]
         counter[0] += 1
@@ -393,7 +403,7 @@ def _emit_widget(
 
     return _widget_init(
         widget, children_array_name, child_count, summary_array_name, summary_count,
-        screen_index_by_name, focus_order_map, lines, sv, str_counter,
+        screen_index_by_name, focus_order_map, lines, sv, str_counter, image_pxs,
     )
 
 
@@ -405,15 +415,36 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
     lines: list[str] = []
     counter = [0]
     str_counter = [0]
+    image_pxs: list[str] = []
     focus_order_map = _assign_focus_order(screen.root)
 
     top_inits = [
-        _emit_widget(child, lines, sv, counter, screen_index_by_name, focus_order_map, str_counter)
+        _emit_widget(child, lines, sv, counter, screen_index_by_name, focus_order_map,
+                     str_counter, image_pxs)
         for child in screen.root.children
     ]
     widgets_array = f"{sv}_widgets"
     body = ",\n".join(f"    {init}" for init in top_inits)
     lines.append(f"static const janus_widget_desc_t {widgets_array}[] JANUS_PROGMEM = {{\n{body}\n}};")
+
+    # Per-screen image far-address table + resolver. A baked RGB565 array
+    # can link past AVR's 64 KiB near-flash window, and its far address
+    # isn't a link-time constant (janus_progmem.h), so the descriptors
+    # carry a 1-based `image_slot` and the runtime calls this resolver
+    # once per screen-enter to fill the RAM table it indexes.
+    if image_pxs:
+        resolver = f"{sv}_resolve_images"
+        far_table = f"{sv}_image_far"
+        fills = "\n".join(
+            f"    {far_table}[{i}] = JANUS_FAR_ADDR({name});" for i, name in enumerate(image_pxs)
+        )
+        lines.append(
+            f"static janus_farptr_t {far_table}[{len(image_pxs)}];\n"
+            f"static void {resolver}(void) {{\n{fills}\n}}"
+        )
+        images_c = f"    .resolve_images = {resolver},\n    .image_far = {far_table},\n"
+    else:
+        images_c = "    .resolve_images = NULL,\n    .image_far = NULL,\n"
 
     messages = screen_bound_messages(screen)
     if len(messages) > 1:
@@ -433,6 +464,7 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
         f"    .widget_count = {len(top_inits)},\n"
         f"    .bound_struct = {bound_struct_c},\n"
         f"    .bound_dirty = {bound_dirty_c},\n"
+        f"{images_c}"
         f"}};"
     )
     return "\n\n".join(lines) + "\n"

@@ -1,7 +1,9 @@
 # Task 2: far-progmem-images
 
-Status: **ready** — re-scoped 2026-09-06 after the `__memx` plan failed
-verification (see below).
+Status: **done (own contract)** — implemented on `2-far-progmem-images`,
+merged to `tasks`. Re-scoped 2026-09-06 after the `__memx` plan failed
+verification (see below). The epic goal (big icons live on the Mega2560)
+is **not** reached by this task alone — see "Discovered, out of scope".
 
 ## Why the plan changed
 
@@ -95,10 +97,32 @@ catalog row.
   what sits past 64 KiB and the descriptors / font / strings stay under
   it. If they don't, stop and flag — the contract assumed they would.
 
+## Discovered, out of scope (2026-09-06) — new tasks needed
+
+Bringing the row-height-icon PWM screen up under `avr-gcc
+-mmcu=atmega2560` past this task's fix:
+
+- **32 KiB single-object cap.** avr-gcc rejects one array ≥ 32768 bytes,
+  so a baked icon can't exceed ~128×128. *Handled here:* `image_asset`
+  warns, and the `examples/host_demo` icons were capped 142→120 px.
+- **Task 3 — SRAM.** `g_async_ops[256]` is 6912 bytes and gets linked
+  into **any** project that renders an image (chain
+  `draw_image → blit_image → async_enqueue_image → g_async_ops`), even in
+  `render_mode: blocking`. On the 8 KiB Mega2560 that overflows `.bss`.
+  Needs the whole async path (`g_async_ops`, `janus_render_*_async*`,
+  `janus_render_poll`, `async_enqueue_*`, the `g_async_enqueue` branches)
+  behind a compile guard keyed off `render_mode`.
+- **Task 4 — near-PROGMEM budget.** ~80 KiB of icon arrays displaces the
+  `janus_font_glyph_*` tables (read with *near* `pgm_read_byte`) — and
+  potentially widget-descriptor arrays / flash strings — past 0x10000,
+  where near reads return garbage. Needs those reads made far-safe, or a
+  link guarantee that image arrays are placed last.
+
 ## Dependencies
 
 None on task 1's code. Uses the row-height-icon
-`examples/host_demo/pwm.screen.yaml` already on `dev` (3d4f527).
+`examples/host_demo/pwm.screen.yaml` already on `dev` (3d4f527), icons
+capped to 120 px here.
 
 ## Pre-work
 
