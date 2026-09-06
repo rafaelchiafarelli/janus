@@ -71,17 +71,17 @@ int main(void) {
      * real firmware would populate this from a sensor read or a ZMQ
      * receive callback, this demo just fakes that step. */
     pwm_instance.ch0_enabled = 1;
-    pwm_instance.ch0_frequency = 20000;
+    pwm_instance.ch0_inverting = 0;
     pwm_instance.ch0_duty_percent = 42;
 
     render_and_summarize("initial render (pwm_ch0_box starts expanded)");
 
     printf("\n");
-    simulate_tap(10, 24);   /* inside pwm_ch0_box's header: {0,18,92,16} */
+    simulate_tap(10, 40);   /* inside pwm_ch0_box's 40px icon header: {0,24,292,40} */
     render_and_summarize("re-render after the tap (box now collapsed)");
 
     printf("\n");
-    simulate_tap(5, 40);    /* inside pwm_ch0_enabled toggle: {0,34,20,12} — bind-only, no touch action */
+    simulate_tap(5, 70);    /* inside pwm_ch0_enabled toggle: {0,64,28,18} — bind-only, no touch action */
 
     return 0;
 }
