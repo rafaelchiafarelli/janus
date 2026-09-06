@@ -1,74 +1,137 @@
 # Task 2: far-progmem-images
 
-Status: **ready** (planning complete, not yet implemented)
+Status: **done (own contract)** — implemented on `2-far-progmem-images`,
+merged to `tasks`. Re-scoped 2026-09-06 after the `__memx` plan failed
+verification (see below). The epic goal (big icons live on the Mega2560)
+is **not** reached by this task alone — see "Discovered, out of scope".
 
-## Contract
+## Why the plan changed
 
-Baked RGB565 image-pixel arrays are addressed through a 24-bit `__memx`
-pointer so they can be linked anywhere in the 256 KiB flash, past the
-64 KiB window that ordinary `PROGMEM` pointers and `memcpy_P` reach.
-Nothing else about image widgets changes; no consuming-project build
-config changes.
+The original contract said `image_pixels` becomes a `const __memx
+uint16_t *` and a plain array symbol promotes to it in a static
+initializer. Verified on `avr-gcc -mmcu=atmega2560`: **it does not** —
+`initializer element is not computable at load time`. `__memx` tagged
+pointers, like `pgm_get_far_address`, can only be formed at runtime.
+`__flash1..5` banked pointers *can* static-init but need a linker script
+to actually place the data in their bank (didn't, in a test — data stayed
+in low `.text`), so they're unsafe without build-config changes too.
+
+Conclusion: any working design resolves far addresses **at runtime**.
+
+## Contract (v2)
+
+Baked RGB565 arrays stay ordinary `JANUS_PROGMEM`. The widget descriptor
+holds a 1-based *slot index*, not a pointer. Each screen carries a tiny
+RAM table of `uint_farptr_t` and a generated function that fills it (via
+`pgm_get_far_address`, legal in a function body); the fixed runtime calls
+that function when the screen becomes current and blits with `memcpy_PF`.
 
 ### Delivered
 
-- `runtime/embedded_c/include/janus_progmem.h`: new `JANUS_MEMX` macro —
-  `__memx` under `__AVR__`, empty otherwise. Short comment: 24-bit
-  named-address-space qualifier, valid in static initializers (unlike
-  `pgm_get_far_address`), so a generated descriptor can point straight at
-  a baked array regardless of where it links.
-- `runtime/embedded_c/include/janus_runtime.h`:
-  `janus_widget_desc_t.image_pixels` becomes
-  `const JANUS_MEMX uint16_t *` (comment updated). `NULL` still assigns
-  and compares fine.
-- `runtime/embedded_c/src/janus_runtime.c`:
-  - `blit_image()` takes `const JANUS_MEMX uint16_t *src`.
-  - `janus_async_op_t.img` becomes `const JANUS_MEMX uint16_t *`.
-  - There is no `memcpy` from `__memx`, so the per-row `JANUS_MEMCPY_P`
-    into `g_tile_buffer` (sync path and async-drain path both) becomes a
-    per-pixel copy loop. Host: bit-identical output. AVR: compiler emits
-    the far (ELPM/RAMPZ) loads. **Known tradeoff:** per-pixel vs block
-    copy is slower on AVR; acceptable for v1, the tiled/async path keeps
-    any single poll bounded. Optimizing it (word reads / hand asm) is a
-    later task if the board render time needs it.
-- `janus/stage3b_embedded_c/emit_embedded_c.py`: `_image_fields_c` — the
-  emitted text is unchanged (`.image_pixels = <name>` and
-  `.image_pixels = NULL`); the `__memx` qualifier lives only on the
-  struct field, and a plain array symbol promotes to it. Confirm no
-  change is actually needed here; if a cast turns out necessary, it goes
-  here.
-- Docs: `architecture.md` Stage 4 image-blit paragraph + Stage 3b image
-  note; `Janus.md`'s RGB565/PROGMEM section and the `image` catalog row.
+**`runtime/embedded_c/include/janus_progmem.h`** — new, AVR vs host:
+- `janus_farptr_t` — `uint_farptr_t` (AVR) / `const uint16_t *` (host)
+- `JANUS_FAR_ADDR(sym)` — `pgm_get_far_address(sym)` / `(sym)`.
+  **Runtime-only** (function bodies), never a static initializer.
+- `JANUS_FAR_ADD(base, byte_off)` — far pointer + byte offset, both sides
+- `JANUS_MEMCPY_PF(dst, far, n)` — `memcpy_PF` / `memcpy`
 
-### Verification (run here, recorded in the commit message)
+**`runtime/embedded_c/include/janus_runtime.h`**:
+- `janus_widget_desc_t`: `const uint16_t *image_pixels` → `uint16_t
+  image_slot` (**1-based**; 0 = not an image / no `file:`, so a
+  zero-initialised descriptor is safe). `image_w/h/error` unchanged.
+- `janus_screen_desc_t`: `+ void (*resolve_images)(void)` and
+  `+ const janus_farptr_t *image_far` (both NULL when the screen bakes no
+  image).
+
+**`runtime/embedded_c/src/janus_runtime.c`**:
+- `static const janus_farptr_t *g_image_far` next to `g_current_screen`.
+- `janus_render_screen` and `janus_render_screen_if_dirty` (the two
+  screen-entry chokepoints — `switch_screen` / `async_start` both route
+  through the former): after `janus_screen_load`, `if (ls.resolve_images)
+  ls.resolve_images(); g_image_far = ls.image_far;`
+- `janus_async_op_t.img` and `async_enqueue_image`'s param → `janus_farptr_t`.
+- `blit_image`'s `src` param → `janus_farptr_t`; the per-row
+  `JANUS_MEMCPY_P` (sync path and async-drain path) → `JANUS_MEMCPY_PF` +
+  `JANUS_FAR_ADD` for the row offset.
+- `draw_image`: `if (lw.image_slot == 0 || g_image_far == NULL)` → stub
+  `fill_rect(color)`; else `blit_image(geo, g_image_far[lw.image_slot - 1],
+  w, h)`. `image_error` still checked first.
+- `janus_render_widget` docstring: gains a line that an image widget
+  refreshed on its own only blits if a full screen render for that screen
+  ran first (else it falls back to the colour stub — graceful, not a
+  crash).
+
+**`janus/stage3b_embedded_c/emit_embedded_c.py`**:
+- `_image_fields_c` takes an `image_pxs: list[str]` accumulator (threaded
+  from `emit_screen` through `_emit_widget` / `_widget_init`). A baked
+  array appends its `_px` name and the fragment becomes
+  `.image_slot = <len>` (1-based). No-file / non-image / error →
+  `.image_slot = 0`.
+- `emit_screen`: after the widgets array, if `image_pxs` is non-empty,
+  emit `static janus_farptr_t <sv>_img_far[N];` + `static void
+  <sv>_resolve_images(void){ <sv>_img_far[i] = JANUS_FAR_ADDR(<name_i>);
+  ... }`, and the screen-desc initializer gets `.resolve_images` /
+  `.image_far`; otherwise both `NULL`.
+
+**Tests**: `runtime/embedded_c/tests/test_runtime.c` (fixtures 9, 9c) and
+`test_render_async.c` (image fixture) — hoist the pixel arrays to file
+scope, add a one-line resolver + `img_far[1]` table, set `.image_slot =
+1` and the two screen-desc fields. `tests/test_emit_embedded_c*.py` —
+update expected substrings (`image_slot`, `resolve_images`, `image_far`).
+Add one Python test: a screen with 2 baked images emits a 2-entry
+`_img_far` table + a `_resolve_images` with 2 `JANUS_FAR_ADDR` lines, and
+the two image widgets carry `.image_slot = 1` / `.image_slot = 2`.
+
+**Docs**: `architecture.md` Stage 3b (image slot + per-screen resolver)
+and Stage 4 (far blit); `Janus.md` RGB565/PROGMEM section + `image`
+catalog row.
+
+### Verification (recorded in the commit)
 
 - `python -m unittest discover -s tests` green.
-- `runtime/embedded_c` `ctest` green on host (image async test in
-  particular).
-- `avr-gcc -mmcu=atmega2560 -Os -c` every `examples/host_demo` generated
-  `.gen.c` + every `runtime/embedded_c/src/*.c` against the vendored
+- `runtime/embedded_c` `ctest` green on host.
+- `avr-gcc -mmcu=atmega2560 -Os -c` on every `examples/host_demo`
+  generated `.gen.c` + `runtime/embedded_c/src/*.c` against the vendored
   headers: **no** `value of NNNNN too large for field of 2 bytes`, no
-  address-space warning. `avr-size -A` the objects to show the image
-  arrays are the only thing past 64 KiB and the descriptors/font/strings
-  stay under it (if they don't, that's a stop-and-flag — the contract
-  assumed they would).
+  address-space diagnostic. `avr-size -A` to confirm the `_px` arrays are
+  what sits past 64 KiB and the descriptors / font / strings stay under
+  it. If they don't, stop and flag — the contract assumed they would.
+
+## Discovered, out of scope (2026-09-06) — new tasks needed
+
+Bringing the row-height-icon PWM screen up under `avr-gcc
+-mmcu=atmega2560` past this task's fix:
+
+- **32 KiB single-object cap.** avr-gcc rejects one array ≥ 32768 bytes,
+  so a baked icon can't exceed ~128×128. *Handled here:* `image_asset`
+  warns, and the `examples/host_demo` icons were capped 142→120 px.
+- **Task 3 — SRAM.** `g_async_ops[256]` is 6912 bytes and gets linked
+  into **any** project that renders an image (chain
+  `draw_image → blit_image → async_enqueue_image → g_async_ops`), even in
+  `render_mode: blocking`. On the 8 KiB Mega2560 that overflows `.bss`.
+  Needs the whole async path (`g_async_ops`, `janus_render_*_async*`,
+  `janus_render_poll`, `async_enqueue_*`, the `g_async_enqueue` branches)
+  behind a compile guard keyed off `render_mode`.
+- **Task 4 — near-PROGMEM budget.** ~80 KiB of icon arrays displaces the
+  `janus_font_glyph_*` tables (read with *near* `pgm_read_byte`) — and
+  potentially widget-descriptor arrays / flash strings — past 0x10000,
+  where near reads return garbage. Needs those reads made far-safe, or a
+  link guarantee that image arrays are placed last.
 
 ## Dependencies
 
-None on task 1's mechanism. (Epic acceptance — two same-slot icons —
-needs both tasks, but this one builds and verifies on its own using the
-existing single-icon `examples/host_demo/pwm.screen.yaml` already on
-`dev`.)
+None on task 1's code. Uses the row-height-icon
+`examples/host_demo/pwm.screen.yaml` already on `dev` (3d4f527), icons
+capped to 120 px here.
 
 ## Pre-work
 
-None. `examples/host_demo/pwm.screen.yaml` already carries row-height
-icons (committed on `dev`, 3d4f527).
+None.
 
 ## DoD
 
 Contract delivered · Python suite green · `ctest` green · the
-`avr-gcc -mmcu=atmega2560` compile above clean · docs updated · this file
-marked done · commit + merge `2-far-progmem-images → tasks`, then
-`tasks → channel_icons → epics → embedded_rendering → features → dev`
-once the epic acceptance gate passes.
+`avr-gcc -mmcu=atmega2560` compile clean · docs updated · this file
+marked done · commit + merge `2-far-progmem-images → tasks`, then walk
+`tasks → channel_icons` (epic acceptance gate) `→ epics →
+embedded_rendering → features → dev`.

@@ -126,17 +126,20 @@ typedef struct janus_widget_desc {
                                                           * every non-box widget and any box with
                                                           * no `summary:` authored. */
     uint16_t summary_child_count;
-    /* JANUS_WIDGET_IMAGE only (added 2026-09-05). `image_pixels` points at
-     * a JANUS_PROGMEM RGB565 buffer of exactly image_w * image_h pixels,
-     * row-major, row 0 first — the widget's `file:` image, decoded and
-     * rescaled to its geometry at generation time (emit_embedded_c.py /
-     * image_asset.py), so the device never decodes or resamples anything.
-     * NULL for a non-image widget, and for an `image` with no `file:`
-     * authored (that still renders the pre-image v1 stub — a `color`
-     * fill). `image_error` is baked true instead when a `file:` *was*
-     * authored but couldn't be found or decoded: draw_image then paints a
-     * magenta placeholder so the missing asset is obvious on-screen. */
-    const uint16_t *image_pixels;
+    /* JANUS_WIDGET_IMAGE only. `image_slot` is a **1-based** index into
+     * the current screen's `image_far` table (janus_screen_desc_t), which
+     * the runtime resolves to a real flash address once per screen-enter
+     * — the baked RGB565 arrays can link past AVR's 64 KiB near-flash
+     * window, so a plain pointer here wouldn't reach them (see
+     * janus_progmem.h). 0 means "not an image, or an `image` with no
+     * `file:`" — the latter still renders the pre-image v1 stub, a
+     * `color` fill — so a zero-initialised descriptor is safe.
+     * `image_error` (checked first by draw_image) is baked true instead
+     * when a `file:` was authored but couldn't be found/decoded: a
+     * magenta placeholder is painted so the gap is obvious on-screen.
+     * `image_w`/`image_h` are the baked pixel dims (== the widget
+     * geometry, normally). */
+    uint16_t image_slot;
     uint16_t image_w, image_h;
     bool image_error;
 } janus_widget_desc_t;
@@ -150,6 +153,14 @@ typedef struct {
     void *bound_dirty;          /* e.g. &device_dirty (added 2026-09-05); mutable — see
                                   * janus_bind_t.dirty_offset and janus_render_*_if_dirty below.
                                   * NULL wherever bound_struct is NULL. */
+    /* Image far-address plumbing (added 2026-09-06). `resolve_images`
+     * fills `image_far` with `pgm_get_far_address` of each baked RGB565
+     * array (a far address can't be a static initializer — see
+     * janus_progmem.h); the runtime calls it on every screen-enter and a
+     * widget's `image_slot` then indexes `image_far` (1-based). Both NULL
+     * for a screen that bakes no images. */
+    void (*resolve_images)(void);
+    const janus_farptr_t *image_far;
 } janus_screen_desc_t;
 
 typedef struct {
@@ -220,7 +231,14 @@ void janus_toggle_box(const janus_widget_desc_t *box);               /* re-rende
  * full janus_render_screen sweep repainting the whole screen along with
  * it. `bound_struct` is whatever that widget's screen uses
  * (janus_screen_desc_t.bound_struct) — pass NULL if it has no live
- * bindings anywhere in its subtree. */
+ * bindings anywhere in its subtree.
+ *
+ * An `image` widget refreshed this way only blits if a full
+ * janus_render_screen / janus_switch_screen for its screen has run at
+ * least once (that's what resolves the screen's image far-addresses);
+ * otherwise it falls back to the `color` stub fill — graceful, never a
+ * crash. In practice a screen is always rendered whole on entry before
+ * anything refreshes a single widget on it, so this is a non-issue. */
 void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_struct);
 
 /* Dirty-aware variants (added 2026-09-05) — same traversal as

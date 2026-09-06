@@ -282,15 +282,36 @@ format check, so a bad path never aborts a parse. Stage 3b
 opens it, composites any alpha over opaque black (alpha is not otherwise
 supported), rescales to the widget's authored `size` with LANCZOS, packs
 to RGB565, and bakes a `static const uint16_t <id>_px[] JANUS_PROGMEM`
-array into the screen source that the descriptor's `.image_pixels` points
-at (`.image_w`/`.image_h` alongside). A missing / unreadable / undecodable
+array into the screen source (`.image_w`/`.image_h` on the descriptor
+alongside). A missing / unreadable / undecodable
 file is logged at WARNING and baked as `.image_error = true` instead — the
 runtime then paints the widget's rect magenta (`JANUS_COLOR_IMAGE_MISSING`,
 `0xf81f`) so the gap is visible on-device. An `image` with no `file:`
 keeps the pre-2026-09-05 stub (a solid `color` fill). Blitting (sync and
 non-blocking `JANUS_ASYNC_OP_IMAGE`) is tiled through the shared
-`g_tile_buffer`, one `JANUS_MEMCPY_P` per source row — no new runtime
+`g_tile_buffer`, one `JANUS_MEMCPY_PF` per source row — no new runtime
 buffer, no on-device decode or resample.
+
+**Far-flash addressing (added 2026-09-06).** Baked arrays can link past
+the 64 KiB an ordinary AVR flash pointer / `memcpy_P` reaches, and a far
+address (`pgm_get_far_address`) is not a link-time constant — so the
+descriptor does **not** hold a pointer. It holds `uint16_t image_slot`
+(1-based; 0 = no image). Per screen, Stage 3b emits `static janus_farptr_t
+<sv>_image_far[N];` plus `static void <sv>_resolve_images(void)` filling
+it with `JANUS_FAR_ADDR(<name_i>)`, and points the `janus_screen_desc_t`'s
+`.resolve_images` / `.image_far` at them (both `NULL` when the screen
+bakes no image). The fixed runtime calls `resolve_images()` on every
+screen-enter (`enter_screen`), stashes the table in `g_image_far`, and
+`draw_image` indexes it by `image_slot`; `blit_image` and the async drain
+copy each row with `JANUS_MEMCPY_PF`. `janus_progmem.h` degrades
+`janus_farptr_t` / `JANUS_FAR_ADDR` / `JANUS_MEMCPY_PF` to plain pointers
++ `memcpy` off-AVR. **Single-object cap:** avr-gcc rejects one object
+≥ 32768 bytes, so a baked array can't exceed 16383 px (~128×128);
+`image_asset` warns past that. **Known-unmet on real AVR (2026-09-06):**
+~80 KiB of icon arrays still displaces the font glyph tables (read with
+*near* `pgm_read_byte`) and can push `g_async_ops[256]` (6912 B, linked
+whenever `blit_image` is) past the 8 KiB SRAM — both tracked as follow-up
+tasks in `initiatives/embedded_rendering/epics/channel_icons/`.
 
 **`box` header:** `box` has no dedicated title field — it reuses the
 generic `Widget.text` field already shared by `label`/`header`/`button`.
