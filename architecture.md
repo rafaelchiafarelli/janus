@@ -307,11 +307,16 @@ copy each row with `JANUS_MEMCPY_PF`. `janus_progmem.h` degrades
 `janus_farptr_t` / `JANUS_FAR_ADDR` / `JANUS_MEMCPY_PF` to plain pointers
 + `memcpy` off-AVR. **Single-object cap:** avr-gcc rejects one object
 ≥ 32768 bytes, so a baked array can't exceed 16383 px (~128×128);
-`image_asset` warns past that. **Known-unmet on real AVR (2026-09-06):**
-~80 KiB of icon arrays still displaces the font glyph tables (read with
-*near* `pgm_read_byte`) and can push `g_async_ops[256]` (6912 B, linked
-whenever `blit_image` is) past the 8 KiB SRAM — both tracked as follow-up
-tasks in `initiatives/embedded_rendering/epics/channel_icons/`.
+`image_asset` warns past that. **SRAM (channel_icons task 3, done
+2026-09-06):** `g_async_ops[256]` (6912 B) used to link into *any*
+image-using project — even `render_mode: blocking` — via
+`blit_image → async_enqueue_image`, overflowing an ATmega2560's 8 KiB
+SRAM. The whole polled/async render path is now behind
+`JANUS_RENDER_NONBLOCKING` (see "Non-blocking rendering" below), so a
+`blocking` build links none of it. **Known-unmet on real AVR
+(2026-09-06):** ~80 KiB of icon arrays still displaces the font glyph
+tables (read with *near* `pgm_read_byte`) past 0x10000 — channel_icons
+task 4.
 
 **`box` header:** `box` has no dedicated title field — it reuses the
 generic `Widget.text` field already shared by `label`/`header`/`button`.
@@ -833,6 +838,25 @@ not live" property any queued frame has. `janus_toggle_box`/
 small, tile-scoped redraws, not full-screen, so blocking briefly for one
 of them is an accepted trade, not an oversight.
 
+**Compile-gated (channel_icons task 3, 2026-09-06).** All of the above —
+`janus_async_op_t`, `g_async_ops`/`g_async_enqueue`, `async_enqueue_*`,
+`janus_render_screen_async_start`/`janus_render_poll`/
+`janus_switch_screen_async_start`, and the `g_async_enqueue` branch
+inside `fill_rect`/`draw_glyph`/`blit_image` — is behind
+`#if defined(JANUS_RENDER_NONBLOCKING)`. Scaffold mode writes a one-line
+`janus_render_config.gen.h` into the vendored runtime's own `include/`
+(`#define JANUS_RENDER_NONBLOCKING 1` iff `render_mode: non_blocking`,
+the macro left undefined otherwise); `janus_runtime.h` pulls it in with
+`__has_include`, so a build with no generated header — the in-repo
+runtime's own ctest/AVR builds — is `blocking`. A `blocking` project
+therefore links *none* of this path, and in particular allocates 0 bytes
+for `g_async_ops` (6912 B) — the fix for the ATmega2560 SRAM overflow.
+The runtime's own `ctest` build forces the macro on
+(`target_compile_definitions(... PUBLIC JANUS_RENDER_NONBLOCKING)`) so
+`test_render_async.c` still exercises the path; `scripts/avr_gate.sh`
+covers the blocking side (links `examples/host_demo` for
+`-mmcu=atmega2560`, asserts `.bss` fits and no async symbol is present).
+
 **Owner:** fixed library. **Adding a widget kind = adding one
 `draw_<kind>()` function here + one enum value + one entry in the Python
 kind catalog — nothing else in this document changes.**
@@ -1069,6 +1093,7 @@ This is the "how does it all actually get compiled" question.
 | `runtime/embedded_c/src/janus_runtime.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` / `janus_font.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `runtime/embedded_c/` itself, under a project — vendored via `janus-generate --scaffold-src DIR` into `target_dir/runtime` | Janus (fixed library, copied) | yes, every build (content-diffed — see Stage 4's vendoring note; unchanged files never touch mtime) |
+| `target_dir/runtime/include/janus_render_config.gen.h` | Janus | yes, scaffold mode only — the one generated file written *inside* the vendored library; `#define JANUS_RENDER_NONBLOCKING 1` iff `render_mode: non_blocking`, so `janus_runtime.c` compiles the polled/async path in only then (see Stage 4 "Compile-gated") |
 | `build/generated/src/{screen}_screen.gen.c` | Janus | yes, every build |
 | `build/generated/include/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
 | `build/generated/src/janus_app.gen.c` | Janus | yes, every build |
@@ -1123,6 +1148,11 @@ once per iteration *alongside* the input poll (not instead of it) — one
 loop iteration does at most one render op and checks for at most one input
 event, so neither blocks the other. Step 5's `JANUS_INPUT_NAVIGATE` case
 calls `janus_switch_screen_async_start` instead of `janus_switch_screen`.
+This mode is also what makes scaffold mode write
+`janus_render_config.gen.h` with `#define JANUS_RENDER_NONBLOCKING` (Stage
+4 "Compile-gated") — without it the fixed runtime wouldn't even define
+`janus_render_poll`, so `blocking` stays the only mode that links with no
+generated render-config header at all.
 `JANUS_INPUT_TOGGLE_BOX` and focus-move/-activate stay exactly as above —
 synchronous, tile-scoped, unaffected by render mode.
 

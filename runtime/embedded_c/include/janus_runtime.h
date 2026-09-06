@@ -14,6 +14,29 @@
 #include "janus_font.h"
 #include "janus_progmem.h"
 
+/* Per-project render mode (app.yaml's `display.render_mode`). Stage 8
+ * scaffold mode writes a one-line `janus_render_config.gen.h` into the
+ * vendored runtime's own include/ (see architecture.md Stage 8): it
+ * `#define`s JANUS_RENDER_NONBLOCKING for a `non_blocking` project and
+ * leaves it undefined for a `blocking` one. A build with no generated
+ * header at all — the in-repo runtime's own ctest / AVR builds, or any
+ * consumer that never ran scaffold mode — is treated as `blocking`.
+ *
+ * When the macro is absent, the entire polled/async render path (its
+ * declarations just below, and its whole implementation in
+ * janus_runtime.c) compiles out, so a `blocking` project links none of
+ * it — in particular not the 6912-byte `g_async_ops` buffer, which
+ * otherwise overflows the 8 KiB SRAM of an ATmega2560 as soon as any
+ * `image` widget pulls `blit_image` in (channel_icons task 3). Define it
+ * on the command line (`-DJANUS_RENDER_NONBLOCKING`) to force the async
+ * path in without the generated header — that's what the runtime's own
+ * async test target does. */
+#if defined(__has_include)
+#  if __has_include("janus_render_config.gen.h")
+#    include "janus_render_config.gen.h"
+#  endif
+#endif
+
 typedef enum {
     JANUS_WIDGET_LABEL, JANUS_WIDGET_HEADER, JANUS_WIDGET_BUTTON,
     JANUS_WIDGET_IMAGE, JANUS_WIDGET_PROGRESS, JANUS_WIDGET_GAUGE,
@@ -267,10 +290,16 @@ void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
  * (e.g. once per event-loop iteration) until it returns false, meaning
  * the screen is fully drawn. `janus_switch_screen_async_start` is
  * `janus_switch_screen`'s non-blocking counterpart, for the same
- * `navigate` handling under `render_mode: non_blocking`. */
+ * `navigate` handling under `render_mode: non_blocking`.
+ *
+ * Declared (and defined) only when JANUS_RENDER_NONBLOCKING is set — see
+ * the note at the top of this header. A `blocking` project neither calls
+ * nor links these. */
+#if defined(JANUS_RENDER_NONBLOCKING)
 void janus_render_screen_async_start(const janus_screen_desc_t *screen);
 bool janus_render_poll(void);
 void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index);
+#endif
 
 /* box's current expand/collapse bit, from the runtime-owned state table
  * (the descriptor itself is static const — see janus_runtime.c). Exposed
