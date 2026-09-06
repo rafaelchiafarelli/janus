@@ -1,6 +1,7 @@
 # Task 1: hidden-widget-flag
 
-Status: **done** (implemented on `1-hidden-widget-flag`, merged to `tasks`)
+Status: ✅ **DONE** — implemented, full suite green, merged
+`1-hidden-widget-flag → tasks` (commit `a889797`, merge `678219d`).
 
 ## Contract
 
