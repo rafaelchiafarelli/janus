@@ -1,10 +1,5 @@
 # Task 4: near-progmem-budget
 
-Status: ✅ **DONE** (2026-09-06) — "link image arrays last" implemented
-per the contract below. Python 221 · `ctest` 7/7 · `scripts/avr_gate.sh`
-PASS (every near-read symbol `< 0x10000`; fonts back at `0x530c`, `_px`
-arrays at `0x6d16+`). Merged `4-near-progmem-budget → tasks`.
-
 ## Problem
 
 Task 2 made *image pixel* reads far-safe, but nothing else. ~80 KiB of

@@ -1,8 +1,5 @@
 # Task 1: hidden-widget-flag
 
-Status: ✅ **DONE** — implemented, full suite green, merged
-`1-hidden-widget-flag → tasks` (commit `a889797`, merge `678219d`).
-
 ## Contract
 
 Add a static `hidden` boolean to the widget DSL. A hidden widget (and its

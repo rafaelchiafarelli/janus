@@ -1,11 +1,5 @@
 # Task 3: async-path-behind-render-mode
 
-Status: ✅ **DONE** — contract delivered, Python + `ctest` suites green,
-`scripts/avr_gate.sh` passes (`examples/host_demo` links for
-`-mmcu=atmega2560` in `blocking` mode, `.bss` 1576 B / 19.2%, no async
-symbol linked). Mechanism decision: **A** (see below). Merged
-`3-async-path-behind-render-mode → tasks`.
-
 ## Problem
 
 `g_async_ops[JANUS_MAX_ASYNC_OPS]` is `256 * sizeof(janus_async_op_t)` ≈

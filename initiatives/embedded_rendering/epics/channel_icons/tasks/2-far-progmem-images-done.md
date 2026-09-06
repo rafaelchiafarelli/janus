@@ -1,12 +1,5 @@
 # Task 2: far-progmem-images
 
-Status: ✅ **DONE** — its own contract (image pixel data reachable past
-64 KiB) is delivered, full suite green, `avr-gcc` compile/link verified;
-merged `2-far-progmem-images → tasks` (commit `0f2d4dc`, merge `d2f1d93`).
-Re-scoped 2026-09-06 after the `__memx` plan failed verification (see
-below). The **epic** goal (big icons run on the Mega2560) still needs
-tasks 3 and 4 — see "Discovered, out of scope".
-
 ## Why the plan changed
 
 The original contract said `image_pixels` becomes a `const __memx
