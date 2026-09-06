@@ -70,6 +70,27 @@ class TestGenerate(unittest.TestCase):
         self.assertTrue((runtime_dir / "host_mock").exists())
         self.assertFalse((runtime_dir / "build").exists())
         self.assertIn(runtime_dir / "CMakeLists.txt", written)
+        # the image-placement linker fragment ships with the library
+        source_ld = repo_root / "runtime" / "embedded_c" / "janus_img.ld"
+        self.assertEqual((runtime_dir / "janus_img.ld").read_text(), source_ld.read_text())
+        self.assertIn(runtime_dir / "janus_img.ld", written)
+
+    def test_scaffold_src_writes_render_config_into_the_vendored_runtime(self) -> None:
+        src_dir = Path(self._tmp.name) / "src"
+        cfg = self.target_dir / "runtime" / "include" / "janus_render_config.gen.h"
+
+        # default app.yaml has no display -> blocking -> macro absent
+        written = generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
+        self.assertIn(cfg, written)
+        self.assertNotIn("JANUS_RENDER_NONBLOCKING", cfg.read_text())
+
+        # non_blocking display -> macro defined
+        generate(FIXTURES / "app_with_display_non_blocking.yaml", self.target_dir, scaffold_src=src_dir)
+        self.assertIn("#define JANUS_RENDER_NONBLOCKING 1", cfg.read_text())
+
+    def test_render_config_not_written_without_scaffold_src(self) -> None:
+        generate(FIXTURES / "app_with_display_non_blocking.yaml", self.target_dir)
+        self.assertFalse((self.target_dir / "runtime").exists())
 
     def test_scaffold_src_vendoring_second_run_with_no_changes_writes_nothing(self) -> None:
         src_dir = Path(self._tmp.name) / "src"

@@ -5,9 +5,12 @@ from pathlib import Path
 from PIL import Image
 
 from janus.stage1_parse.dsl_yaml import parse_screen
-from janus.stage3b_embedded_c.emit_embedded_c import emit_screen
+from janus.stage3b_embedded_c.emit_embedded_c import (
+    emit_screen,
+    estimate_baked_image_bytes,
+)
 from janus.stage2_layout.layout import layout_screen
-from janus.ir import Binding, Screen, Widget
+from janus.ir import App, Binding, Screen, Widget
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -374,32 +377,44 @@ class TestEmitImageWidget(unittest.TestCase):
         use_idx = out.index(f".id = {var}")
         return out[use_idx: use_idx + 900]
 
-    def test_decoded_image_bakes_a_pixel_array_referenced_by_the_widget(self) -> None:
+    def test_decoded_image_bakes_a_pixel_array_reached_via_the_screen_far_table(self) -> None:
         path = self.dir / "logo.png"
         Image.new("RGB", (4, 4), (255, 0, 0)).save(path)
         out = self._emit(str(path))
 
         id_var = _find_flash_string_var(out, "logo")
         arr = f"{id_var}_px"
-        self.assertIn(f"static const uint16_t {arr}[] JANUS_PROGMEM = {{", out)
+        # JANUS_IMG_SECTION, not JANUS_PROGMEM — on AVR the baked arrays
+        # link into their own `.janus_img` section past .text so they
+        # don't displace the near-read tables (channel_icons task 4).
+        self.assertIn(f"static const uint16_t {arr}[] JANUS_IMG_SECTION = {{", out)
         # 16 red pixels
         self.assertIn("0xf800, 0xf800", out)
         seg = self._segment(out, "logo")
-        self.assertIn(f".image_pixels = {arr},", seg)
+        # 1-based slot into the screen's far table — no pointer in the descriptor
+        self.assertIn(".image_slot = 1,", seg)
         self.assertIn(".image_w = 4, .image_h = 4,", seg)
         self.assertIn(".image_error = false", seg)
-        # array declared before the initializer that points at it
+        # per-screen resolver fills a 1-entry RAM table with the array's far address
+        self.assertIn("static janus_farptr_t img_image_far[1];", out)
+        self.assertIn(f"img_image_far[0] = JANUS_FAR_ADDR({arr});", out)
+        self.assertIn(".resolve_images = img_resolve_images,", out)
+        self.assertIn(".image_far = img_image_far,", out)
+        # array declared before the resolver that takes its address
         self.assertLess(
             out.index(f"static const uint16_t {arr}[]"),
-            out.index(f".image_pixels = {arr},"),
+            out.index(f"img_image_far[0] = JANUS_FAR_ADDR({arr});"),
         )
 
     def test_missing_file_bakes_image_error_not_a_hard_failure(self) -> None:
         out = self._emit(str(self.dir / "does_not_exist.png"))
         seg = self._segment(out, "logo")
-        self.assertIn(".image_pixels = NULL,", seg)
+        self.assertIn(".image_slot = 0,", seg)
         self.assertIn(".image_error = true", seg)
         self.assertNotIn("static const uint16_t img_str1_px[]", out)
+        # no images baked -> no resolver, no table
+        self.assertIn(".resolve_images = NULL,", out)
+        self.assertNotIn("janus_farptr_t img_image_far", out)
 
     def test_undecodable_file_bakes_image_error(self) -> None:
         junk = self.dir / "junk.png"
@@ -415,7 +430,44 @@ class TestEmitImageWidget(unittest.TestCase):
             ]),
         )
         seg = self._segment(emit_screen(layout_screen(screen)), "logo")
-        self.assertIn(".image_pixels = NULL, .image_w = 0, .image_h = 0, .image_error = false", seg)
+        self.assertIn(".image_slot = 0, .image_w = 0, .image_h = 0, .image_error = false", seg)
+
+    def test_two_images_get_slots_1_and_2_and_a_two_entry_far_table(self) -> None:
+        a = self.dir / "a.png"
+        b = self.dir / "b.png"
+        Image.new("RGB", (4, 4), (255, 0, 0)).save(a)
+        Image.new("RGB", (4, 4), (0, 255, 0)).save(b)
+        screen = Screen(
+            name="Two",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="image", id="ione", size=(4, 4), image_file=str(a)),
+                Widget(kind="image", id="itwo", size=(4, 4), image_file=str(b)),
+            ]),
+        )
+        out = emit_screen(layout_screen(screen))
+        self.assertIn(".image_slot = 1,", self._segment(out, "ione"))
+        self.assertIn(".image_slot = 2,", self._segment(out, "itwo"))
+        self.assertIn("static janus_farptr_t two_image_far[2];", out)
+        self.assertEqual(out.count("JANUS_FAR_ADDR("), 2)
+        self.assertIn("two_image_far[0] = JANUS_FAR_ADDR(", out)
+        self.assertIn("two_image_far[1] = JANUS_FAR_ADDR(", out)
+
+
+class TestEstimateBakedImageBytes(unittest.TestCase):
+    def _app(self, *widgets: Widget) -> App:
+        return App(screens=[Screen(name="S", root=Widget(kind="column", id="r", children=list(widgets)))])
+
+    def test_sums_w_times_h_times_two_over_image_widgets_with_a_file(self) -> None:
+        app = self._app(
+            Widget(kind="image", id="a", size=(10, 20), image_file="a.png"),
+            Widget(kind="image", id="b", size=(4, 4), image_file="b.png"),
+            Widget(kind="image", id="c", size=(99, 99)),          # no file: -> stub fill, not baked
+            Widget(kind="label", id="d", text="hi"),
+        )
+        self.assertEqual(estimate_baked_image_bytes(app), (10 * 20 + 4 * 4) * 2)
+
+    def test_zero_when_no_baked_images(self) -> None:
+        self.assertEqual(estimate_baked_image_bytes(self._app(Widget(kind="label", id="l", text="x"))), 0)
 
 
 if __name__ == "__main__":

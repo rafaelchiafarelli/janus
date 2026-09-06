@@ -100,6 +100,20 @@ required-vs-defaulted split actually gets enforced (it needs to know each
 widget's `kind`, and defaulting is a layout-policy decision, not a parse
 one).
 
+**`hidden: true` prune (added 2026-09-06)** — a widget authored
+`hidden: true` (must be a literal bool, else a parse error) is dropped by
+the parser *with its entire subtree*, right after it's parsed and
+validated, from both `children` and `summary` at every level
+(`_drop_hidden`). This is the whole feature: nothing past Stage 1 ever
+sees a hidden node, so it gets no geometry, no render, no focus/hit-test
+entry, no `janus_generated.harpia` field, and (for an `image`) no baked
+RGB565 array — all for free, no downstream code. Its purpose is letting
+two widgets be authored in one slot (an enabled + a disabled icon) with
+one kept; the survivor lays out identically to the hidden node being
+absent. Static only in v1 — a field-bound `hidden` would instead need to
+survive to Stage 2/3b with a real rect and a runtime check. A screen
+dict with top-level `hidden` is a parse error (`screen_from_dict`).
+
 **`display:` (optional, added 2026-08-20; `bus`/`controller` added same
 day)** — `app.yaml`'s `size: {w, h}` + `color: mono|gray|rgb565` (default
 `mono`) + optional `bus: spi|i2c|parallel` + optional `controller:` one of
@@ -161,6 +175,8 @@ class Widget:
     collapsible: bool = False                  # box only
     default_expanded: bool = True              # box only
     layout: Literal["column", "row"] | None = None   # containers only
+    hidden: bool = False        # `hidden: true` -> pruned in Stage 1, subtree and all;
+                                # always False on any Widget that leaves the parser
     children: list["Widget"] = field(default_factory=list)
     # --- filled in by the layout pass, empty after parsing ---
     geometry: Rect | None = None
@@ -265,16 +281,65 @@ format check, so a bad path never aborts a parse. Stage 3b
 (`image_asset.load_rgb565`, called from `emit_embedded_c._image_fields_c`)
 opens it, composites any alpha over opaque black (alpha is not otherwise
 supported), rescales to the widget's authored `size` with LANCZOS, packs
-to RGB565, and bakes a `static const uint16_t <id>_px[] JANUS_PROGMEM`
-array into the screen source that the descriptor's `.image_pixels` points
-at (`.image_w`/`.image_h` alongside). A missing / unreadable / undecodable
+to RGB565, and bakes a `static const uint16_t <id>_px[] JANUS_IMG_SECTION`
+array into the screen source (`.image_w`/`.image_h` on the descriptor
+alongside) — `JANUS_IMG_SECTION`, not `JANUS_PROGMEM`, so on AVR the
+arrays land in their own `.janus_img` flash section past `.text` (see
+"Near-flash budget" below). A missing / unreadable / undecodable
 file is logged at WARNING and baked as `.image_error = true` instead — the
 runtime then paints the widget's rect magenta (`JANUS_COLOR_IMAGE_MISSING`,
 `0xf81f`) so the gap is visible on-device. An `image` with no `file:`
 keeps the pre-2026-09-05 stub (a solid `color` fill). Blitting (sync and
 non-blocking `JANUS_ASYNC_OP_IMAGE`) is tiled through the shared
-`g_tile_buffer`, one `JANUS_MEMCPY_P` per source row — no new runtime
+`g_tile_buffer`, one `JANUS_MEMCPY_PF` per source row — no new runtime
 buffer, no on-device decode or resample.
+
+**Far-flash addressing (added 2026-09-06).** Baked arrays can link past
+the 64 KiB an ordinary AVR flash pointer / `memcpy_P` reaches, and a far
+address (`pgm_get_far_address`) is not a link-time constant — so the
+descriptor does **not** hold a pointer. It holds `uint16_t image_slot`
+(1-based; 0 = no image). Per screen, Stage 3b emits `static janus_farptr_t
+<sv>_image_far[N];` plus `static void <sv>_resolve_images(void)` filling
+it with `JANUS_FAR_ADDR(<name_i>)`, and points the `janus_screen_desc_t`'s
+`.resolve_images` / `.image_far` at them (both `NULL` when the screen
+bakes no image). The fixed runtime calls `resolve_images()` on every
+screen-enter (`enter_screen`), stashes the table in `g_image_far`, and
+`draw_image` indexes it by `image_slot`; `blit_image` and the async drain
+copy each row with `JANUS_MEMCPY_PF`. `janus_progmem.h` degrades
+`janus_farptr_t` / `JANUS_FAR_ADDR` / `JANUS_MEMCPY_PF` to plain pointers
++ `memcpy` off-AVR. **Single-object cap:** avr-gcc rejects one object
+≥ 32768 bytes, so a baked array can't exceed 16383 px (~128×128);
+`image_asset` warns past that. **SRAM (channel_icons task 3, done
+2026-09-06):** `g_async_ops[256]` (6912 B) used to link into *any*
+image-using project — even `render_mode: blocking` — via
+`blit_image → async_enqueue_image`, overflowing an ATmega2560's 8 KiB
+SRAM. The whole polled/async render path is now behind
+`JANUS_RENDER_NONBLOCKING` (see "Non-blocking rendering" below), so a
+`blocking` build links none of it.
+
+**Near-flash budget (channel_icons task 4, done 2026-09-06).** Baked
+image arrays are large (tens of KiB) and, left in `.progmem.data` with
+everything else, pushed the font glyph tables, widget descriptors and
+flash strings — all read with *near* `pgm_read_byte` / `memcpy_P` /
+`pgm_read_ptr` — past AVR's 64 KiB near-flash window, where those reads
+return garbage. Fix: the `<id>_px` arrays are emitted `JANUS_IMG_SECTION`
+(`janus_progmem.h`) instead of `JANUS_PROGMEM` — `__attribute__((used,
+section(".janus_img")))` on AVR, nothing off-AVR. avr-gcc silently drops
+a `section` attribute when `__progmem__` is also present, so these are
+deliberately *not* `PROGMEM`; they stay flash-only anyway (a `const` in a
+read-only section the linker maps into the text region, no RAM shadow)
+and every read still goes through `JANUS_FAR_ADDR` + `JANUS_MEMCPY_PF`
+(the descriptor carries a slot index, never a pointer, so nothing
+near-derefs one). `runtime/embedded_c/janus_img.ld` — a one-line
+`SECTIONS { .janus_img : { *(.janus_img*) } } INSERT AFTER .text;`
+fragment — pins the section after `.text`; the vendored `CMakeLists.txt`
+passes it via `target_link_options(janus_runtime INTERFACE -Wl,-T,…)` for
+an AVR CMake consumer with no edit on their side, and a bare `avr-gcc`
+link gets the same placement from the linker's orphan-section rule (a
+read-only alloc section trails `.text`). `emit_embedded_c.warn_if_image_flash_heavy`
+logs a non-fatal line if total baked image bytes exceed 128 KiB.
+`scripts/avr_gate.sh` asserts (via `avr-nm`) that every near-read symbol
+links `< 0x10000`, `_px` arrays excepted.
 
 **`box` header:** `box` has no dedicated title field — it reuses the
 generic `Widget.text` field already shared by `label`/`header`/`button`.
@@ -796,6 +861,25 @@ not live" property any queued frame has. `janus_toggle_box`/
 small, tile-scoped redraws, not full-screen, so blocking briefly for one
 of them is an accepted trade, not an oversight.
 
+**Compile-gated (channel_icons task 3, 2026-09-06).** All of the above —
+`janus_async_op_t`, `g_async_ops`/`g_async_enqueue`, `async_enqueue_*`,
+`janus_render_screen_async_start`/`janus_render_poll`/
+`janus_switch_screen_async_start`, and the `g_async_enqueue` branch
+inside `fill_rect`/`draw_glyph`/`blit_image` — is behind
+`#if defined(JANUS_RENDER_NONBLOCKING)`. Scaffold mode writes a one-line
+`janus_render_config.gen.h` into the vendored runtime's own `include/`
+(`#define JANUS_RENDER_NONBLOCKING 1` iff `render_mode: non_blocking`,
+the macro left undefined otherwise); `janus_runtime.h` pulls it in with
+`__has_include`, so a build with no generated header — the in-repo
+runtime's own ctest/AVR builds — is `blocking`. A `blocking` project
+therefore links *none* of this path, and in particular allocates 0 bytes
+for `g_async_ops` (6912 B) — the fix for the ATmega2560 SRAM overflow.
+The runtime's own `ctest` build forces the macro on
+(`target_compile_definitions(... PUBLIC JANUS_RENDER_NONBLOCKING)`) so
+`test_render_async.c` still exercises the path; `scripts/avr_gate.sh`
+covers the blocking side (links `examples/host_demo` for
+`-mmcu=atmega2560`, asserts `.bss` fits and no async symbol is present).
+
 **Owner:** fixed library. **Adding a widget kind = adding one
 `draw_<kind>()` function here + one enum value + one entry in the Python
 kind catalog — nothing else in this document changes.**
@@ -1032,6 +1116,8 @@ This is the "how does it all actually get compiled" question.
 | `runtime/embedded_c/src/janus_runtime.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `runtime/embedded_c/src/janus_input_touch.c` / `janus_input_focus.c` / `janus_font.c` | Janus (fixed library) | no — only on Janus version upgrade |
 | `runtime/embedded_c/` itself, under a project — vendored via `janus-generate --scaffold-src DIR` into `target_dir/runtime` | Janus (fixed library, copied) | yes, every build (content-diffed — see Stage 4's vendoring note; unchanged files never touch mtime) |
+| `target_dir/runtime/include/janus_render_config.gen.h` | Janus | yes, scaffold mode only — the one generated file written *inside* the vendored library; `#define JANUS_RENDER_NONBLOCKING 1` iff `render_mode: non_blocking`, so `janus_runtime.c` compiles the polled/async path in only then (see Stage 4 "Compile-gated") |
+| `runtime/embedded_c/janus_img.ld` | Janus (fixed library, vendored verbatim) | no — the `INSERT AFTER .text` fragment that keeps baked images out of the near-flash window (Stage 3b "Near-flash budget"); applied for a CMake consumer by the vendored `CMakeLists.txt` |
 | `build/generated/src/{screen}_screen.gen.c` | Janus | yes, every build |
 | `build/generated/include/janus_actions.gen.h` | Janus | yes, every build (cheap — just names) |
 | `build/generated/src/janus_app.gen.c` | Janus | yes, every build |
@@ -1086,6 +1172,11 @@ once per iteration *alongside* the input poll (not instead of it) — one
 loop iteration does at most one render op and checks for at most one input
 event, so neither blocks the other. Step 5's `JANUS_INPUT_NAVIGATE` case
 calls `janus_switch_screen_async_start` instead of `janus_switch_screen`.
+This mode is also what makes scaffold mode write
+`janus_render_config.gen.h` with `#define JANUS_RENDER_NONBLOCKING` (Stage
+4 "Compile-gated") — without it the fixed runtime wouldn't even define
+`janus_render_poll`, so `blocking` stays the only mode that links with no
+generated render-config header at all.
 `JANUS_INPUT_TOGGLE_BOX` and focus-move/-activate stay exactly as above —
 synchronous, tile-scoped, unaffected by render mode.
 
