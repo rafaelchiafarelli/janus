@@ -17,6 +17,7 @@ from pathlib import Path
 from .generate import write_project
 from .stage1_parse.dsl_yaml import parse_app
 from .stage2_layout.layout import check_fits_display, layout_screen
+from .stage3b_embedded_c.emit_files import render_render_config_header
 from .stage5_actions.scaffold_actions import scaffold_actions_c
 from .stage8_scaffold.scaffold_main import scaffold_main_c
 from .writer import copy_tree_if_changed, write_if_changed
@@ -29,13 +30,25 @@ _RUNTIME_EMBEDDED_C = Path(__file__).resolve().parents[1] / "runtime" / "embedde
 _VENDORED_SUBDIRS = ("include", "src", "tests", "host_mock")
 
 
-def _vendor_runtime(dest_dir: Path) -> list[Path]:
+_VENDORED_ROOT_FILES = ("CMakeLists.txt", "janus_img.ld")
+
+
+def _vendor_runtime(dest_dir: Path, render_mode: str) -> list[Path]:
     written = []
-    cmakelists = _RUNTIME_EMBEDDED_C / "CMakeLists.txt"
-    if write_if_changed(dest_dir / "CMakeLists.txt", cmakelists.read_text()):
-        written.append(dest_dir / "CMakeLists.txt")
+    for fname in _VENDORED_ROOT_FILES:
+        if write_if_changed(dest_dir / fname, (_RUNTIME_EMBEDDED_C / fname).read_text()):
+            written.append(dest_dir / fname)
     for subdir in _VENDORED_SUBDIRS:
         written.extend(copy_tree_if_changed(_RUNTIME_EMBEDDED_C / subdir, dest_dir / subdir))
+
+    # The one generated file that lands *inside* the vendored fixed
+    # library: janus_runtime.{c,h} pull it in via __has_include so a
+    # `blocking` project compiles out the polled/async render path (and
+    # its 6912-byte g_async_ops buffer — channel_icons task 3). Written
+    # for `blocking` too, macro undefined, so the include never dangles.
+    cfg = dest_dir / "include" / "janus_render_config.gen.h"
+    if write_if_changed(cfg, render_render_config_header(render_mode)):
+        written.append(cfg)
     return written
 
 
@@ -71,7 +84,8 @@ def generate(
             written.append(scaffold_src / "janus_actions.c")
         if scaffold_main_c(app, scaffold_src / "main.c"):
             written.append(scaffold_src / "main.c")
-        written.extend(_vendor_runtime(target_dir / "runtime"))
+        render_mode = app.display.render_mode if app.display is not None else "blocking"
+        written.extend(_vendor_runtime(target_dir / "runtime", render_mode))
 
     return written
 

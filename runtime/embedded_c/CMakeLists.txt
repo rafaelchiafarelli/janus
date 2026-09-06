@@ -13,8 +13,29 @@ add_library(janus_runtime STATIC
 target_include_directories(janus_runtime PUBLIC include)
 target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
 
+# channel_icons task 4: force the baked-image `.janus_img` section past
+# `.text` so near-read flash data (fonts, descriptors, strings) stays
+# below AVR's 64 KiB window. INTERFACE so it reaches the consumer's link
+# with no edit on their side. Only for an AVR cross-build — `-Wl,-T` is a
+# GNU-ld extension a host linker (notably macOS ld64) would reject, and
+# the host suites don't need it (the section is empty off-AVR anyway).
+if(CMAKE_C_COMPILER MATCHES "avr")
+    target_link_options(janus_runtime INTERFACE
+        "-Wl,-T,${CMAKE_CURRENT_SOURCE_DIR}/janus_img.ld")
+endif()
+
 option(JANUS_RUNTIME_BUILD_TESTS "Build janus_runtime's own host-side tests" ON)
 if(JANUS_RUNTIME_BUILD_TESTS)
+    # The host test suite exercises the polled/async render path
+    # (test_render_async.c), which janus_runtime.c compiles only under
+    # JANUS_RENDER_NONBLOCKING (a generated project gets this from its
+    # vendored janus_render_config.gen.h; see janus_runtime.h). PUBLIC so
+    # every test target that links janus_runtime sees the matching
+    # declarations. The *blocking* build — where none of that path is
+    # linked — is checked separately by scripts/avr_gate.sh, which
+    # compiles this library with the macro absent.
+    target_compile_definitions(janus_runtime PUBLIC JANUS_RENDER_NONBLOCKING)
+
     add_library(janus_host_mock STATIC
         host_mock/mock_driver.c
         host_mock/mock_touch.c
