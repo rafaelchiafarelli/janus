@@ -421,13 +421,24 @@ overflow against (see `architecture.md` Stage 2 for the exact check).
   poll — see `architecture.md` Stage 4 for the queue-based design (a
   draw-op queue built once per screen entry, drained one driver call at a
   time, backing off while `display_busy()`). Declared, not baked into
-  every project unconditionally — same "input.modality" precedent.
+  every project unconditionally — same "input.modality" precedent. Since
+  2026-09-06 (channel_icons task 3) it also drives a **compile gate** in
+  the fixed runtime: scaffold mode writes `janus_render_config.gen.h`
+  into the vendored `runtime/include/` and `janus_runtime.c` puts its
+  entire polled/async path (including the 6912-byte `g_async_ops` buffer)
+  behind `JANUS_RENDER_NONBLOCKING`, so a `blocking` project links none
+  of it — required to fit an ATmega2560's 8 KiB SRAM once any real baked
+  `image` pulls `blit_image` in.
 
 **What "implemented" means here, precisely:** all five fields are parsed,
 validated, and emitted as plain data in `janus_display_config.gen.h`
 (`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`)
 — consumed by hand-written vendor driver code (except `render_mode`, which
-Stage 8's scaffold itself consumes), never by the fixed runtime library,
+Stage 8's scaffold consumes to pick a `main.c`, *and* — since
+channel_icons task 3 — re-emits as a separate one-line
+`janus_render_config.gen.h` inside the vendored `runtime/include/` that
+the fixed runtime `#include`s via `__has_include` to compile-gate its
+async path). The rest is never read by the fixed runtime library,
 which stays display-size-agnostic. **The driver bodies themselves are not
 generated and stay human-owned** (settled 2026-08-20, see Open Questions)
 — `bus`/`controller` are a hardware *selection* a human's driver code can

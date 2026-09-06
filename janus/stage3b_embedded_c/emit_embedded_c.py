@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from ..ir import App, DisplayConfig, Screen, Widget
+from ..ir import App, DisplayConfig, RenderMode, Screen, Widget
 from .image_asset import ImageAssetError, load_rgb565
 
 log = logging.getLogger("janus.emit")
@@ -515,6 +515,28 @@ def emit_display_config(display: DisplayConfig) -> str:
         f"#define JANUS_DISPLAY_RENDER_MODE {_DISPLAY_RENDER_MODE_MACRO[display.render_mode]}\n",
     ]
     return "\n".join(parts)
+
+
+def emit_render_config(render_mode: RenderMode) -> str:
+    """The body of `janus_render_config.gen.h` — a *build-config* header
+    the fixed runtime library itself pulls in (via `__has_include`, see
+    janus_runtime.h), distinct from emit_display_config's plain data for
+    the vendor's driver. Scaffold mode writes it into the vendored
+    runtime's own `include/` so `janus_runtime.c` compiles the polled/
+    async render path in only for a `non_blocking` project; a `blocking`
+    one links none of it — most importantly not the 6912-byte
+    `g_async_ops` buffer, which would otherwise overflow an 8 KiB SRAM
+    part (channel_icons task 3). Emitted for `blocking` too (macro left
+    undefined) so the `#include` is never a dangling reference."""
+    if render_mode == "non_blocking":
+        return (
+            "/* app.yaml: display.render_mode: non_blocking */\n"
+            "#define JANUS_RENDER_NONBLOCKING 1\n"
+        )
+    return (
+        "/* app.yaml: display.render_mode: blocking — the fixed runtime's\n"
+        " * polled/async render path is left out of the build. */\n"
+    )
 
 
 # ------------------------------------------------------------- app table --

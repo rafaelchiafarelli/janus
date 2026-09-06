@@ -15,6 +15,16 @@ target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
 
 option(JANUS_RUNTIME_BUILD_TESTS "Build janus_runtime's own host-side tests" ON)
 if(JANUS_RUNTIME_BUILD_TESTS)
+    # The host test suite exercises the polled/async render path
+    # (test_render_async.c), which janus_runtime.c compiles only under
+    # JANUS_RENDER_NONBLOCKING (a generated project gets this from its
+    # vendored janus_render_config.gen.h; see janus_runtime.h). PUBLIC so
+    # every test target that links janus_runtime sees the matching
+    # declarations. The *blocking* build — where none of that path is
+    # linked — is checked separately by scripts/avr_gate.sh, which
+    # compiles this library with the macro absent.
+    target_compile_definitions(janus_runtime PUBLIC JANUS_RENDER_NONBLOCKING)
+
     add_library(janus_host_mock STATIC
         host_mock/mock_driver.c
         host_mock/mock_touch.c

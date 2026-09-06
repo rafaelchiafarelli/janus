@@ -1,6 +1,10 @@
 # Task 3: async-path-behind-render-mode
 
-Status: **scoped, ready to implement** (one open decision — see "Mechanism").
+Status: ✅ **DONE** — contract delivered, Python + `ctest` suites green,
+`scripts/avr_gate.sh` passes (`examples/host_demo` links for
+`-mmcu=atmega2560` in `blocking` mode, `.bss` 1576 B / 19.2%, no async
+symbol linked). Mechanism decision: **A** (see below). Merged
+`3-async-path-behind-render-mode → tasks`.
 
 ## Problem
 
@@ -37,38 +41,46 @@ today.
   absent those branches compile out entirely, so nothing references
   `g_async_ops` and the linker allocates 0 bytes for it.
 - `runtime/embedded_c/include/janus_runtime.h` — the three async entry
-  declarations behind the same guard.
-- Whatever the **Mechanism** decision below settles: the thing that
-  actually `#define`s `JANUS_RENDER_NONBLOCKING` for a `non_blocking`
-  project and leaves it undefined otherwise.
+  declarations behind the same guard, plus the `__has_include` pull of
+  `janus_render_config.gen.h` (before the guard uses the macro).
+- `runtime/embedded_c/CMakeLists.txt` —
+  `target_compile_definitions(janus_runtime PUBLIC JANUS_RENDER_NONBLOCKING)`
+  inside the `JANUS_RUNTIME_BUILD_TESTS` block.
+- Mechanism A: `janus/stage3b_embedded_c/emit_embedded_c.py`
+  `emit_render_config()` + `emit_files.py` `render_render_config_header()`
+  + `janus/templates/render_config.h.tmpl`; `janus/cli.py` `_vendor_runtime`
+  writes `janus_render_config.gen.h` into `target_dir/runtime/include/`
+  (scaffold mode, both render modes).
+- `scripts/avr_gate.sh` — the blocking-side gate (regenerate host_demo,
+  `avr-gcc -mmcu=atmega2560 -Os` compile + link a minimal harness, assert
+  `.bss` fits and `avr-nm` shows no async symbol).
+- Tests: `tests/test_emit_files.py` (render-config header both ways),
+  `tests/test_cli.py` + `tests/fixtures/app_with_display_non_blocking.yaml`
+  (scaffold writes it into the vendored runtime, macro iff non_blocking).
 - Docs: `architecture.md` Stage 4 (async section) + Stage 8, `Janus.md`
   `render_mode` paragraph — state that `blocking` now also means "links
   none of the async path".
 
-### Mechanism — DECISION NEEDED (do not pick implicitly)
+### Mechanism — DECIDED: **A** (2026-09-06, Rafael)
 
-The fixed runtime has no current way to learn a per-project setting
-(`render_mode` only picks a scaffold template in Stage 8 today). Options,
-smallest blast radius first:
+Stage 8 scaffold mode (`--scaffold-src`) writes `janus_render_config.gen.h`
+into the **vendored runtime's own `include/`** (`target_dir/runtime/include/`,
+not the generated `include/` — that keeps it on `janus_runtime`'s existing
+PUBLIC include path with zero consumer build-config change). It carries
+`#define JANUS_RENDER_NONBLOCKING 1` iff `render_mode: non_blocking`, and
+just a comment otherwise — written both ways so the include never dangles.
 
-- **A.** Stage 8 / `--scaffold-src` writes `janus_render_config.gen.h`
-  into the vendored `runtime/include/` — `#define
-  JANUS_RENDER_NONBLOCKING` iff `non_blocking`, empty otherwise —
-  and `janus_runtime.c` does `#include "janus_render_config.gen.h"`.
-  Always written so the include never fails. Cost: the fixed runtime now
-  includes one generated *build-config* header (not a data descriptor —
-  arguably within the spirit of the split, but it *is* a new coupling).
-- **B.** Stage 8 templates the vendored `runtime/embedded_c/CMakeLists.txt`
-  to add `target_compile_definitions(janus_runtime PRIVATE
-  JANUS_RENDER_NONBLOCKING)` when `non_blocking`. Runtime source stays
-  pristine; `--scaffold-src`'s verbatim copy of `CMakeLists.txt` becomes
-  a small template. Doesn't help a non-CMake consumer (PlatformIO builds
-  the lib its own way).
-- **C.** The consuming project passes `-DJANUS_RENDER_NONBLOCKING` in its
-  own build config (documented in the scaffold README + `Janus.md`).
-  One `-D`, opt-in with `non_blocking` anyway — but it's a consumer
-  build-config change, the class of thing this initiative has been
-  avoiding.
+Refinement within A: `janus_runtime.h` pulls it in with
+`#if defined(__has_include) && __has_include("janus_render_config.gen.h")`
+rather than an unconditional `#include`, so the **in-repo** runtime (its
+own `ctest`, `scripts/avr_gate.sh`, any consumer that never ran scaffold
+mode) compiles fine with no such header — treated as `blocking`. The
+runtime's `ctest` build forces the macro on via
+`target_compile_definitions(janus_runtime PUBLIC JANUS_RENDER_NONBLOCKING)`
+so `test_render_async.c` still links the path.
+
+B/C rejected: B doesn't reach a PlatformIO consumer; C is a consumer
+build-config edit, the class of thing this initiative avoids.
 
 ## Dependencies
 
