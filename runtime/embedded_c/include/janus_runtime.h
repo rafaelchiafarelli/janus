@@ -198,11 +198,30 @@ typedef struct {
     const janus_farptr_t *image_far;
 } janus_screen_desc_t;
 
+/* One tab of the app-level nav strip (app.yaml `nav: { kind: tabs }`).
+ * Geometry is baked at generation time — equal-width cells across the
+ * panel, laid out at y=0 in a band `NAV_BAR_H` tall that every screen's
+ * own content sits below (stage2_layout; architecture.md Stage 2).
+ * `title` is flash-resident on AVR, same caveat as janus_widget_desc_t.id
+ * (read it pgm-aware). `target` is the index into janus_app_t.screens
+ * this tab navigates to. The whole `janus_nav_tabs[]` array is
+ * JANUS_PROGMEM. Rendered by draw_nav_bar (nav_tabs epic task 2) — no
+ * runtime code reads this yet as of task 1. */
+typedef struct {
+    janus_rect_t rect;
+    const char *title;
+    int16_t target;
+} janus_nav_tab_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;   /* generated as a JANUS_PROGMEM pointer table on
                                                    * AVR — read via janus_app_get_screen(app, i)
                                                    * below, never a plain array index */
-    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset (no tab bar) */
+    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset. Legacy
+                                       * screen-parallel title lookup — the renderable strip is
+                                       * `nav_tabs` below (nav order + baked geometry). */
+    const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM array in nav order; NULL if app.nav is unset */
+    uint16_t nav_tab_count;          /* 0 if app.nav is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -227,6 +246,12 @@ static inline janus_widget_desc_t janus_widget_load(const janus_widget_desc_t *w
 static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *screen) {
     janus_screen_desc_t out;
     JANUS_MEMCPY_P(&out, screen, sizeof(out));
+    return out;
+}
+
+static inline janus_nav_tab_t janus_nav_tab_load(const janus_nav_tab_t *tab) {
+    janus_nav_tab_t out;
+    JANUS_MEMCPY_P(&out, tab, sizeof(out));
     return out;
 }
 
@@ -273,6 +298,30 @@ void janus_toggle_box(const janus_widget_desc_t *box);               /* re-rende
  * it's also public for a project that drives screen changes by hand (an
  * encoder wired straight to a tab bar, say). NULL is a no-op. */
 void janus_clear_screen(const janus_screen_desc_t *screen);
+
+/* Paints the app-level nav strip (app.yaml `nav: { kind: tabs }`) into
+ * its band at the top of the panel — one cell per `app->nav_tabs` entry
+ * (baked geometry), title centered; the cell whose `target` equals
+ * `app->active_screen` gets the active fill + a bottom accent bar. No-op
+ * if the app has no nav (`nav_tabs == NULL`). Repaint-on-change, not
+ * per-frame: janus_switch_screen[_async_start] call it after rendering
+ * the incoming screen, and a scaffold calls it once after the first
+ * janus_render_screen. It is deliberately NOT part of janus_render_screen
+ * (screen-scoped, no `app`), so a periodic janus_render_*_if_dirty sweep
+ * never repaints it. Colours / band height are fixed runtime constants
+ * (nav_tabs epic decision 2). (task 2.) */
+void janus_render_nav_bar(const janus_app_t *app);
+
+/* Switch to the tab one cell after / before (nav order, wrapping) the one
+ * currently showing `app->active_screen` — a full janus_switch_screen
+ * under the hood (erases the old screen, renders the new one, repaints
+ * the strip). For a project with a control to spare for tab-cycling
+ * (ArduinoIHM's second encoder, say); the single-control scaffolds reach
+ * the tabs through focus instead. No-op if the app has no nav. Focus on
+ * the new screen is the caller's to re-establish, same as
+ * janus_switch_screen. (nav_tabs epic task 3.) */
+void janus_nav_next(janus_app_t *app);
+void janus_nav_prev(janus_app_t *app);
 
 /* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its
  * always-visible `summary` plus its `children` if currently expanded,

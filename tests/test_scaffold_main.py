@@ -40,6 +40,13 @@ class TestRenderMainC(unittest.TestCase):
         self.assertIn("case JANUS_INPUT_TOGGLE_BOX:", out)
         self.assertIn("janus_toggle_box(hit.widget);", out)
 
+    def test_touch_checks_the_nav_strip_before_screen_content(self) -> None:
+        out = render_main_c()
+        self.assertIn("janus_render_nav_bar(&janus_app);", out)
+        self.assertIn("janus_nav_hit_test(&janus_app, x, y)", out)
+        # nav check comes before the per-screen hit-test
+        self.assertLess(out.index("janus_nav_hit_test"), out.index("janus_touch_hit_test(screen"))
+
 
 class TestRenderMainCEncoder(unittest.TestCase):
     def test_polls_encoder_and_moves_focus(self) -> None:

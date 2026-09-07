@@ -16,7 +16,7 @@ from pathlib import Path
 
 from .generate import write_project
 from .stage1_parse.dsl_yaml import parse_app
-from .stage2_layout.layout import check_fits_display, layout_screen
+from .stage2_layout.layout import build_nav_bar, check_fits_display, layout_screen
 from .stage3b_embedded_c.emit_files import render_render_config_header
 from .stage5_actions.scaffold_actions import scaffold_actions_c
 from .stage8_scaffold.scaffold_main import scaffold_main_c
@@ -33,7 +33,7 @@ _VENDORED_SUBDIRS = ("include", "src", "tests", "host_mock")
 _VENDORED_ROOT_FILES = ("CMakeLists.txt", "janus_img.ld")
 
 
-def _vendor_runtime(dest_dir: Path, render_mode: str, display=None) -> list[Path]:
+def _vendor_runtime(dest_dir: Path, render_mode: str, display=None, has_nav: bool = False) -> list[Path]:
     written = []
     for fname in _VENDORED_ROOT_FILES:
         if write_if_changed(dest_dir / fname, (_RUNTIME_EMBEDDED_C / fname).read_text()):
@@ -47,7 +47,7 @@ def _vendor_runtime(dest_dir: Path, render_mode: str, display=None) -> list[Path
     # its 6912-byte g_async_ops buffer — channel_icons task 3). Written
     # for `blocking` too, macro undefined, so the include never dangles.
     cfg = dest_dir / "include" / "janus_render_config.gen.h"
-    if write_if_changed(cfg, render_render_config_header(render_mode, display)):
+    if write_if_changed(cfg, render_render_config_header(render_mode, display, has_nav)):
         written.append(cfg)
     return written
 
@@ -70,10 +70,12 @@ def generate(
     regenerated-every-run Janus output. Returns every path actually
     written (empty on a no-op re-run)."""
     app = parse_app(app_yaml)
+    has_nav = app.nav is not None
     for screen in app.screens:
-        layout_screen(screen, app.display)
+        layout_screen(screen, app.display, has_nav=has_nav)
         if app.display is not None:
             check_fits_display(screen, app.display)
+    app.nav_bar = build_nav_bar(app)
 
     target_dir = Path(target_dir)
     written = write_project(app, target_dir)
@@ -85,7 +87,7 @@ def generate(
         if scaffold_main_c(app, scaffold_src / "main.c"):
             written.append(scaffold_src / "main.c")
         render_mode = app.display.render_mode if app.display is not None else "blocking"
-        written.extend(_vendor_runtime(target_dir / "runtime", render_mode, app.display))
+        written.extend(_vendor_runtime(target_dir / "runtime", render_mode, app.display, has_nav))
 
     return written
 

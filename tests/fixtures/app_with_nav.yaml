@@ -1,0 +1,16 @@
+# Three-tab nav app on a known 320x480 panel — exercises the nav-bar band
+# (stage2_layout NAV_BAR_H) and the baked janus_nav_tabs[] descriptor,
+# including the last cell absorbing the 320 % 3 width remainder.
+screens:
+  - nav_alpha.screen.yaml
+  - nav_bravo.screen.yaml
+  - nav_charlie.screen.yaml
+nav:
+  kind: tabs
+  targets:
+    - { screen: Alpha, title: "Alpha" }
+    - { screen: Bravo, title: "Bravo" }
+    - { screen: Charlie, title: "Charlie" }
+display:
+  size: { w: 320, h: 480 }
+  color: rgb565
