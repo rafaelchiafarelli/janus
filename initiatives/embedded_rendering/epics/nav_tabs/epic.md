@@ -27,7 +27,7 @@ can't fix.
 
 | # | file | status | contract (one line) |
 |---|---|---|---|
-| 1 | `tasks/1-nav-bar-geometry-and-descriptor.md` | ⬜ planned | Stage 2 reserves a `NAV_BAR_H` band atop every screen when `app.nav` is set; Stage 3b bakes a per-app nav descriptor (tab count, per-tab rect + title + target index). Data only, nothing draws. |
+| 1 | `tasks/1-nav-bar-geometry-and-descriptor-done.md` | ✅ **done** | `NAV_BAR_H`=28 band offsets every screen's root when `app.nav` set; Stage 1 requires `display:` + validates tab count/targets; `build_nav_bar` lays equal cells (last absorbs remainder); `janus_nav_tabs[]` + `.nav_tab_count` baked into the app table; `JANUS_DISPLAY_PANEL_W/H` now emitted for `nav` too. No pixels. |
 | 2 | `tasks/2-draw-nav-bar.md` | ⬜ planned | `draw_nav_bar` in the fixed runtime — N equal cells, centered titles, the `active_screen` cell styled distinct; painted on screen-enter / `janus_switch_screen`, not per frame. |
 | 3 | `tasks/3-nav-bar-input.md` | ⬜ planned | touch hit-test covers the strip → `JANUS_INPUT_NAVIGATE`; encoder/buttons get a defined tab interaction; `main_*.c.tmpl` scaffolds call it; `architecture.md`'s "metadata only" note updated. |
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from ..ir import App, DisplayConfig, RenderMode, Screen, Widget
+from ..stage2_layout.layout import build_nav_bar
 from .image_asset import ImageAssetError, load_rgb565
 
 log = logging.getLogger("janus.emit")
@@ -576,7 +577,9 @@ def emit_display_config(display: DisplayConfig) -> str:
     return "\n".join(parts)
 
 
-def emit_render_config(render_mode: RenderMode, display: "DisplayConfig | None" = None) -> str:
+def emit_render_config(
+    render_mode: RenderMode, display: "DisplayConfig | None" = None, has_nav: bool = False
+) -> str:
     """The body of `janus_render_config.gen.h` — a *build-config* header
     the fixed runtime library itself pulls in (via `__has_include`, see
     janus_runtime.h), distinct from emit_display_config's plain data for
@@ -603,12 +606,20 @@ def emit_render_config(render_mode: RenderMode, display: "DisplayConfig | None" 
             "/* app.yaml: display.render_mode: blocking — the fixed runtime's",
             " * polled/async render path is left out of the build. */",
         ]
+    # Panel size reaches the fixed runtime only when it actually needs it:
+    # display.background (janus_clear_screen full-panel erase) or app.nav
+    # (nav-bar geometry, nav_tabs epic). Otherwise the runtime stays
+    # display-size-agnostic.
+    if display is not None and (display.background is not None or has_nav):
+        lines += [
+            "/* panel size — for janus_clear_screen's full-panel erase and/or the nav bar */",
+            f"#define JANUS_DISPLAY_PANEL_W {display.width}",
+            f"#define JANUS_DISPLAY_PANEL_H {display.height}",
+        ]
     if display is not None and display.background is not None:
         lines += [
             "/* app.yaml: display.background — full-panel erase colour for janus_clear_screen */",
             f"#define JANUS_DISPLAY_BACKGROUND 0x{_pack_rgb565(display.background):04x}",
-            f"#define JANUS_DISPLAY_PANEL_W {display.width}",
-            f"#define JANUS_DISPLAY_PANEL_H {display.height}",
         ]
     return "\n".join(lines) + "\n"
 
@@ -630,11 +641,8 @@ def emit_app_table(app: App) -> str:
         missing = [s.name for s in app.screens if s.name not in title_by_screen]
         if missing:
             raise ValueError(f"app.nav is missing a title for screen(s): {missing}")
-        # Title bytes themselves stay plain (RAM-shadowed) literals for now —
-        # nothing in janus_runtime.c reads a nav title yet (no tab-bar
-        # rendering implemented), unlike widget id/static_text/screen name
-        # above, which the runtime does read. Revisit (JANUS_PROGMEM +
-        # _emit_flash_string, same as those) once tab-bar rendering lands.
+        # `nav_titles` — screen-parallel title lookup, kept as-is (plain
+        # RAM-shadowed literals; nothing reads it on the render path).
         titles_body = ",\n".join(
             f"    {_c_string(title_by_screen[s.name])}" for s in app.screens
         )
@@ -642,13 +650,47 @@ def emit_app_table(app: App) -> str:
             f"static const char *const janus_app_nav_titles[] JANUS_PROGMEM = {{\n{titles_body}\n}};"
         )
         titles_ref = "janus_app_nav_titles"
+
+        # `nav_tabs[]` — the renderable strip descriptor (nav order, baked
+        # geometry + target index). draw_nav_bar (nav_tabs epic task 2)
+        # reads this; the titles here ARE flash-resident (JANUS_PROGMEM),
+        # unlike the legacy nav_titles above, since task 2 will pgm-read
+        # them per frame. `build_nav_bar` needs `app.display` — a real
+        # project always has it here (Stage 1 rejects nav without it); a
+        # hand-built test App without one just gets nav_tabs = NULL.
+        nav_bar = app.nav_bar if app.nav_bar is not None else build_nav_bar(app)
+        if nav_bar is not None:
+            tab_str_refs = []
+            for i, tab in enumerate(nav_bar):
+                ref = f"janus_app_nav_tab_str{i + 1}"
+                lines.append(
+                    f"static const char {ref}[] JANUS_PROGMEM = {_c_string(tab.title)};"
+                )
+                tab_str_refs.append(ref)
+            tabs_body = ",\n".join(
+                f"    {{ {_rect(tab.rect)}, {ref}, {tab.target_screen_index} }}"
+                for tab, ref in zip(nav_bar, tab_str_refs)
+            )
+            lines.append(
+                f"static const janus_nav_tab_t janus_app_nav_tabs[] JANUS_PROGMEM = "
+                f"{{\n{tabs_body}\n}};"
+            )
+            tabs_ref = "janus_app_nav_tabs"
+            tab_count = len(nav_bar)
+        else:
+            tabs_ref = "NULL"
+            tab_count = 0
     else:
         titles_ref = "NULL"
+        tabs_ref = "NULL"
+        tab_count = 0
 
     lines.append(
         "janus_app_t janus_app = {\n"
         "    .screens = janus_app_screens,\n"
         f"    .nav_titles = {titles_ref},\n"
+        f"    .nav_tabs = {tabs_ref},\n"
+        f"    .nav_tab_count = {tab_count},\n"
         f"    .screen_count = {len(screen_vars)},\n"
         "    .active_screen = 0,\n"
         "};"

@@ -365,7 +365,7 @@ Project-level nav (not an in-screen widget kind):
 
 | kind | shape | notes |
 |---|---|---|
-| `tabs` | `targets: [{screen, title}]` in `app.yaml` | switches between **full top-level screens** by name, not sub-panels. Only one screen's widgets are ever live at once — device holds a small `active_screen` index and redraws from that screen's precomputed geometry table on switch, using the same tiled-redraw mechanism as everything else (fits the ~2 KiB transient-buffer budget: no room for two screens' framebuffers at once). |
+| `tabs` | `targets: [{screen, title}]` in `app.yaml` | switches between **full top-level screens** by name, not sub-panels. Only one screen's widgets are ever live at once — device holds a small `active_screen` index and redraws from that screen's precomputed geometry table on switch, using the same tiled-redraw mechanism as everything else (fits the ~2 KiB transient-buffer budget: no room for two screens' framebuffers at once). **Requires a `display:` block** (a tab strip is laid out across the panel width). Janus reserves a fixed `NAV_BAR_H` band at the top of every screen for the strip and bakes a `janus_nav_tabs[]` descriptor (per-tab rect + title + target index) into the app table — the *nav_tabs epic*; as of task 1 that's geometry + data only, `draw_nav_bar` and the encoder/touch wiring are later tasks in the same epic. |
 
 **Project layout is multi-file**, one screen per file, matching harpia's own multi-Include precedent (`test.harpia` importing `file{1,2,3}.harpia`):
 
