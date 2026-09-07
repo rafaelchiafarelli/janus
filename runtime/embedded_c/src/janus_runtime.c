@@ -17,6 +17,7 @@
 
 #include "janus_bound.h"
 #include "janus_font.h"
+#include "janus_format.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -381,24 +382,35 @@ static const janus_farptr_t *g_image_far = NULL;
  * JANUS_COLOR_DEFAULT_FG/_BG when omitted. Never a runtime constant.
  */
 
-/* label/header: authored `text:` wins if present (unbound widgets, or a
- * widget authored with both — Janus.md's catalog documents `bind`/`text`
- * as one-or-the-other, but nothing at parse time forbids both, so this is
- * the deterministic tie-break); otherwise fall back to the live bound
- * string, if any. */
-static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
+/* label/header text resolution, in priority order:
+ *   1. `text_is_format` -> `static_text` is a printf-style template;
+ *      format it against `bind` into a stack buffer (janus_format_into)
+ *      and draw that (RAM, so from_flash = false).
+ *   2. plain authored `static_text` -> draw it verbatim from flash.
+ *      (A widget authored with both `text:` and `bind:` but no format
+ *      conversion lands here — static_text is the deterministic
+ *      tie-break, Janus.md's catalog documents them as one-or-the-other.)
+ *   3. otherwise the live bound string, if any. */
+static void draw_text_leaf(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
+
+    if (lw.text_is_format && lw.static_text != NULL) {
+        char buf[JANUS_FORMAT_BUF];
+        janus_format_into(buf, sizeof buf, lw.static_text, &lw.bind, bound_struct);
+        draw_string(lw.geometry, buf, lw.color, lw.bg_color, false, lw.font_size, lw.font_scale);
+        return;
+    }
+
     bool from_flash = lw.static_text != NULL;
     const char *text = from_flash ? lw.static_text : janus_read_bound_string(&lw.bind, bound_struct);
     draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
 }
+static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
+    draw_text_leaf(w, bound_struct);
+}
 static void draw_header(const janus_widget_desc_t *w, const void *bound_struct) {
-    janus_widget_desc_t lw = janus_widget_load(w);
-    fill_rect(lw.geometry, lw.bg_color);
-    bool from_flash = lw.static_text != NULL;
-    const char *text = from_flash ? lw.static_text : janus_read_bound_string(&lw.bind, bound_struct);
-    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
+    draw_text_leaf(w, bound_struct);
 }
 static void draw_button(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);

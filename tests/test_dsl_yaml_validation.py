@@ -192,5 +192,56 @@ class TestFontSizeValidation(unittest.TestCase):
             screen_from_dict(data)
 
 
+class TestFormatTextValidation(unittest.TestCase):
+    def test_conversion_without_bind_is_rejected(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "%d"}])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_double_percent_without_bind_is_fine(self) -> None:
+        data = _screen([{"kind": "label", "id": "a", "text": "100%%"}])
+        screen_from_dict(data)  # must not raise — no real conversion
+
+    def test_string_conversion_needs_a_string_bind(self) -> None:
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "%s",
+             "bind": {"message": "m", "field": "n", "type": "int"}},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_numeric_conversion_rejects_a_string_bind(self) -> None:
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "%d",
+             "bind": {"message": "m", "field": "n", "type": "string"}},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_conversion_on_a_non_text_kind_is_rejected(self) -> None:
+        data = _screen([
+            {"kind": "button", "id": "a", "text": "go %d",
+             "bind": {"message": "m", "field": "n", "type": "int"}},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_valid_format_label_accepted(self) -> None:
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "T: %.1f C",
+             "bind": {"message": "m", "field": "t", "type": "float"}},
+        ])
+        w = screen_from_dict(data).root.children[0]
+        self.assertTrue(w.text_is_format)
+
+    def test_second_conversion_warns_but_does_not_raise(self) -> None:
+        data = _screen([
+            {"kind": "label", "id": "a", "text": "%d of %d",
+             "bind": {"message": "m", "field": "n", "type": "int"}},
+        ])
+        with self.assertLogs("janus.parse", level="WARNING"):
+            screen_from_dict(data)  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()

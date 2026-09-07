@@ -121,9 +121,15 @@ typedef struct janus_widget_desc {
                                          * Flash-resident (JANUS_PROGMEM) on AVR, same as `id` above
                                          * — draw_string's `from_flash` parameter is what tells it to
                                          * read this one byte-at-a-time via JANUS_PGM_READ_U8, vs. a
-                                         * live bound string (read_bound_string), which is always
-                                         * plain RAM (the vendor's own mutable struct) and never
-                                         * moves. */
+                                         * live bound string (janus_read_bound_string), which is
+                                         * always plain RAM (the vendor's own mutable struct) and
+                                         * never moves. */
+    bool text_is_format;               /* label/header: when true, `static_text` is a printf-style
+                                         * template (an unescaped conversion and/or a `%%` escape).
+                                         * draw_label/draw_header run it through janus_format_into
+                                         * against `bind` into a stack buffer per draw instead of
+                                         * blitting it verbatim. Baked from Widget.text_is_format
+                                         * (Stage 1 recognises the template; Stage 3b emits this). */
     janus_rect_t geometry;             /* also the "expanded" rect for box */
     janus_rect_t geometry_collapsed;   /* box only, ignored otherwise */
     bool initial_expanded;             /* box only — baked from Widget.default_expanded */

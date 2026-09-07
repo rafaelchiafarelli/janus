@@ -39,6 +39,15 @@ class Widget:
     id: str
     bind: Optional[Binding] = None
     text: Optional[str] = None
+    # Set by the Stage 1 parser, never authored. True when `text` is a
+    # printf-style *template* rather than a literal string: it holds an
+    # unescaped conversion (`%d %u %x %ld %lld %f %.Nf %s`) and/or a `%%`
+    # escape. label/header only. Stage 3b bakes it as `.text_is_format`
+    # and the runtime then formats `text` against this widget's `bind`
+    # into a scratch buffer per draw instead of blitting it verbatim
+    # (janus_format.c). A `text` with a real conversion also requires a
+    # `bind` of a matching type — enforced in _validate_widget.
+    text_is_format: bool = False
     asset: Optional[str] = None
     # kind == "image" only: filesystem path to a source image file (PNG,
     # BMP, JPEG, GIF, TIFF, WebP, ...), resolved to an absolute path
