@@ -69,8 +69,25 @@ None.
 - `janus_sin16(0) == 0`; `janus_sin16(90) == 32767`; `|janus_sin16(30) - 16384| <= 1`;
   `janus_cos16(0) == 32767`; `janus_sin16(-90) == -32767`.
 
+## Notes — deviations from the sketch above
+
+- **Not `static`.** Same as task 1: `janus_rgb565_lerp`,
+  `janus_shade_rect_v`, `janus_draw_line`, `janus_sin16`, `janus_cos16`
+  are `extern` (`janus_`-prefixed) via the internal `janus_draw.h`, so
+  the unit tests can call them. Definitions stay in `janus_runtime.c`.
+  The `janus_sin_q15[91]` table itself stays `static` there.
+- **`JANUS_PGM_READ_U16` added** to `janus_progmem.h` (`pgm_read_word` /
+  plain deref) — the table read needed it and it's the obvious sibling
+  of the existing `JANUS_PGM_READ_U8`.
+- **`draw_line` uses `fill_hspan`** (task 1's clip helper) per pixel
+  rather than a bare `fill_rect({x,y,1,1})` — same effect, plus the
+  x<0 / y<0 guard for free.
+- **Tests are `tests/test_draw.c`** (extends task 1's `janus_draw_tests`),
+  not `test_runtime.c`.
+
 ## DoD
 
-Contract delivered · `ctest` green · `scripts/avr_gate.sh` green (table
-in flash, no new `.bss`) · no Python file touched · this file renamed
+Contract delivered · `ctest` green (9/9) · `scripts/avr_gate.sh` green
+(no new `.bss`; the sin table is `--gc-sections`'d out until vu_meter
+uses it) · no Python file touched · this file renamed
 `2-shade-line-trig-done.md` · commit + merge `2-shade-line-trig → tasks`.
