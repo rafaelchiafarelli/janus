@@ -58,6 +58,20 @@ static int rt_painted_colour(int px, int py, uint16_t colour) {
     return 0;
 }
 
+/* the colour of the last span painted over (px,py), or 0 if none did */
+static uint16_t rt_sample_at(int px, int py) {
+    uint16_t v = 0;
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if ((int)c.x <= px && px < (int)(c.x + c.w) &&
+            (int)c.y <= py && py < (int)(c.y + c.h)) v = c.sample_pixel;
+    }
+    return v;
+}
+
+/* glyph-blit counters — defined with the font fixtures further down */
+static int count_calls_of_size(uint16_t w, uint16_t h);
+
 /* does any span of colour `colour` touch the x-band [x_lo, x_hi)? */
 static int rt_colour_in_xband(uint16_t colour, int x_lo, int x_hi) {
     for (uint16_t i = 0; i < mock_driver_log_count; i++) {
@@ -440,6 +454,79 @@ static void test_switch_screen_erase_covers_gaps_and_ragged_edges(void) {
     janus_switch_screen(&app, 1);
     CHECK(rt_painted_colour(5, 15, 0x0777));    /* the gap between the two rows */
     CHECK(rt_painted_colour(30, 5, 0x0777));    /* ragged edge past the narrow first row */
+}
+
+/* ---- fixture 4b: the app-level nav strip (nav_tabs epic task 2) ----
+ * 3 tabs, 40px cells across a 120px band, NAV_BAR_H (28) tall. targets
+ * are screen indices in nav order; the cell whose target == active_screen
+ * is the "active" one. */
+static const janus_nav_tab_t rt_nav_tabs[] = {
+    { { 0,  0, 40, 28 }, "A", 0 },
+    { { 40, 0, 40, 28 }, "B", 1 },
+    { { 80, 0, 40, 28 }, "C", 2 },
+};
+static const janus_screen_desc_t rt_nav_s0 = { .name = "S0", .widget_count = 0 };
+static const janus_screen_desc_t rt_nav_s1 = { .name = "S1", .widget_count = 0 };
+static const janus_screen_desc_t rt_nav_s2 = { .name = "S2", .widget_count = 0 };
+static const janus_screen_desc_t *const rt_nav_screens[] = { &rt_nav_s0, &rt_nav_s1, &rt_nav_s2 };
+
+static void test_nav_bar_renders_cells_and_marks_the_active_tab(void) {
+    janus_app_t app = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .nav_tabs = rt_nav_tabs, .nav_tab_count = 3,
+        .screen_count = 3, .active_screen = 1,
+    };
+
+    mock_driver_reset();
+    janus_render_nav_bar(&app);
+
+    /* one fill per cell, spanning the whole 120px band, no gap */
+    CHECK(rt_painted(2, 4) && rt_painted(60, 4) && rt_painted(118, 4));
+    /* three medium-glyph title blits (one char each) */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 3);
+
+    /* active cell (tab B, target 1) reads different from an inactive one */
+    uint16_t active_body = rt_sample_at(60, 4);
+    uint16_t inactive_body = rt_sample_at(20, 4);
+    CHECK(active_body != inactive_body);
+
+    /* accent bar: a ~6px band along the bottom of the active cell only */
+    CHECK(rt_sample_at(60, 24) != active_body);            /* accent colour, not the cell body */
+    CHECK(rt_sample_at(60, 24) == rt_sample_at(60, 27));   /* same accent colour top-to-bottom of the bar */
+    CHECK(rt_sample_at(20, 24) == inactive_body);          /* inactive cell: no accent band this high */
+}
+
+static void test_nav_bar_no_op_without_nav(void) {
+    janus_app_t no_nav = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .nav_tabs = NULL, .nav_tab_count = 0,
+        .screen_count = 3, .active_screen = 0,
+    };
+    mock_driver_reset();
+    janus_render_nav_bar(&no_nav);
+    janus_render_nav_bar(NULL);
+    CHECK(mock_driver_log_count == 0);
+}
+
+static void test_switch_screen_repaints_the_nav_strip(void) {
+    janus_app_t app = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .nav_tabs = rt_nav_tabs, .nav_tab_count = 3,
+        .screen_count = 3, .active_screen = 0,
+    };
+    /* active tab A -> its cell [0,40) carries the accent at y=24 */
+    janus_set_focus(NULL);   /* drop any stale focus a prior fixture left set */
+    mock_driver_reset();
+    janus_render_nav_bar(&app);
+    uint16_t a_accent = rt_sample_at(20, 24);
+    uint16_t a_body = rt_sample_at(20, 4);
+    CHECK(a_accent != a_body);
+
+    mock_driver_reset();
+    janus_switch_screen(&app, 2);          /* -> active tab C, cell [80,120) */
+    CHECK(app.active_screen == 2);
+    CHECK(rt_sample_at(100, 24) == a_accent);   /* accent moved to C's cell */
+    CHECK(rt_sample_at(20, 24) != a_accent);    /* and left A's cell */
 }
 
 /* ---- fixture 5: divider/toggle/badge/slider — the four "low effort"
@@ -1059,6 +1146,9 @@ int main(void) {
     test_box_summary_renders_when_collapsed_and_expanded();
     test_switch_screen_erases_old_then_draws_new();
     test_switch_screen_erase_covers_gaps_and_ragged_edges();
+    test_nav_bar_renders_cells_and_marks_the_active_tab();
+    test_nav_bar_no_op_without_nav();
+    test_switch_screen_repaints_the_nav_strip();
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
     test_toggle_render_is_async_safe();
