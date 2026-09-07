@@ -105,6 +105,71 @@ static void test_circle_straddling_x_zero_writes_no_negative_x(void) {
     CHECK(!covers(9, 20));                  /* one past it */
 }
 
+/* ---- task 2: shade / line / trig ---- */
+
+static int r5(uint16_t px) { return (px >> 11) & 0x1F; }
+
+static void test_rgb565_lerp_endpoints_and_identity(void) {
+    CHECK(janus_rgb565_lerp(0x0000, 0xFFFF, 0)   == 0x0000);
+    CHECK(janus_rgb565_lerp(0x0000, 0xFFFF, 255) == 0xFFFF);
+    CHECK(janus_rgb565_lerp(0x1234, 0x1234, 128) == 0x1234);
+}
+
+static void test_shade_rect_v_runs_top_to_bottom_monotone(void) {
+    mock_driver_reset();
+    janus_shade_rect_v((janus_rect_t){ 0, 0, 1, 10 }, 0x0000, 0xF800);
+    CHECK(mock_driver_log_count == 10);
+    CHECK(mock_driver_log[0].sample_pixel == 0x0000);
+    CHECK(mock_driver_log[9].sample_pixel == 0xF800);
+    for (uint16_t i = 1; i < mock_driver_log_count; i++) {
+        CHECK(r5(mock_driver_log[i].sample_pixel) >= r5(mock_driver_log[i - 1].sample_pixel));
+    }
+}
+
+static void test_shade_rect_v_single_row_is_a_flat_top_fill(void) {
+    mock_driver_reset();
+    janus_shade_rect_v((janus_rect_t){ 0, 0, 4, 1 }, 0x07E0, 0xF800);
+    CHECK(mock_driver_log_count == 1);
+    CHECK(mock_driver_log[0].sample_pixel == 0x07E0);
+}
+
+static void test_draw_line_vertical_is_contiguous_on_one_column(void) {
+    mock_driver_reset();
+    janus_draw_line(2, 2, 2, 8, 0x9999);
+    CHECK(mock_driver_log_count == 7);   /* (2,2)..(2,8) inclusive */
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        CHECK(mock_driver_log[i].x == 2);
+        CHECK(mock_driver_log[i].w == 1 && mock_driver_log[i].h == 1);
+    }
+    CHECK(covers(2, 2));
+    CHECK(covers(2, 8));
+    CHECK(!covers(2, 9));
+}
+
+static void test_draw_line_diagonal_hits_both_endpoints(void) {
+    mock_driver_reset();
+    janus_draw_line(0, 0, 5, 5, 0xAAAA);
+    CHECK(covers_colour(0, 0, 0xAAAA));
+    CHECK(covers_colour(5, 5, 0xAAAA));
+    CHECK(mock_driver_log_count == 6);
+}
+
+static void test_sin16_cos16_known_angles(void) {
+    CHECK(janus_sin16(0) == 0);
+    CHECK(janus_sin16(90) == 32767);
+    CHECK(janus_sin16(180) == 0);
+    CHECK(janus_sin16(270) == -32767);
+    CHECK(janus_sin16(-90) == -32767);
+    int16_t s30 = janus_sin16(30);
+    CHECK(s30 >= 16383 && s30 <= 16385);   /* ~0.5 * 32767 */
+    CHECK(janus_cos16(0) == 32767);
+    CHECK(janus_cos16(90) == 0);
+    CHECK(janus_cos16(180) == -32767);
+    /* full-turn reduction */
+    CHECK(janus_sin16(360) == janus_sin16(0));
+    CHECK(janus_sin16(450) == janus_sin16(90));
+}
+
 int main(void) {
     test_rounded_rect_radius_zero_is_a_plain_fill();
     test_rounded_rect_corner_is_clipped_off();
@@ -112,6 +177,12 @@ int main(void) {
     test_circle_centre_and_extent();
     test_circle_no_op_for_non_positive_radius();
     test_circle_straddling_x_zero_writes_no_negative_x();
+    test_rgb565_lerp_endpoints_and_identity();
+    test_shade_rect_v_runs_top_to_bottom_monotone();
+    test_shade_rect_v_single_row_is_a_flat_top_fill();
+    test_draw_line_vertical_is_contiguous_on_one_column();
+    test_draw_line_diagonal_hits_both_endpoints();
+    test_sin16_cos16_known_angles();
 
     if (g_failures == 0) {
         printf("all tests passed\n");

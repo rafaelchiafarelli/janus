@@ -30,4 +30,25 @@ void janus_fill_rounded_rect(janus_rect_t rect, int16_t radius, uint16_t colour)
  * skipped entirely when its row is above y = 0. */
 void janus_fill_circle(int16_t cx, int16_t cy, int16_t r, uint16_t colour);
 
+/* RGB565 channel-wise linear interpolation: `t == 0` -> `a`,
+ * `t == 255` -> `b`. Integer only, no allocation. */
+uint16_t janus_rgb565_lerp(uint16_t a, uint16_t b, uint8_t t);
+
+/* Vertical two-stop gradient over `rect`: top row == `top`, bottom row
+ * == `bottom`, one interpolated `fill_rect` span per row. `rect.h <= 1`
+ * degrades to a flat `top` fill. */
+void janus_shade_rect_v(janus_rect_t rect, uint16_t top, uint16_t bottom);
+
+/* Integer Bresenham line, one 1x1 span per pixel (left-clipped to x >= 0,
+ * rows above y = 0 dropped). Pixel-at-a-time — sized for VU ticks + a
+ * single needle, not bulk drawing. */
+void janus_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t colour);
+
+/* Fixed-point sine / cosine of an angle in **degrees**, result in Q15
+ * (`sin * 32767`, so -32767..32767). Backed by a 0..90 quarter-wave
+ * flash table; the other quadrants are folded onto it. No libm.
+ * `janus_cos16(d) == janus_sin16(d + 90)`. */
+int16_t janus_sin16(int16_t deg);
+int16_t janus_cos16(int16_t deg);
+
 #endif /* JANUS_DRAW_H */
