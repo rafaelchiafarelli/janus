@@ -411,8 +411,35 @@ static void test_switch_screen_erases_old_then_draws_new(void) {
     mock_driver_reset();
     janus_switch_screen(&app, 1);
     CHECK(app.active_screen == 1);
-    CHECK(mock_driver_log_count == 2);          /* 1 erase of s1's rect + 1 draw of s2's widget */
-    CHECK(mock_driver_log[0].sample_pixel == 0x1234);  /* the erase uses s1's own bg colour */
+    CHECK(mock_driver_log_count == 2);          /* 1 union-bbox erase of s1 + 1 draw of s2's widget */
+    CHECK(mock_driver_log[0].sample_pixel == 0x1234);  /* the erase uses s1's first widget's bg colour */
+}
+
+/* the erase is one fill over the union of the outgoing screen's top-level
+ * rects, anchored at the origin — so it also covers the GAP between them
+ * and any ragged right/bottom edge a per-widget fill would leave. */
+static void test_switch_screen_erase_covers_gaps_and_ragged_edges(void) {
+    static const janus_widget_desc_t s1_a = {
+        .kind = JANUS_WIDGET_LABEL, .id = "a", .geometry = { 0, 0, 10, 10 }, .bg_color = 0x0777,
+    };
+    static const janus_widget_desc_t s1_b = {
+        .kind = JANUS_WIDGET_LABEL, .id = "b", .geometry = { 0, 20, 40, 10 }, .bg_color = 0x0777,
+    };
+    static const janus_widget_desc_t s1_widgets[] = { s1_a, s1_b };
+    static const janus_widget_desc_t s2_widget = {
+        .kind = JANUS_WIDGET_LABEL, .id = "s2w", .geometry = { 0, 0, 4, 4 },
+    };
+    static const janus_screen_desc_t s1 = { .name = "S1", .widgets = s1_widgets, .widget_count = 2 };
+    static const janus_screen_desc_t s2 = { .name = "S2", .widgets = &s2_widget, .widget_count = 1 };
+    static const janus_screen_desc_t *const screens[] = { &s1, &s2 };
+    janus_app_t app = {
+        .screens = screens, .nav_titles = NULL, .screen_count = 2, .active_screen = 0,
+    };
+
+    mock_driver_reset();
+    janus_switch_screen(&app, 1);
+    CHECK(rt_painted_colour(5, 15, 0x0777));    /* the gap between the two rows */
+    CHECK(rt_painted_colour(30, 5, 0x0777));    /* ragged edge past the narrow first row */
 }
 
 /* ---- fixture 5: divider/toggle/badge/slider — the four "low effort"
@@ -664,6 +691,25 @@ static void test_text_still_clips_once_at_the_smallest_size(void) {
     mock_driver_reset();
     janus_render_screen(&screen);
     CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 1);
+}
+
+static void test_button_text_overflow_clips_not_shrinks(void) {
+    /* A button does NOT auto-shrink (unlike label/header) — a tab bar must
+     * keep one consistent size, so an over-long button label clips at the
+     * authored font instead of silently dropping to medium (2026-09-07
+     * round 2). "ABCD" at large needs 1 + 4*20 + 3 = 84px; in w=45 only
+     * 'A' (x=1..21) and 'B' (x=22..42) fit, 'C' would end at 63 > 45. */
+    static const janus_widget_desc_t button = {
+        .kind = JANUS_WIDGET_BUTTON, .id = "b", .static_text = "ABCD", .geometry = { 0, 0, 45, 28 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ClipBtn", .widgets = &button, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 2);   /* still at large, just clipped */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 0);
 }
 
 static void test_button_text_is_centered(void) {
@@ -1012,6 +1058,7 @@ int main(void) {
     test_toggle_box_clears_vacated_body_on_collapse();
     test_box_summary_renders_when_collapsed_and_expanded();
     test_switch_screen_erases_old_then_draws_new();
+    test_switch_screen_erase_covers_gaps_and_ragged_edges();
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
     test_toggle_render_is_async_safe();
@@ -1023,6 +1070,7 @@ int main(void) {
     test_label_with_text_draws_one_glyph_call_per_character();
     test_text_wider_than_widget_shrinks_to_fit();
     test_text_still_clips_once_at_the_smallest_size();
+    test_button_text_overflow_clips_not_shrinks();
     test_button_text_is_centered();
     test_medium_font_size_draws_medium_sized_glyph();
     test_font_scale_multiplies_medium_up_to_large_footprint();
