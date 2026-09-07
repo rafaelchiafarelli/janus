@@ -414,13 +414,16 @@ static int32_t text_run_px(const char *text, bool from_flash, int16_t glyph_w, u
  * label (a nav tab like "PWM") sits centered instead of floating against
  * the left edge (2026-09-07).
  *
- * Auto-shrinks to fit `rect.w`: if the run overflows it steps the font
- * down — `font_scale` toward 1 first, then `large` -> `medium` — and only
- * clips once it's already at `medium`/scale 1. This is a *render-time*
- * fit only; Stage 2 geometry is unchanged (it's still computed from the
- * authored font_size — Janus.md's deferred auto-sizing note still holds
- * for layout), so a shrunk label just stops spilling out of the box it
- * was given.
+ * When `allow_shrink` is set, auto-shrinks to fit `rect.w`: if the run
+ * overflows it steps the font down — `font_scale` toward 1 first, then
+ * `large` -> `medium` — and only clips once it's already at `medium`/
+ * scale 1. Render-time fit only; Stage 2 geometry is unchanged (still
+ * computed from the authored font_size — Janus.md's deferred auto-sizing
+ * note still holds for layout), so a shrunk label just stops spilling out
+ * of its box. label/header pass `allow_shrink`; button does NOT — a row
+ * of buttons (a tab bar) must stay one consistent size, so an over-long
+ * button label clips rather than silently rendering smaller than its
+ * neighbours (2026-09-07 round 2).
  *
  * `from_flash` distinguishes the two possible sources of `text`: a
  * widget's authored `static_text` (generated, JANUS_PROGMEM on AVR — pass
@@ -438,7 +441,7 @@ static int32_t text_run_px(const char *text, bool from_flash, int16_t glyph_w, u
  * initialized `.font_scale` — see janus_font.h), so it protects its own
  * buffer regardless. */
 static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16_t bg, bool from_flash,
-                         janus_font_size_t font_size, uint8_t scale, bool center) {
+                         janus_font_size_t font_size, uint8_t scale, bool center, bool allow_shrink) {
     if (text == NULL) return;
     if (scale < 1) scale = 1;
 
@@ -449,7 +452,7 @@ static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16
      * then large -> medium); stop at medium/scale 1 and let the loop
      * below clip, same as before this existed. `rect.w - 1` accounts for
      * the 1px left pad the draw loop starts every string with. */
-    while (text_run_px(text, from_flash, (int16_t)(m.w * scale), scale) > rect.w - 1) {
+    while (allow_shrink && text_run_px(text, from_flash, (int16_t)(m.w * scale), scale) > rect.w - 1) {
         if (scale > 1) {
             scale--;
         } else if (font_size != JANUS_FONT_SIZE_MEDIUM) {
@@ -492,7 +495,7 @@ static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16
  */
 #define JANUS_COLOR_FOCUS_RING  ((uint16_t)0x07ff)  /* cyan */
 #define JANUS_COLOR_FOCUS_SHADE ((uint16_t)0x0208)  /* darker cyan — the ring's shade edge */
-#define JANUS_FOCUS_RING_W 4                         /* ring thickness, px */
+#define JANUS_FOCUS_RING_W 6                         /* ring thickness, px */
 
 /* Only button and box are ever focusable (Stage 3b's _assign_focus_order
  * — everything else keeps JANUS_FOCUS_NONE), so this is the one piece of
@@ -608,13 +611,13 @@ static void draw_text_leaf(const janus_widget_desc_t *w, const void *bound_struc
     if (lw.text_is_format && lw.static_text != NULL) {
         char buf[JANUS_FORMAT_BUF];
         janus_format_into(buf, sizeof buf, lw.static_text, &lw.bind, bound_struct);
-        draw_string(lw.geometry, buf, lw.color, lw.bg_color, false, lw.font_size, lw.font_scale, false);
+        draw_string(lw.geometry, buf, lw.color, lw.bg_color, false, lw.font_size, lw.font_scale, false, true);
         return;
     }
 
     bool from_flash = lw.static_text != NULL;
     const char *text = from_flash ? lw.static_text : janus_read_bound_string(&lw.bind, bound_struct);
-    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale, false);
+    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale, false, true);
 }
 static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
     draw_text_leaf(w, bound_struct);
@@ -625,7 +628,7 @@ static void draw_header(const janus_widget_desc_t *w, const void *bound_struct) 
 static void draw_button(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
-    draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale, true);
+    draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale, true, false);
     if (w == g_focused_widget) draw_focus_ring(lw.geometry);
 }
 /* "missing texture" magenta — a `file:` was authored on an image widget
@@ -852,7 +855,7 @@ static void draw_box_header(const janus_widget_desc_t *box, const void *bound_st
     if (has_strip) {
         fill_rect(lb.geometry_collapsed, lb.bg_color);
         draw_string(lb.geometry_collapsed, lb.static_text, lb.color, lb.bg_color, true,
-                    lb.font_size, lb.font_scale, false);
+                    lb.font_size, lb.font_scale, false, true);
         /* summary widgets always render here, collapsed or expanded — unlike
          * lb.children, which only render when the box is actually expanded
          * (see the JANUS_WIDGET_BOX case below / janus_toggle_box). */
@@ -972,10 +975,29 @@ void janus_render_screen_if_dirty(const janus_screen_desc_t *screen) {
 void janus_clear_screen(const janus_screen_desc_t *screen) {
     if (screen == NULL) return;
     janus_screen_desc_t ls = janus_screen_load(screen);
+    if (ls.widget_count == 0) return;
+
+    /* One fill over the union of every top-level widget's rect, anchored
+     * at the origin — so it also covers the GAP between widgets and any
+     * ragged right/bottom edge that a per-widget fill would leave showing
+     * the previous screen. The colour is the first top-level widget's own
+     * bg: the fixed runtime has no canvas/background colour of its own
+     * (see janus_runtime.h), so a project that needs a specific erase
+     * colour authors `bg:` on that widget — by convention a full-width
+     * status/header bar. Still best-effort: if the screen's widgets don't
+     * reach the panel edges, pixels beyond them aren't ours to clear. */
+    int16_t max_x = 0, max_y = 0;
+    uint16_t erase_colour = 0;
     for (uint16_t i = 0; i < ls.widget_count; i++) {
         janus_widget_desc_t lw = janus_widget_load(&ls.widgets[i]);
-        fill_rect(lw.geometry, lw.bg_color);
+        if (i == 0) erase_colour = lw.bg_color;
+        int16_t rx = (int16_t)(lw.geometry.x + lw.geometry.w);
+        int16_t ry = (int16_t)(lw.geometry.y + lw.geometry.h);
+        if (rx > max_x) max_x = rx;
+        if (ry > max_y) max_y = ry;
     }
+    janus_rect_t all = { 0, 0, max_x, max_y };
+    fill_rect(all, erase_colour);
 }
 
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
