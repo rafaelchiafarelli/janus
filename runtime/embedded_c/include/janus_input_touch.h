@@ -22,6 +22,14 @@
  * janus_box_is_expanded() is true. */
 janus_input_result_t janus_touch_hit_test(const janus_screen_desc_t *screen, int16_t x, int16_t y);
 
+/* Hit-test a point against the app-level nav strip (app.yaml
+ * `nav: { kind: tabs }`) — a tap in a tab cell resolves to
+ * JANUS_INPUT_NAVIGATE for that tab's target screen; NONE otherwise
+ * (including when the app has no nav). Check this before
+ * janus_touch_hit_test — the strip band is app-owned and outranks screen
+ * content. (nav_tabs epic task 3.) */
+janus_input_result_t janus_nav_hit_test(const janus_app_t *app, int16_t x, int16_t y);
+
 /* Input driver contract — vendor/host-provided, non-blocking, mirrors
  * display_busy()'s polling style. Returns true and fills x/y exactly
  * once per new touch; false if there's nothing new since the last call. */

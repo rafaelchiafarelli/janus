@@ -1043,6 +1043,17 @@ dispatched identically by the caller (`main.c`'s event loop) — confirming
 the original sketch's core claim that only the "which widget" front-end
 differs per modality.
 
+**Nav strip — hit-testing** (`janus_nav_hit_test(app, x, y)`,
+`janus_input_touch.c`, nav_tabs epic task 3): the app-level tab strip
+isn't part of any screen, so it has its own point-in-rect test over the
+baked `janus_nav_tabs[]` cells — a tap in a cell → `JANUS_INPUT_NAVIGATE`
+for that tab's `target`. A scaffold checks this *before*
+`janus_touch_hit_test` (the band is app-owned, above the screen).
+`janus_nav_next(app)`/`janus_nav_prev(app)` (`janus_runtime.c`) are the
+non-touch counterpart — cycle the active tab, for a project with a
+control to spare; making the tabs reachable from the *single*-control
+encoder/button scaffolds via focus is a follow-up (nav_tabs epic task 4).
+
 **Touch — hit-testing** (`janus_touch_hit_test`, `janus_input_touch.c`):
 point-in-rect against the already-baked absolute geometry, deepest match
 wins. `box`'s `geometry_collapsed` doubles as its header hit-region —
