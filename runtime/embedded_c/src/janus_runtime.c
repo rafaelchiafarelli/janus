@@ -636,12 +636,31 @@ static void draw_divider(const janus_widget_desc_t *w) {
     fill_rect(lw.geometry, lw.color);
 }
 
+/* progress/gauge share one render: a recessed rounded track (.bg_color),
+ * a rounded proportional fill (.color), and a 1px-ish gloss along the top
+ * of the filled part. Both kinds land here — a distinct radial gauge is a
+ * later increment (ui_widgets/kind_visuals task 2). */
 static void draw_progress_or_gauge(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     double value = janus_read_bound_value(&lw.bind, bound_struct);
     double span = (double)lw.bind.range_max - (double)lw.bind.range_min;
     double fraction = span != 0.0 ? (value - lw.bind.range_min) / span : 0.0;
-    fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+
+    janus_rect_t r = lw.geometry;
+    int16_t radius = (int16_t)(r.h / 2);
+    janus_fill_rounded_rect(r, radius, lw.bg_color);
+
+    int16_t filled_w = (int16_t)((double)r.w * fraction);
+    if (filled_w > 0) {
+        janus_rect_t fill = { r.x, r.y, filled_w, r.h };
+        janus_fill_rounded_rect(fill, radius, lw.color);
+        int16_t gloss_h = (int16_t)(r.h / 3);
+        if (gloss_h < 1) gloss_h = 1;
+        janus_rect_t gloss = { r.x, r.y, filled_w, gloss_h };
+        janus_shade_rect_v(gloss, janus_rgb565_lerp(lw.color, 0xffff, 64), lw.color);
+    }
 }
 
 static void draw_checkbox(const janus_widget_desc_t *w, const void *bound_struct) {
@@ -650,21 +669,52 @@ static void draw_checkbox(const janus_widget_desc_t *w, const void *bound_struct
     fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
 }
 
+/* led: a round, shaded indicator — a darker rim ring, the state-colour
+ * face on top, and a small lighter specular highlight up-and-left. State
+ * -> colour selection is unchanged (0 -> .bg_color, 1 -> .color, >=2 ->
+ * amber); this only changes how that colour is painted. Rim/highlight
+ * are derived from the state colour via janus_rgb565_lerp, so there's
+ * nothing new to author (ui_widgets/kind_visuals task 3). */
 static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     int state = (int)janus_read_bound_value(&lw.bind, bound_struct);
-    uint16_t value = state <= 0 ? lw.bg_color : (state == 1 ? lw.color : JANUS_COLOR_LED_WARN);
-    fill_rect(lw.geometry, value);
+    uint16_t colour = state <= 0 ? lw.bg_color : (state == 1 ? lw.color : JANUS_COLOR_LED_WARN);
+
+    janus_rect_t r = lw.geometry;
+    int16_t cx = (int16_t)(r.x + r.w / 2);
+    int16_t cy = (int16_t)(r.y + r.h / 2);
+    int16_t rad = (int16_t)((r.w < r.h ? r.w : r.h) / 2);
+    if (rad <= 0) { fill_rect(r, colour); return; }
+
+    janus_fill_circle(cx, cy, rad, janus_rgb565_lerp(colour, 0x0000, 80));       /* rim */
+    janus_fill_circle(cx, cy, (int16_t)(rad - 1), colour);                        /* face */
+    int16_t hl_r = (int16_t)(rad / 3);
+    if (hl_r < 1) hl_r = 1;
+    janus_fill_circle((int16_t)(cx - rad / 3), (int16_t)(cy - rad / 3), hl_r,
+                      janus_rgb565_lerp(colour, 0xffff, 130));                    /* highlight */
 }
 
-/* toggle/badge/slider intentionally reuse checkbox's and progress/gauge's
- * bind logic exactly (same shape: int on/off, numeric+range) — only the
- * widget kind (and so its own .color/.bg_color) differs, so each reads as
- * its own kind in a render. */
+/* badge/slider still reuse checkbox's / progress's bind logic as a plain
+ * fill — toggle is where that stops: it renders a switch (rounded pill
+ * track + a circular knob that sits left when off, right when on), so it
+ * no longer looks like a checkbox. Knob colour is a lightened copy of
+ * whichever track colour is showing, so it reads in both states with no
+ * new authored field (ui_widgets/kind_visuals task 1). */
 static void draw_toggle(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = janus_read_bound_value(&lw.bind, bound_struct);
-    fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
+    bool on = janus_read_bound_value(&lw.bind, bound_struct) != 0.0;
+    janus_rect_t r = lw.geometry;
+
+    int16_t half_w = (int16_t)(r.w / 2);
+    int16_t kd = r.h < half_w ? r.h : half_w;          /* knob diameter */
+    int16_t pad = 1;
+    uint16_t track = on ? lw.color : lw.bg_color;
+
+    janus_fill_rounded_rect(r, (int16_t)(r.h / 2), track);
+    int16_t cx = on ? (int16_t)(r.x + r.w - kd / 2 - pad)
+                    : (int16_t)(r.x + kd / 2 + pad);
+    janus_fill_circle(cx, (int16_t)(r.y + r.h / 2), (int16_t)(kd / 2 - pad),
+                      janus_rgb565_lerp(track, 0xffff, 96));
 }
 
 static void draw_badge(const janus_widget_desc_t *w, const void *bound_struct) {
