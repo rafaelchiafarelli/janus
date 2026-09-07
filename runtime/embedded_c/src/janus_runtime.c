@@ -657,14 +657,27 @@ static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
     fill_rect(lw.geometry, value);
 }
 
-/* toggle/badge/slider intentionally reuse checkbox's and progress/gauge's
- * bind logic exactly (same shape: int on/off, numeric+range) — only the
- * widget kind (and so its own .color/.bg_color) differs, so each reads as
- * its own kind in a render. */
+/* badge/slider still reuse checkbox's / progress's bind logic as a plain
+ * fill — toggle is where that stops: it renders a switch (rounded pill
+ * track + a circular knob that sits left when off, right when on), so it
+ * no longer looks like a checkbox. Knob colour is a lightened copy of
+ * whichever track colour is showing, so it reads in both states with no
+ * new authored field (ui_widgets/kind_visuals task 1). */
 static void draw_toggle(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = janus_read_bound_value(&lw.bind, bound_struct);
-    fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
+    bool on = janus_read_bound_value(&lw.bind, bound_struct) != 0.0;
+    janus_rect_t r = lw.geometry;
+
+    int16_t half_w = (int16_t)(r.w / 2);
+    int16_t kd = r.h < half_w ? r.h : half_w;          /* knob diameter */
+    int16_t pad = 1;
+    uint16_t track = on ? lw.color : lw.bg_color;
+
+    janus_fill_rounded_rect(r, (int16_t)(r.h / 2), track);
+    int16_t cx = on ? (int16_t)(r.x + r.w - kd / 2 - pad)
+                    : (int16_t)(r.x + kd / 2 + pad);
+    janus_fill_circle(cx, (int16_t)(r.y + r.h / 2), (int16_t)(kd / 2 - pad),
+                      janus_rgb565_lerp(track, 0xffff, 96));
 }
 
 static void draw_badge(const janus_widget_desc_t *w, const void *bound_struct) {
