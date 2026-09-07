@@ -1069,6 +1069,30 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     draw_nav_bar(app);   /* strip lives in its own band above the screen; repaint the active tab */
 }
 
+/* Switch to the tab `dir` cells away (nav order, wrapping) from whichever
+ * one currently points at `active_screen`. Public entry for a project
+ * that has a control to spare for tab-cycling (e.g. ArduinoIHM's second
+ * encoder) — the single-control scaffolds reach the tabs through focus
+ * instead (nav_tabs epic task 4). No-op without nav. Leaves focus
+ * re-establishment on the new screen to the caller, same as
+ * janus_switch_screen. */
+static void nav_step(janus_app_t *app, int16_t dir) {
+    if (app == NULL || app->nav_tabs == NULL || app->nav_tab_count == 0) return;
+    uint16_t cur = 0;
+    for (uint16_t i = 0; i < app->nav_tab_count; i++) {
+        if (janus_nav_tab_load(&app->nav_tabs[i]).target == (int16_t)app->active_screen) {
+            cur = i;
+            break;
+        }
+    }
+    int32_t n = app->nav_tab_count;
+    int32_t nxt = (((int32_t)cur + dir) % n + n) % n;
+    janus_switch_screen(app, (uint16_t)janus_nav_tab_load(&app->nav_tabs[nxt]).target);
+}
+
+void janus_nav_next(janus_app_t *app) { nav_step(app, 1); }
+void janus_nav_prev(janus_app_t *app) { nav_step(app, -1); }
+
 #if defined(JANUS_RENDER_NONBLOCKING)
 void janus_render_screen_async_start(const janus_screen_desc_t *screen) {
     g_async_op_count = 0;

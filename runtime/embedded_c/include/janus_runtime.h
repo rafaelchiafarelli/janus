@@ -312,6 +312,17 @@ void janus_clear_screen(const janus_screen_desc_t *screen);
  * (nav_tabs epic decision 2). (task 2.) */
 void janus_render_nav_bar(const janus_app_t *app);
 
+/* Switch to the tab one cell after / before (nav order, wrapping) the one
+ * currently showing `app->active_screen` — a full janus_switch_screen
+ * under the hood (erases the old screen, renders the new one, repaints
+ * the strip). For a project with a control to spare for tab-cycling
+ * (ArduinoIHM's second encoder, say); the single-control scaffolds reach
+ * the tabs through focus instead. No-op if the app has no nav. Focus on
+ * the new screen is the caller's to re-establish, same as
+ * janus_switch_screen. (nav_tabs epic task 3.) */
+void janus_nav_next(janus_app_t *app);
+void janus_nav_prev(janus_app_t *app);
+
 /* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its
  * always-visible `summary` plus its `children` if currently expanded,
  * same as any other traversal reaching it. The entry point for a caller

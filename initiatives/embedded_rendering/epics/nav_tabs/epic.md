@@ -29,7 +29,8 @@ can't fix.
 |---|---|---|---|
 | 1 | `tasks/1-nav-bar-geometry-and-descriptor-done.md` | ✅ **done** | `NAV_BAR_H`=28 band offsets every screen's root when `app.nav` set; Stage 1 requires `display:` + validates tab count/targets; `build_nav_bar` lays equal cells (last absorbs remainder); `janus_nav_tabs[]` + `.nav_tab_count` baked into the app table; `JANUS_DISPLAY_PANEL_W/H` now emitted for `nav` too. No pixels. |
 | 2 | `tasks/2-draw-nav-bar-done.md` | ✅ **done** | `janus_render_nav_bar`/`draw_nav_bar` in the fixed runtime — N equal cells (pgm-safe `janus_nav_tab_load`), `medium` centered titles (no shrink), active cell = active fill + 6px accent bar. Wired into `janus_switch_screen[_async_start]` + all 6 `main_*.c.tmpl` scaffolds. Not in `janus_render_screen`. |
-| 3 | `tasks/3-nav-bar-input.md` | ⬜ planned | touch hit-test covers the strip → `JANUS_INPUT_NAVIGATE`; encoder/buttons get a defined tab interaction; `main_*.c.tmpl` scaffolds call it; `architecture.md`'s "metadata only" note updated. |
+| 3 | `tasks/3-nav-bar-input-done.md` | ✅ **done** | `janus_nav_hit_test` (tap in a cell → `NAVIGATE`) wired into the touch scaffolds; public `janus_nav_next/prev(app)` cycle helper; docs. The focus-stop half of decision 3 split out ↓. |
+| 4 | `tasks/4-nav-bar-focus-stop.md` | ⬜ planned | Fold the strip into `janus_input_focus.c` traversal so a single-control encoder/button scaffold reaches the tabs — needs `app` threaded through the focus API + a synthetic focus position + a focus ring on a cell rect. Split from task 3 (invasive to the focus core). |
 
 ## Decisions (settled with Rafael 2026-09-07 — these are fixed constraints for the tasks below)
 

@@ -17,8 +17,14 @@ int main(void) {
         int16_t x, y;
         if (!janus_touch_poll(&x, &y)) continue;
 
-        const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
-        janus_input_result_t hit = janus_touch_hit_test(screen, x, y);
+        /* the app-level tab strip outranks screen content (it's a
+         * separate band above the screen) — check it first */
+        janus_input_result_t hit = janus_nav_hit_test(&janus_app, x, y);
+        if (hit.kind == JANUS_INPUT_NONE) {
+            const janus_screen_desc_t *screen =
+                janus_app_get_screen(&janus_app, janus_app.active_screen);
+            hit = janus_touch_hit_test(screen, x, y);
+        }
         switch (hit.kind) {
             case JANUS_INPUT_ACTION:
                 janus_handle_action((janus_action_t)hit.action);
