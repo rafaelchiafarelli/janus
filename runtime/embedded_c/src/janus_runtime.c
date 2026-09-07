@@ -16,6 +16,7 @@
 #include "janus_runtime.h"
 
 #include "janus_bound.h"
+#include "janus_draw.h"
 #include "janus_font.h"
 #include "janus_format.h"
 
@@ -186,6 +187,73 @@ static void fill_rect_fraction(janus_rect_t rect, double fraction,
     };
     fill_rect(filled, fill_value);
     fill_rect(empty, empty_value);
+}
+
+/* ------------------------------------------------------ shape primitives --
+ * janus_draw.h's helpers — see that header for the contract. Everything
+ * here decomposes to `fill_rect`, so the JANUS_RENDER_NONBLOCKING path
+ * captures them as ordinary JANUS_ASYNC_OP_FILL spans with no extra code.
+ *
+ * `isqrt32` is a plain bit-by-bit integer square root (no <math.h>): for
+ * the radii these primitives see (a widget dimension / 2, so well under
+ * 256) the operand `r*r - dy*dy` fits comfortably in int32. */
+static int16_t isqrt32(int32_t v) {
+    if (v <= 0) return 0;
+    int32_t rem = v, root = 0, bit = 1L << 30;
+    while (bit > v) bit >>= 2;
+    while (bit != 0) {
+        if (rem >= root + bit) {
+            rem -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
+        bit >>= 2;
+    }
+    return (int16_t)root;
+}
+
+/* One horizontal run of `colour`, left-clipped to x >= 0 and dropped if
+ * its row is above the panel. `fill_rect` itself doesn't clip negative
+ * origins (widget geometry is always on-screen), but a circle/rounded
+ * corner can round past an edge, so the shape helpers clip here. */
+static void fill_hspan(int16_t x, int16_t y, int16_t w, uint16_t colour) {
+    if (y < 0 || w <= 0) return;
+    if (x < 0) { w = (int16_t)(w + x); x = 0; }
+    if (w <= 0) return;
+    janus_rect_t span = { x, y, w, 1 };
+    fill_rect(span, colour);
+}
+
+void janus_fill_rounded_rect(janus_rect_t rect, int16_t radius, uint16_t colour) {
+    if (rect.w <= 0 || rect.h <= 0) return;
+    int16_t max_r = (int16_t)((rect.w < rect.h ? rect.w : rect.h) / 2);
+    if (radius > max_r) radius = max_r;
+    if (radius <= 0) { fill_rect(rect, colour); return; }
+
+    /* centre band: full width, the rows the corners don't touch */
+    janus_rect_t band = {
+        rect.x, (int16_t)(rect.y + radius), rect.w, (int16_t)(rect.h - 2 * radius)
+    };
+    fill_rect(band, colour);
+
+    /* `radius` rounded rows, mirrored top and bottom — 2*radius spans,
+     * plus the band above == 2*radius + 1 fill_rect calls total */
+    for (int16_t dy = 1; dy <= radius; dy++) {
+        int16_t inset = (int16_t)(radius - isqrt32((int32_t)radius * radius - (int32_t)dy * dy));
+        int16_t span_w = (int16_t)(rect.w - 2 * inset);
+        int16_t x = (int16_t)(rect.x + inset);
+        fill_hspan(x, (int16_t)(rect.y + radius - dy), span_w, colour);
+        fill_hspan(x, (int16_t)(rect.y + rect.h - radius - 1 + dy), span_w, colour);
+    }
+}
+
+void janus_fill_circle(int16_t cx, int16_t cy, int16_t r, uint16_t colour) {
+    if (r <= 0) return;
+    for (int16_t dy = (int16_t)(-r); dy <= r; dy++) {
+        int16_t half = isqrt32((int32_t)r * r - (int32_t)dy * dy);
+        fill_hspan((int16_t)(cx - half), (int16_t)(cy + dy), (int16_t)(2 * half + 1), colour);
+    }
 }
 
 /* --------------------------------------------------------- font tables --
