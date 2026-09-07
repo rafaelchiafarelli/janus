@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+try:
+    from PIL import Image
+    _HAS_PIL = True
+except ImportError:  # image-baking tests need Pillow; the rest of this file doesn't
+    Image = None
+    _HAS_PIL = False
 
 from janus.stage1_parse.dsl_yaml import parse_screen
 from janus.stage3b_embedded_c.emit_embedded_c import (
@@ -76,7 +81,7 @@ class TestEmitEmbeddedC(unittest.TestCase):
 
     def test_static_label_has_no_bind(self) -> None:
         # the static caption's own entry has no offsetof call right after its id
-        segment = _widget_segment(self.out, "battery_caption", 200)
+        segment = _widget_segment(self.out, "battery_caption", 260)
         self.assertIn("JANUS_FIELD_NONE", segment)
 
     def test_geometry_baked_in(self) -> None:
@@ -286,7 +291,7 @@ class TestEmitEmbeddedCLowEffortKinds(unittest.TestCase):
 
     def test_slider_reuses_progress_style_bind_with_range(self) -> None:
         self.assertIn("offsetof(dev_t, level)", self.out)
-        segment = _widget_segment(self.out, "s", 300)
+        segment = _widget_segment(self.out, "s", 360)
         self.assertIn(".range_min = 0, .range_max = 100", segment)
 
 
@@ -357,6 +362,7 @@ class TestEmitEmbeddedCFocusOrder(unittest.TestCase):
         self.assertIn(".focus_order = 2", self._segment(out, "after_btn"))
 
 
+@unittest.skipUnless(_HAS_PIL, "Pillow not installed")
 class TestEmitImageWidget(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -468,6 +474,24 @@ class TestEstimateBakedImageBytes(unittest.TestCase):
 
     def test_zero_when_no_baked_images(self) -> None:
         self.assertEqual(estimate_baked_image_bytes(self._app(Widget(kind="label", id="l", text="x"))), 0)
+
+
+class TestFormatTextEmit(unittest.TestCase):
+    def _emit(self, *widgets: Widget) -> str:
+        return emit_screen(Screen(name="Fmt", root=Widget(kind="column", id="r", children=list(widgets))))
+
+    def test_format_label_bakes_text_is_format_true(self) -> None:
+        out = self._emit(
+            Widget(kind="label", id="fmt", text="Duty: %d%%", text_is_format=True,
+                   bind=Binding(message="m", field="duty", type="int")),
+        )
+        segment = _widget_segment(out, "fmt", 300)
+        self.assertIn(".text_is_format = true", segment)
+
+    def test_plain_label_bakes_text_is_format_false(self) -> None:
+        out = self._emit(Widget(kind="label", id="plain", text="Hello"))
+        segment = _widget_segment(out, "plain", 300)
+        self.assertIn(".text_is_format = false", segment)
 
 
 if __name__ == "__main__":
