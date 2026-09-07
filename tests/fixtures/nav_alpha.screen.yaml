@@ -1,0 +1,6 @@
+screen: Alpha
+layout: column
+fill: true
+children:
+  - { kind: header, id: alpha_header, text: "Alpha", font_size: medium, size: { w: 120, h: 20 } }
+  - { kind: label, id: alpha_body, text: "Alpha body", font_size: medium, size: { w: 200, h: 18 } }

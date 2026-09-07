@@ -217,10 +217,27 @@ class DisplayConfig:
 @dataclass
 class App:
     screens: list[Screen]
-    nav: list[NavTarget] | None    # kind is always "tabs" in v1
+    nav: list[NavTarget] | None    # kind is always "tabs" in v1; requires `display:` (Stage 1 raises otherwise)
     display: DisplayConfig | None  # None if app.yaml omits `display:`
     input_modality: Literal["touch", "encoder", "buttons"] = "touch"
+    nav_bar: list[NavTab] | None = None  # laid-out tab strip, filled after layout (build_nav_bar); not authored
 ```
+
+**`nav` → nav strip (nav_tabs epic).** When `app.nav` is set, Stage 1
+requires a `display:` block (a full-width tab strip has no width to lay
+across otherwise) and rejects a `nav` target that isn't one of the app's
+screens or a tab count that can't get `NAV_TAB_MIN_W` px per cell. Stage 2
+then (a) reserves a `NAV_BAR_H`-tall band at `y = 0` on every screen —
+`layout_screen(screen, display, has_nav=True)` offsets the screen root to
+`y = NAV_BAR_H` and takes the band out of the height a top-level `fill:`
+child sees; the screen's own authored `header`/`status_bar` row is
+unchanged, it just starts below the strip — and (b) `build_nav_bar(app)`
+lays the tabs out as equal-width cells across `display.width` (last cell
+absorbs the width remainder), each `NAV_BAR_H` tall, in `nav` order, each
+carrying its target screen's index. `NAV_BAR_H` / `NAV_TAB_MIN_W` are
+fixed layout constants (no `nav:` styling fields — nav_tabs epic decision
+2). Task 1 is geometry + the baked descriptor only; `draw_nav_bar` and
+the input wiring are later tasks.
 
 ---
 
@@ -452,7 +469,12 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   Implemented: `emit_actions_header(app)`.
 - `janus_app.gen.c` — the `janus_app_t` table: an array of pointers to
   every screen's `janus_screen_desc_t`, plus `nav_titles` (parallel array,
-  `NULL` if `app.nav` is unset). Implemented: `emit_app_table(app)`;
+  `NULL` if `app.nav` is unset) and — when `app.nav` is set —
+  `janus_nav_tabs[]` (`JANUS_PROGMEM` array of `janus_nav_tab_t`: baked
+  `rect` + flash `title` + `target` screen index, in `nav` order) with
+  `.nav_tab_count`. `nav_tabs[]` titles are flash-resident (the render
+  path will pgm-read them); the legacy screen-parallel `nav_titles` stays
+  plain. Implemented: `emit_app_table(app)` (calls `build_nav_bar`);
   raises if `app.nav` doesn't cover every screen.
 - `janus_display_config.gen.h` — only written when `app.display` is set:
   `JANUS_DISPLAY_WIDTH`/`HEIGHT` + `JANUS_DISPLAY_COLOR*`/`BUS*`/
@@ -634,9 +656,13 @@ typedef struct {
                                   * .dirty_offset and janus_render_*_if_dirty above */
 } janus_screen_desc_t;
 
+typedef struct { janus_rect_t rect; const char *title; int16_t target; } janus_nav_tab_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;
-    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset (no tab bar) */
+    const char *const *nav_titles;   /* legacy screen-parallel title lookup; NULL if app.nav is unset */
+    const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM, nav order, baked geometry; NULL if app.nav is unset */
+    uint16_t nav_tab_count;          /* 0 if app.nav is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -758,10 +784,11 @@ emits the `JANUS_PROGMEM` attribute on every generated array/struct, and
 routes every `id`/`static_text`/screen-`name` string through
 `_emit_flash_string()` — a named `static const char ... JANUS_PROGMEM`
 declaration per string, since an inline string literal has no way to
-carry its own `PROGMEM` attribute in C. `nav_titles` is the one exception,
-deliberately left as plain (RAM-shadowed) — nothing in `janus_runtime.c`
-reads a nav title yet (no tab-bar rendering implemented); revisit once
-that lands.
+carry its own `PROGMEM` attribute in C. The legacy screen-parallel
+`nav_titles` array is left plain (RAM-shadowed) — nothing on the render
+path reads it. The nav_tabs epic's `janus_nav_tabs[]` descriptor **does**
+flash-resident its `title` strings (via a per-string `static const char
+... JANUS_PROGMEM`), since `draw_nav_bar` (task 2) will pgm-read them.
 
 **Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
 `janus_action_t` is defined by the *generated*, per-project
@@ -803,6 +830,21 @@ redrawn on top of the incoming screen's freshly rendered content. Only
 `button` (unbound in v1, per Janus.md's catalog) and `box` are ever
 focusable, so the redraw never needs `bind` data — `read_bound_value`/
 `read_bound_string` are never called from this path.
+
+**Nav strip rendering (nav_tabs epic task 2).** `janus_render_nav_bar(app)`
+(internal `draw_nav_bar`) paints the app-level tab strip into its band:
+one `fill_rect` per `app->nav_tabs` cell (baked geometry, loaded pgm-safe
+via `janus_nav_tab_load`), the title centered at `medium` with no
+auto-shrink (every tab must read at one size), and — on the cell whose
+`target == app->active_screen` — an active fill plus a
+`JANUS_NAV_ACCENT_H` (6px) bottom accent bar; inactive cells get a 1px
+baseline. Colours/heights are fixed runtime constants (`JANUS_COLOR_NAV_*`,
+decision 2), same "Janus-owned affordance" status as `JANUS_COLOR_FOCUS_RING`.
+It is **not** called from `janus_render_screen` (screen-scoped, no `app`)
+— `janus_switch_screen[_async_start]` call it right after rendering the
+incoming screen, and a scaffold calls it once after the first
+`janus_render_screen`; a periodic `janus_render_*_if_dirty` sweep never
+touches it.
 
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
@@ -1000,6 +1042,17 @@ established between what the fixed library understands autonomously
 dispatched identically by the caller (`main.c`'s event loop) — confirming
 the original sketch's core claim that only the "which widget" front-end
 differs per modality.
+
+**Nav strip — hit-testing** (`janus_nav_hit_test(app, x, y)`,
+`janus_input_touch.c`, nav_tabs epic task 3): the app-level tab strip
+isn't part of any screen, so it has its own point-in-rect test over the
+baked `janus_nav_tabs[]` cells — a tap in a cell → `JANUS_INPUT_NAVIGATE`
+for that tab's `target`. A scaffold checks this *before*
+`janus_touch_hit_test` (the band is app-owned, above the screen).
+`janus_nav_next(app)`/`janus_nav_prev(app)` (`janus_runtime.c`) are the
+non-touch counterpart — cycle the active tab, for a project with a
+control to spare; making the tabs reachable from the *single*-control
+encoder/button scaffolds via focus is a follow-up (nav_tabs epic task 4).
 
 **Touch — hit-testing** (`janus_touch_hit_test`, `janus_input_touch.c`):
 point-in-rect against the already-baked absolute geometry, deepest match

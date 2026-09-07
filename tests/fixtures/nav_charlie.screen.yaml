@@ -1,0 +1,6 @@
+screen: Charlie
+layout: column
+fill: true
+children:
+  - { kind: header, id: charlie_header, text: "Charlie", font_size: medium, size: { w: 120, h: 20 } }
+  - { kind: label, id: charlie_body, text: "Charlie body", font_size: medium, size: { w: 200, h: 18 } }
