@@ -344,8 +344,12 @@ static void test_toggle_box_clears_vacated_body_on_collapse(void) {
 /* ---- fixture 3b: box.summary — always drawn, collapsed or expanded,
  * unlike .children (expanded-only, see fixture 3 above) ---- */
 static void test_box_summary_renders_when_collapsed_and_expanded(void) {
-    static const janus_widget_desc_t summary_led = {
-        .kind = JANUS_WIDGET_LED, .id = "status_led", .geometry = { 0, 0, 10, 10 },
+    /* summary child is a checkbox (one flat fill) — this fixture asserts
+     * exact call counts, and led now renders as a multi-span shaded disc
+     * (kind_visuals task 3); the box-summary behaviour under test doesn't
+     * depend on which leaf kind sits in the summary. */
+    static const janus_widget_desc_t summary_dot = {
+        .kind = JANUS_WIDGET_CHECKBOX, .id = "status_dot", .geometry = { 0, 0, 10, 10 },
     };
     static const janus_widget_desc_t box_child = {
         .kind = JANUS_WIDGET_LABEL, .id = "child", .geometry = { 0, 16, 10, 10 },
@@ -355,7 +359,7 @@ static void test_box_summary_renders_when_collapsed_and_expanded(void) {
         .geometry = { 0, 0, 10, 26 }, .geometry_collapsed = { 0, 0, 10, 16 },
         .initial_expanded = false,
         .children = &box_child, .child_count = 1,
-        .summary_children = &summary_led, .summary_child_count = 1,
+        .summary_children = &summary_dot, .summary_child_count = 1,
     };
     static const janus_screen_desc_t screen = {
         .name = "BoxSummary", .widgets = &box_widget, .widget_count = 1, .bound_struct = NULL,
@@ -451,6 +455,58 @@ static void test_toggle_render_is_async_safe(void) {
     };
     g_demo.level = 1;
     CHECK(rt_render_matches_async(&screen));
+}
+
+/* led renders as a shaded disc: darker rim ring, state-colour face,
+ * lighter specular highlight up-left. Geometry {0,0,20,20}: cx=cy=10,
+ * rad=10, highlight centred at (7,7). */
+#define LED_COLOR  0x4208   /* mid grey with headroom both ways */
+#define LED_BG     0x8410
+
+static const janus_widget_desc_t g_led = {
+    .kind = JANUS_WIDGET_LED, .id = "led", .geometry = { 0, 0, 20, 20 },
+    .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+    .color = LED_COLOR, .bg_color = LED_BG,
+};
+static const janus_screen_desc_t g_led_screen = {
+    .name = "Led", .widgets = &g_led, .widget_count = 1, .bound_struct = &g_demo,
+};
+
+static int channel_lighter(uint16_t lighter, uint16_t base) {
+    return ((lighter >> 11) & 0x1F) >= ((base >> 11) & 0x1F) &&
+           ((lighter >> 5)  & 0x3F) >= ((base >> 5)  & 0x3F) &&
+           ( lighter        & 0x1F) >= ( base        & 0x1F) &&
+           lighter != base;
+}
+
+static void test_led_shaded_disc_per_state(void) {
+    const uint16_t rim = janus_rgb565_lerp(LED_COLOR, 0x0000, 80);
+    const uint16_t hl  = janus_rgb565_lerp(LED_COLOR, 0xFFFF, 130);
+
+    g_demo.level = 1;
+    mock_driver_reset();
+    janus_render_screen(&g_led_screen);
+    CHECK(rt_painted_colour(10, 10, LED_COLOR));    /* face centre = state colour */
+    CHECK(rt_painted_colour(20, 10, rim));          /* rim ring at the disc edge */
+    CHECK(rim != LED_COLOR && rim != 0);
+    CHECK(rt_painted_colour(7, 7, hl));             /* specular highlight */
+    CHECK(channel_lighter(hl, LED_COLOR));
+    CHECK(!rt_painted(22, 10));                     /* nothing outside the disc */
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&g_led_screen);
+    CHECK(rt_painted_colour(10, 10, LED_BG));       /* off state */
+
+    g_demo.level = 2;
+    mock_driver_reset();
+    janus_render_screen(&g_led_screen);
+    CHECK(rt_painted_colour(10, 10, JANUS_COLOR_LED_WARN));  /* warn state */
+}
+
+static void test_led_render_is_async_safe(void) {
+    g_demo.level = 1;
+    CHECK(rt_render_matches_async(&g_led_screen));
 }
 
 static void test_badge_fill_tracks_live_value(void) {
@@ -894,6 +950,8 @@ int main(void) {
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
     test_toggle_render_is_async_safe();
+    test_led_shaded_disc_per_state();
+    test_led_render_is_async_safe();
     test_badge_fill_tracks_live_value();
     test_slider_fill_tracks_live_value();
     test_label_without_text_draws_only_the_background_fill();
