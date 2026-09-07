@@ -191,6 +191,16 @@ class TestEmitFiles(unittest.TestCase):
         self.assertNotIn("JANUS_DISPLAY_BACKGROUND", out)
         self.assertNotIn("JANUS_DISPLAY_PANEL_W", out)
 
+    def test_render_config_header_carries_panel_size_when_nav_is_set(self) -> None:
+        # a nav bar needs the panel width in the runtime even with no background
+        out = render_render_config_header(
+            "blocking", DisplayConfig(width=320, height=480, color="rgb565"), has_nav=True
+        )
+        self.assertIn("#define JANUS_DISPLAY_PANEL_W 320", out)
+        self.assertIn("#define JANUS_DISPLAY_PANEL_H 480", out)
+        self.assertNotIn("JANUS_DISPLAY_BACKGROUND", out)
+        self.assertTrue(_balanced_braces(out))
+
     def test_render_config_header_carries_background_and_panel_size_when_set(self) -> None:
         out = render_render_config_header(
             "blocking",

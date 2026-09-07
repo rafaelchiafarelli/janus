@@ -64,3 +64,28 @@ janus_input_result_t janus_touch_hit_test(const janus_screen_desc_t *screen, int
     }
     return result;
 }
+
+/* The nav strip (app.yaml `nav: { kind: tabs }`) is app-level, not part
+ * of any screen, so it gets its own hit-test — a tap in a tab cell
+ * (baked geometry, pgm-safe load) resolves to JANUS_INPUT_NAVIGATE for
+ * that tab's target screen. A scaffold checks this before
+ * janus_touch_hit_test so the band always wins over whatever screen
+ * content happens to sit under it (nothing does — the screen starts at
+ * y = NAV_BAR_H — but the ordering is the contract). NONE if the app has
+ * no nav or the point is outside every cell. */
+janus_input_result_t janus_nav_hit_test(const janus_app_t *app, int16_t x, int16_t y) {
+    janus_input_result_t result = {
+        .kind = JANUS_INPUT_NONE, .widget = NULL,
+        .action = JANUS_ACTION_ID_NONE, .navigate_target = -1,
+    };
+    if (app == NULL || app->nav_tabs == NULL) return result;
+    for (uint16_t i = 0; i < app->nav_tab_count; i++) {
+        janus_nav_tab_t tab = janus_nav_tab_load(&app->nav_tabs[i]);
+        if (point_in_rect(x, y, tab.rect)) {
+            result.kind = JANUS_INPUT_NAVIGATE;
+            result.navigate_target = tab.target;
+            return result;
+        }
+    }
+    return result;
+}

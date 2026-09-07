@@ -100,12 +100,59 @@ static void test_expanded_box_child_becomes_hit_testable(void) {
     CHECK(header_hit.kind == JANUS_INPUT_TOGGLE_BOX);
 }
 
+/* ---- nav strip hit-test (nav_tabs epic task 3) ---- */
+static const janus_nav_tab_t it_nav_tabs[] = {
+    { { 0,  0, 40, 28 }, "A", 0 },
+    { { 40, 0, 40, 28 }, "B", 1 },
+    { { 80, 0, 40, 28 }, "C", 2 },
+};
+static const janus_screen_desc_t it_nav_screen = { .name = "N", .widget_count = 0 };
+static const janus_screen_desc_t *const it_nav_screens[] = {
+    &it_nav_screen, &it_nav_screen, &it_nav_screen,
+};
+
+static void test_nav_hit_test_resolves_a_tab_tap_to_navigate(void) {
+    janus_app_t app = {
+        .screens = it_nav_screens, .nav_tabs = it_nav_tabs, .nav_tab_count = 3,
+        .screen_count = 3, .active_screen = 0,
+    };
+    janus_input_result_t hit = janus_nav_hit_test(&app, 100, 14);  /* inside cell C */
+    CHECK(hit.kind == JANUS_INPUT_NAVIGATE);
+    CHECK(hit.navigate_target == 2);
+
+    /* a point below the 28px band is not the strip's */
+    CHECK(janus_nav_hit_test(&app, 100, 40).kind == JANUS_INPUT_NONE);
+}
+
+static void test_nav_hit_test_none_without_nav(void) {
+    janus_app_t no_nav = {
+        .screens = it_nav_screens, .nav_tabs = NULL, .nav_tab_count = 0,
+        .screen_count = 3, .active_screen = 0,
+    };
+    CHECK(janus_nav_hit_test(&no_nav, 10, 10).kind == JANUS_INPUT_NONE);
+    CHECK(janus_nav_hit_test(NULL, 10, 10).kind == JANUS_INPUT_NONE);
+}
+
+static void test_nav_next_prev_cycle_the_active_screen(void) {
+    janus_app_t app = {
+        .screens = it_nav_screens, .nav_tabs = it_nav_tabs, .nav_tab_count = 3,
+        .screen_count = 3, .active_screen = 0,
+    };
+    janus_nav_next(&app);  CHECK(app.active_screen == 1);
+    janus_nav_next(&app);  CHECK(app.active_screen == 2);
+    janus_nav_next(&app);  CHECK(app.active_screen == 0);   /* wraps */
+    janus_nav_prev(&app);  CHECK(app.active_screen == 2);   /* wraps back */
+}
+
 int main(void) {
     test_tap_on_action_button();
     test_tap_on_navigate_button();
     test_tap_on_plain_label_is_a_defined_miss();
     test_tap_on_empty_space_is_none();
     test_tap_on_box_header_toggles_regardless_of_state();
+    test_nav_hit_test_resolves_a_tab_tap_to_navigate();
+    test_nav_hit_test_none_without_nav();
+    test_nav_next_prev_cycle_the_active_screen();
     test_collapsed_box_child_is_not_hit_testable();
     test_expanded_box_child_becomes_hit_testable(); /* must run last: mutates box state */
 

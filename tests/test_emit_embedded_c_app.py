@@ -91,6 +91,25 @@ class TestActionsAndAppTable(unittest.TestCase):
     def test_app_table_without_nav_has_null_titles(self) -> None:
         out = emit_app_table(App(screens=self.app.screens, nav=None))
         self.assertIn(".nav_titles = NULL,", out)
+        self.assertIn(".nav_tabs = NULL,", out)
+        self.assertIn(".nav_tab_count = 0,", out)
+
+    def test_app_table_bakes_nav_tabs_descriptor(self) -> None:
+        app = App(
+            screens=self.app.screens,
+            nav=[NavTarget(screen="Two", title="Settings"),
+                 NavTarget(screen="One", title="Status")],
+            display=DisplayConfig(width=200, height=320, color="rgb565"),
+        )
+        out = emit_app_table(app)
+        self.assertIn("static const janus_nav_tab_t janus_app_nav_tabs[] JANUS_PROGMEM = {", out)
+        # equal cells across 200px, nav order, target = screen index
+        self.assertIn("{ {0, 0, 100, 28}, janus_app_nav_tab_str1, 1 }", out)   # "Two" -> index 1
+        self.assertIn("{ {100, 0, 100, 28}, janus_app_nav_tab_str2, 0 }", out)  # "Status" -> index 0
+        self.assertIn(".nav_tabs = janus_app_nav_tabs,", out)
+        self.assertIn(".nav_tab_count = 2,", out)
+        # tab titles are flash-resident here (task 2 pgm-reads them)
+        self.assertIn('static const char janus_app_nav_tab_str1[] JANUS_PROGMEM = "Settings";', out)
 
     def test_app_table_raises_if_nav_missing_a_screen(self) -> None:
         bad_app = App(screens=self.app.screens, nav=[NavTarget(screen="One", title="Status")])
