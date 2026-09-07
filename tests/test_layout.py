@@ -114,19 +114,54 @@ class TestLayoutBoxSummary(unittest.TestCase):
         # right-aligned summary still starts on-screen, not negative
         self.assertGreaterEqual(box.summary[0].geometry.x, box.geometry.x)
 
-    def test_box_with_no_summary_lays_out_unchanged(self) -> None:
+    def test_collapsible_box_reserves_the_16px_header_strip(self) -> None:
         from janus.ir import Screen, Widget
 
         screen = Screen(
-            name="NoSummary",
+            name="Collapsible",
             root=Widget(kind="column", id="root", children=[
-                Widget(kind="box", id="drawer", layout="column", children=[
+                Widget(kind="box", id="drawer", layout="column", collapsible=True, children=[
                     Widget(kind="label", id="detail"),
                 ]),
             ]),
         )
         layout_screen(screen)
         self.assertEqual(screen.root.children[0].geometry_collapsed.h, 16)
+
+    def test_titled_box_reserves_the_16px_header_strip(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Titled",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="drawer", layout="column", text="Network", children=[
+                    Widget(kind="label", id="detail"),
+                ]),
+            ]),
+        )
+        layout_screen(screen)
+        self.assertEqual(screen.root.children[0].geometry_collapsed.h, 16)
+
+    def test_bare_grouping_box_reserves_no_header_strip(self) -> None:
+        # not collapsible, no title text, no summary -> a pure grouping
+        # container; reserving/painting a 16px strip above its children
+        # just ate content area (2026-09-07).
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Bare",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="drawer", layout="column", children=[
+                    Widget(kind="label", id="detail", size=(40, 12)),
+                ]),
+            ]),
+        )
+        layout_screen(screen)
+        box = screen.root.children[0]
+        self.assertEqual(box.geometry_collapsed.h, 0)
+        # child sits at the box's own top edge, not pushed down by a strip
+        self.assertEqual(box.children[0].geometry.y, box.geometry.y)
+        self.assertEqual(box.geometry.h, 12)
 
 
 class TestLayoutSizeEnforcement(unittest.TestCase):

@@ -249,8 +249,18 @@ const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
-void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
+void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus, then erases the outgoing screen, then renders the new one */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
+
+/* Erases `screen` by repainting each of its top-level widgets' rects with
+ * that widget's own background colour — the runtime has no panel size or
+ * canvas colour to do a true full-panel fill (see the display-agnostic
+ * note above). janus_switch_screen[_async_start] calls this automatically
+ * on the outgoing screen so stale pixels don't show through the incoming
+ * one; call it directly if a project drives screen changes itself (an
+ * encoder wired straight to a tab bar, say) instead of through
+ * janus_switch_screen. NULL is a no-op. */
+void janus_clear_screen(const janus_screen_desc_t *screen);
 
 /* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its
  * always-visible `summary` plus its `children` if currently expanded,
@@ -277,12 +287,14 @@ void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_st
  * Firmware sets a field's bit (e.g. `pwm_dirty.ch0_frequency = true`)
  * whenever it writes a new value into the matching `bound_struct` field
  * — nothing here does value comparison, it only trusts what firmware
- * reports changed. Unbound (static) leaves and containers always draw
- * regardless (nothing ever marks them dirty, and they're cheap/one-shot
- * by nature) — this is purely about skipping *unchanged bound data* on a
- * repeated sweep, e.g. a header redrawn on a timer. `janus_toggle_box`/
- * `janus_set_focus` are unaffected — collapse/focus state changing is
- * its own reason to redraw regardless of any field's dirty bit. */
+ * reports changed. Containers always recurse; an *unbound* (static) leaf
+ * is skipped on a dirty sweep (added 2026-09-07) — its pixels never
+ * change after the first full janus_render_screen, so repainting it every
+ * tick only made a timer-refreshed header/status bar flicker its own
+ * unchanging text. `janus_toggle_box`/`janus_set_focus` are unaffected —
+ * collapse/focus state changing is its own reason to redraw regardless of
+ * any field's dirty bit, and both use the force-draw (NULL bound_dirty)
+ * path where every leaf still draws. */
 void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void *bound_struct, void *bound_dirty);
 void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
 
