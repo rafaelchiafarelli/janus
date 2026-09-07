@@ -56,18 +56,29 @@ can't fix.
    their header rows exactly as today — the strip does not replace that
    convention.
 
+## Status
+
+Tasks 1–3 done and **fast-tracked to `dev` 2026-09-07** (Rafael's call —
+the epic reaches `dev` incrementally rather than as one unit). Task 4
+(focus-stop) is the only work left; branch it off `dev`. The epic's own
+`epics`→`dev` merge already happened with the fast-track, so task 4 lands
+via its own `<task> → tasks → nav_tabs → … → dev` walk when done.
+
 ## Acceptance gate
 
 1. `examples/host_demo` (already declares `nav: { kind: tabs }`) renders a
    tab strip on all three screens with the active one distinct, no
-   hand-authored tab `row` in any `.screen.yaml`.
-2. A touch/tap in a tab cell navigates to that screen; the encoder/button
-   path (per decision 3) switches tabs.
+   hand-authored tab `row` in any `.screen.yaml`. *(host_demo's frozen
+   scaffolded `src/main.c` needs a one-line `janus_render_nav_bar` /
+   `janus_nav_hit_test` hand-edit — human-owned once scaffolded; do it
+   with task 4.)*
+2. A touch/tap in a tab cell navigates to that screen ✅ (task 3); the
+   single-control encoder/button path switches tabs — **task 4**.
 3. `scripts/avr_gate.sh` green (SRAM/flash budget holds), Python
-   `unittest` + C `ctest` green on host.
+   `unittest` + C `ctest` green on host — ✅ held through task 3.
 4. The nav strip is not repainted on the periodic render tick — only on
-   an actual screen change (no per-frame flicker, consistent with the
-   2026-09-07 header-repaint fix).
+   an actual screen change ✅ (task 2 — `draw_nav_bar` is out of
+   `janus_render_screen` entirely).
 
 ## Out of scope
 
