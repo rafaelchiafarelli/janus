@@ -30,7 +30,13 @@
  * `image` widget pulls `blit_image` in (channel_icons task 3). Define it
  * on the command line (`-DJANUS_RENDER_NONBLOCKING`) to force the async
  * path in without the generated header — that's what the runtime's own
- * async test target does. */
+ * async test target does.
+ *
+ * The same generated header also carries JANUS_DISPLAY_BACKGROUND (packed
+ * RGB565) plus JANUS_DISPLAY_PANEL_W/H when app.yaml declared
+ * `display.background` — the only case where panel dimensions reach this
+ * otherwise display-size-agnostic library, used by janus_clear_screen for
+ * a full-panel erase. Absent -> janus_clear_screen stays best-effort. */
 #if defined(__has_include)
 #  if __has_include("janus_render_config.gen.h")
 #    include "janus_render_config.gen.h"
@@ -252,14 +258,20 @@ void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus, then erases the outgoing screen, then renders the new one */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 
-/* Erases `screen` by repainting each of its top-level widgets' rects with
- * that widget's own background colour — the runtime has no panel size or
- * canvas colour to do a true full-panel fill (see the display-agnostic
- * note above). janus_switch_screen[_async_start] calls this automatically
- * on the outgoing screen so stale pixels don't show through the incoming
- * one; call it directly if a project drives screen changes itself (an
- * encoder wired straight to a tab bar, say) instead of through
- * janus_switch_screen. NULL is a no-op. */
+/* Erases `screen` before the incoming one is drawn.
+ *   - If app.yaml declared `display.background`, janus_render_config.gen.h
+ *     carries JANUS_DISPLAY_BACKGROUND + JANUS_DISPLAY_PANEL_W/H and this
+ *     does a true full-panel fill in that colour (the one place the fixed
+ *     runtime uses panel dimensions).
+ *   - Otherwise it's best-effort: one fill over the union of the screen's
+ *     top-level widget rects (anchored at the origin, so inter-widget
+ *     gaps and ragged edges are covered), in the first top-level widget's
+ *     own bg — the runtime has no canvas colour of its own, so author
+ *     `bg:` on that widget (by convention a full-width status/header bar)
+ *     to control the colour.
+ * janus_switch_screen[_async_start] call this on the outgoing screen;
+ * it's also public for a project that drives screen changes by hand (an
+ * encoder wired straight to a tab bar, say). NULL is a no-op. */
 void janus_clear_screen(const janus_screen_desc_t *screen);
 
 /* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its

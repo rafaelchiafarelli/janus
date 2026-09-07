@@ -33,7 +33,7 @@ _VENDORED_SUBDIRS = ("include", "src", "tests", "host_mock")
 _VENDORED_ROOT_FILES = ("CMakeLists.txt", "janus_img.ld")
 
 
-def _vendor_runtime(dest_dir: Path, render_mode: str) -> list[Path]:
+def _vendor_runtime(dest_dir: Path, render_mode: str, display=None) -> list[Path]:
     written = []
     for fname in _VENDORED_ROOT_FILES:
         if write_if_changed(dest_dir / fname, (_RUNTIME_EMBEDDED_C / fname).read_text()):
@@ -47,7 +47,7 @@ def _vendor_runtime(dest_dir: Path, render_mode: str) -> list[Path]:
     # its 6912-byte g_async_ops buffer — channel_icons task 3). Written
     # for `blocking` too, macro undefined, so the include never dangles.
     cfg = dest_dir / "include" / "janus_render_config.gen.h"
-    if write_if_changed(cfg, render_render_config_header(render_mode)):
+    if write_if_changed(cfg, render_render_config_header(render_mode, display)):
         written.append(cfg)
     return written
 
@@ -85,7 +85,7 @@ def generate(
         if scaffold_main_c(app, scaffold_src / "main.c"):
             written.append(scaffold_src / "main.c")
         render_mode = app.display.render_mode if app.display is not None else "blocking"
-        written.extend(_vendor_runtime(target_dir / "runtime", render_mode))
+        written.extend(_vendor_runtime(target_dir / "runtime", render_mode, app.display))
 
     return written
 

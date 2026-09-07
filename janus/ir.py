@@ -147,6 +147,15 @@ class DisplayConfig:
     # instead (see Stage 8's scaffold_main.py) — declared, not baked into
     # every project unconditionally, same "input.modality" precedent.
     render_mode: RenderMode = "blocking"
+    # "#RRGGBB" canvas/background colour, packed to RGB565 at Stage 3b.
+    # Optional — when set, it's emitted into janus_render_config.gen.h
+    # (JANUS_DISPLAY_BACKGROUND, alongside JANUS_DISPLAY_PANEL_W/H) so the
+    # fixed runtime's janus_clear_screen can do a true full-panel erase in
+    # that colour on a screen switch; without it the runtime stays
+    # display-size-agnostic and janus_clear_screen falls back to a
+    # best-effort union-of-top-level-widget-rects fill. Declaring this is
+    # the explicit opt-in to the runtime knowing the panel size.
+    background: Optional[str] = None
 
 
 @dataclass
