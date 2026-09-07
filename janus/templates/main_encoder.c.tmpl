@@ -13,6 +13,9 @@ int main(void) {
     display_driver_init();
     const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
     janus_render_screen(screen);
+    janus_render_nav_bar(&janus_app);   /* app-level tab strip (no-op if app.yaml has no `nav:`) */
+    /* Tabs are reachable from a single control via focus (nav_tabs epic task 4). A project
+     * with a spare control can also call janus_nav_next(&janus_app) / janus_nav_prev(...). */
     janus_focus_move(screen, 0);   /* establish initial focus */
 
     while (1) {
