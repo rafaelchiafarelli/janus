@@ -636,12 +636,31 @@ static void draw_divider(const janus_widget_desc_t *w) {
     fill_rect(lw.geometry, lw.color);
 }
 
+/* progress/gauge share one render: a recessed rounded track (.bg_color),
+ * a rounded proportional fill (.color), and a 1px-ish gloss along the top
+ * of the filled part. Both kinds land here — a distinct radial gauge is a
+ * later increment (ui_widgets/kind_visuals task 2). */
 static void draw_progress_or_gauge(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     double value = janus_read_bound_value(&lw.bind, bound_struct);
     double span = (double)lw.bind.range_max - (double)lw.bind.range_min;
     double fraction = span != 0.0 ? (value - lw.bind.range_min) / span : 0.0;
-    fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+
+    janus_rect_t r = lw.geometry;
+    int16_t radius = (int16_t)(r.h / 2);
+    janus_fill_rounded_rect(r, radius, lw.bg_color);
+
+    int16_t filled_w = (int16_t)((double)r.w * fraction);
+    if (filled_w > 0) {
+        janus_rect_t fill = { r.x, r.y, filled_w, r.h };
+        janus_fill_rounded_rect(fill, radius, lw.color);
+        int16_t gloss_h = (int16_t)(r.h / 3);
+        if (gloss_h < 1) gloss_h = 1;
+        janus_rect_t gloss = { r.x, r.y, filled_w, gloss_h };
+        janus_shade_rect_v(gloss, janus_rgb565_lerp(lw.color, 0xffff, 64), lw.color);
+    }
 }
 
 static void draw_checkbox(const janus_widget_desc_t *w, const void *bound_struct) {
