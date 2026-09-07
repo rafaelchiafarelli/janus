@@ -109,32 +109,77 @@ static void test_traversal_reaches_every_widget(void) {
 typedef struct { int level; } demo_t;
 static demo_t g_demo = { .level = 0 };
 
-static void test_progress_fill_tracks_live_value(void) {
-    static const janus_widget_desc_t progress = {
-        .kind = JANUS_WIDGET_PROGRESS, .id = "p", .geometry = { 0, 0, 100, 10 },
+/* progress renders as a bar: recessed rounded track (.bg_color) + a
+ * rounded proportional fill (.color) + a top gloss on the filled part.
+ * Geometry {0,0,100,12}, radius 6, mid-height y=6 (below the gloss). */
+#define PB_COLOR   0x1111
+#define PB_BG      0xeeee
+
+static const janus_widget_desc_t g_progress = {
+    .kind = JANUS_WIDGET_PROGRESS, .id = "p", .geometry = { 0, 0, 100, 12 },
+    .bind = {
+        .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
+        .range_min = 0, .range_max = 100,
+    },
+    .color = PB_COLOR, .bg_color = PB_BG,
+};
+static const janus_screen_desc_t g_progress_screen = {
+    .name = "Progress", .widgets = &g_progress, .widget_count = 1, .bound_struct = &g_demo,
+};
+
+static void test_progress_bar_fill_width_tracks_value(void) {
+    g_demo.level = 50;
+    mock_driver_reset();
+    janus_render_screen(&g_progress_screen);
+    CHECK(rt_painted_colour(40, 6, PB_COLOR));     /* filled at ~40% width */
+    CHECK(!rt_painted_colour(80, 6, PB_COLOR));    /* not at ~80% */
+    CHECK(!rt_painted_colour(0, 0, PB_BG));         /* rounded track leaves its corner unfilled */
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&g_progress_screen);
+    CHECK(!rt_colour_in_xband(PB_COLOR, 0, 100));  /* nothing filled */
+    CHECK(rt_painted_colour(50, 6, PB_BG));        /* bare track at the midline */
+
+    g_demo.level = 100;
+    mock_driver_reset();
+    janus_render_screen(&g_progress_screen);
+    CHECK(rt_painted_colour(98, 6, PB_COLOR));     /* filled right up to the end */
+}
+
+static void test_progress_render_is_async_safe(void) {
+    g_demo.level = 60;
+    CHECK(rt_render_matches_async(&g_progress_screen));
+}
+
+static void test_gauge_renders_identically_to_progress(void) {
+    static const janus_widget_desc_t gauge = {
+        .kind = JANUS_WIDGET_GAUGE, .id = "p", .geometry = { 0, 0, 100, 12 },
         .bind = {
             .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
             .range_min = 0, .range_max = 100,
         },
-        .color = 0x1111, .bg_color = 0xeeee,
+        .color = PB_COLOR, .bg_color = PB_BG,
     };
-    static const janus_screen_desc_t screen = {
-        .name = "Progress", .widgets = &progress, .widget_count = 1, .bound_struct = &g_demo,
+    static const janus_screen_desc_t gauge_screen = {
+        .name = "Gauge", .widgets = &gauge, .widget_count = 1, .bound_struct = &g_demo,
     };
+    static mock_draw_call_t prog[MOCK_DRIVER_LOG_CAPACITY];
 
-    g_demo.level = 0;
+    g_demo.level = 37;
     mock_driver_reset();
-    janus_render_screen(&screen);
-    CHECK(mock_driver_log_count > 0);
-    uint16_t sample_at_0 = mock_driver_log[0].sample_pixel;
+    janus_render_screen(&g_progress_screen);
+    uint16_t n = mock_driver_log_count;
+    for (uint16_t i = 0; i < n; i++) prog[i] = mock_driver_log[i];
 
-    g_demo.level = 100;
     mock_driver_reset();
-    janus_render_screen(&screen);
-    CHECK(mock_driver_log_count > 0);
-    uint16_t sample_at_100 = mock_driver_log[0].sample_pixel;
-
-    CHECK(sample_at_0 != sample_at_100);
+    janus_render_screen(&gauge_screen);
+    CHECK(mock_driver_log_count == n && n > 0);
+    for (uint16_t i = 0; i < mock_driver_log_count && i < n; i++) {
+        CHECK(prog[i].x == mock_driver_log[i].x && prog[i].y == mock_driver_log[i].y);
+        CHECK(prog[i].w == mock_driver_log[i].w && prog[i].h == mock_driver_log[i].h);
+        CHECK(prog[i].sample_pixel == mock_driver_log[i].sample_pixel);
+    }
 }
 
 /* ---- fixture 3: box collapse/expand, real dual-geometry state ---- */
@@ -835,7 +880,9 @@ static void test_image_larger_than_tile_splits_with_correct_offsets(void) {
 
 int main(void) {
     test_traversal_reaches_every_widget();
-    test_progress_fill_tracks_live_value();
+    test_progress_bar_fill_width_tracks_value();
+    test_progress_render_is_async_safe();
+    test_gauge_renders_identically_to_progress();
     test_render_widget_draws_only_that_widget();
     test_render_widget_if_dirty_skips_unchanged_field();
     test_unbound_widget_always_draws_via_if_dirty();
