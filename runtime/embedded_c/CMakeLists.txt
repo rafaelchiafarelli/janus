@@ -9,6 +9,8 @@ add_library(janus_runtime STATIC
     src/janus_input_touch.c
     src/janus_input_focus.c
     src/janus_font.c
+    src/janus_bound.c
+    src/janus_format.c
 )
 target_include_directories(janus_runtime PUBLIC include)
 target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
@@ -74,6 +76,13 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_font_tests PRIVATE janus_runtime)
     target_compile_options(janus_font_tests PRIVATE -Wall -Wextra)
 
+    # No driver contract in play — janus_format.c only pulls janus_bound.c
+    # (both leaf objects in the archive), so this needs no host mock, same
+    # as janus_font_tests.
+    add_executable(janus_format_tests tests/test_format.c)
+    target_link_libraries(janus_format_tests PRIVATE janus_runtime)
+    target_compile_options(janus_format_tests PRIVATE -Wall -Wextra)
+
     add_executable(janus_render_async_tests tests/test_render_async.c)
     target_link_libraries(janus_render_async_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_render_async_tests PRIVATE -Wall -Wextra)
@@ -85,5 +94,6 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_input_encoder_tests COMMAND janus_input_encoder_tests)
     add_test(NAME janus_input_buttons_tests COMMAND janus_input_buttons_tests)
     add_test(NAME janus_font_tests COMMAND janus_font_tests)
+    add_test(NAME janus_format_tests COMMAND janus_format_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
 endif()

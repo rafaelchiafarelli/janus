@@ -388,9 +388,11 @@ def _widget_init(
     font_size_c = _FONT_SIZE_ENUM[widget.font_size]
     image_fields_c = _image_fields_c(widget, lines, id_c, image_pxs)
 
+    text_is_format_c = "true" if widget.text_is_format else "false"
+
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {id_c}, "
-        f".static_text = {static_text_c}, "
+        f".static_text = {static_text_c}, .text_is_format = {text_is_format_c}, "
         f".geometry = {_rect(widget.geometry)}, "
         f".geometry_collapsed = {_rect(widget.geometry_collapsed)}, "
         f".initial_expanded = {initial_expanded_c}, "

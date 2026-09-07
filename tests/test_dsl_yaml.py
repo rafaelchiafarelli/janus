@@ -96,5 +96,45 @@ class TestImageFile(unittest.TestCase):
             })
 
 
+class TestFormatText(unittest.TestCase):
+    def _label(self, **extra):
+        data = {
+            "screen": "Fmt",
+            "layout": "column",
+            "children": [{"kind": "label", "id": "l", **extra}],
+        }
+        return screen_from_dict(data).root.children[0]
+
+    def test_conversion_plus_bind_marks_text_is_format(self) -> None:
+        w = self._label(
+            text="Duty: %d%%",
+            bind={"message": "m", "field": "duty", "type": "int"},
+        )
+        self.assertTrue(w.text_is_format)
+
+    def test_float_precision_conversion_is_recognised(self) -> None:
+        w = self._label(
+            text="T: %.1f C",
+            bind={"message": "m", "field": "t", "type": "float"},
+        )
+        self.assertTrue(w.text_is_format)
+
+    def test_double_percent_only_is_a_template_but_needs_no_bind(self) -> None:
+        w = self._label(text="100%%")
+        self.assertTrue(w.text_is_format)  # runtime must collapse %% -> %
+
+    def test_bare_percent_that_is_not_a_conversion_stays_literal(self) -> None:
+        w = self._label(text="50% done")
+        self.assertFalse(w.text_is_format)
+
+    def test_plain_text_is_not_a_format(self) -> None:
+        w = self._label(text="Hello")
+        self.assertFalse(w.text_is_format)
+
+    def test_no_text_is_not_a_format(self) -> None:
+        w = self._label(bind={"message": "m", "field": "name", "type": "string"})
+        self.assertFalse(w.text_is_format)
+
+
 if __name__ == "__main__":
     unittest.main()

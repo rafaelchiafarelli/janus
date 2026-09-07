@@ -94,6 +94,15 @@ completeness of the pipeline).
 - `radiobutton.value` type matches its parent `radiogroup.bind.type`
 - `button.navigate` (if present) names a screen that exists in `app.yaml`
 - `bind.type` is one of `string`/`int`/`int64`/`float` (harpia's real types)
+- a `text:` holding a printf conversion (`%d %u %x %ld %lld`, `%f`/`%.Nf`,
+  `%s`; `%%` excluded) is a **format template** — the parser sets
+  `Widget.text_is_format` and requires it to be a `label`/`header` with a
+  `bind` whose type matches the conversion (`%s`⇔string, else numeric).
+  A conversion with no `bind` is a parse error; a second conversion is a
+  warning (the runtime emits it literally). `%%`-only text (`"100%%"`) is
+  still a template — the runtime collapses it to `"100%"` — but needs no
+  `bind`. A bare non-conversion `%` (`"50% done"`) stays literal. See
+  Stage 4's "Format templates" for the runtime side.
 
 Note: `size` is *not* validated here — see Stage 2, which is where the
 required-vs-defaulted split actually gets enforced (it needs to know each
@@ -580,6 +589,7 @@ typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;
     const char *static_text;           /* authored Widget.text, baked in; NULL if none or bound */
+    bool text_is_format;               /* label/header: static_text is a printf template — see Stage 4 */
     janus_rect_t geometry;             /* also the "expanded" rect for box */
     janus_rect_t geometry_collapsed;   /* box only, ignored otherwise */
     bool initial_expanded;             /* box only, ignored otherwise — baked from Widget.default_expanded */
@@ -831,6 +841,25 @@ an unpopulated bound string renders as the plain fill — unchanged
 behavior from before this slice, not a special case. `static_text` wins
 if a widget somehow has both (nothing at parse time forbids it) — a
 deterministic tie-break, not new validation.
+
+**Format templates (label_format epic).** When a `label`/`header`'s
+`text:` holds an unescaped printf conversion (`%d %u %x %ld %lld`, `%f` /
+`%.Nf`, `%s`) and/or a `%%` escape, Stage 1 sets `Widget.text_is_format`
+and Stage 3b bakes it as `.text_is_format` beside `.static_text` (still
+the raw template, flash-resident). `draw_label`/`draw_header` then run
+that template through `janus_format_into()` (`janus_format.c` — a
+hand-rolled one-argument formatter, no libc `printf`, no `<math.h>`)
+against the widget's `bind`, into a `JANUS_FORMAT_BUF`-byte stack buffer,
+and hand *that* to `draw_string()` with `from_flash = false`. One
+conversion is filled (a widget has one `bind`); a second, an unknown
+letter, or any conversion on an unbound widget is copied through
+verbatim. The value read reuses `janus_read_bound_value` /
+`janus_read_bound_string`, which moved to `janus_bound.c` so the
+formatter shares that offset math without linking the render module.
+Stage 1 enforces the pairing: a real conversion requires a `label`/
+`header` kind and a `bind` whose type matches (`%s`⇔string, else
+numeric); a second conversion is a warning. A bare `%` that isn't a
+conversion (`"50% done"`) is left literal and takes the plain path.
 
 **Non-blocking rendering (2026-08-22).** DESIGN.md called for "blocking
 AND non-blocking, tiled, polled rendering" — `draw_area_async`/

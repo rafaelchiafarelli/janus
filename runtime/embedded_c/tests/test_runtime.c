@@ -555,6 +555,68 @@ static void test_static_text_wins_over_bound_string(void) {
     CHECK(count_glyph_sized_calls() == 1);  /* "A", not "ZZ" */
 }
 
+/* ---- fixture 6b: label_format — printf template in `text:` ---- */
+
+typedef struct { int32_t n; float f; } demo_num_t;
+static demo_num_t g_demo_num = { 0, 0.0f };
+
+static void test_format_label_interpolates_int_value(void) {
+    /* "%d%%" over an int bind of 72 -> "72%", three glyphs. w=64 fits
+     * three 20px columns (1 + 20 + 1 + 20 + 1 + 20 = 63). */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l",
+        .static_text = "%d%%", .text_is_format = true,
+        .geometry = { 0, 0, 64, 10 },
+        .bind = { .field_offset = offsetof(demo_num_t, n), .field_type = JANUS_FIELD_INT },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "FmtInt", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo_num,
+    };
+
+    g_demo_num.n = 72;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 3);  /* '7' '2' '%' */
+}
+
+static void test_format_label_interpolates_float_value(void) {
+    /* "%.1f" over a float bind of 21.5 -> "21.5", four glyphs. w=96 fits
+     * four 20px columns comfortably. */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l",
+        .static_text = "%.1f", .text_is_format = true,
+        .geometry = { 0, 0, 96, 10 },
+        .bind = { .field_offset = offsetof(demo_num_t, f), .field_type = JANUS_FIELD_FLOAT },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "FmtFloat", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo_num,
+    };
+
+    g_demo_num.f = 21.5f;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 4);  /* '2' '1' '.' '5' */
+}
+
+static void test_format_false_label_still_blits_static_text_verbatim(void) {
+    /* text_is_format = false: a literal string with no conversion is
+     * drawn straight from flash, bound value ignored (tie-break). */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l",
+        .static_text = "AB", .text_is_format = false,
+        .geometry = { 0, 0, 64, 10 },
+        .bind = { .field_offset = offsetof(demo_num_t, n), .field_type = JANUS_FIELD_INT },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "FmtOff", .widgets = &label, .widget_count = 1, .bound_struct = &g_demo_num,
+    };
+
+    g_demo_num.n = 999;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 2);  /* "AB", not "999" */
+}
+
 static void test_box_header_draws_its_title_text(void) {
     /* geometry_collapsed's width is what draw_box_header uses for the
      * title (janus_runtime.c) — 42 is the minimum that fits both
@@ -712,6 +774,9 @@ int main(void) {
     test_bound_string_with_value_draws_glyphs();
     test_bound_string_null_renders_fill_only();
     test_static_text_wins_over_bound_string();
+    test_format_label_interpolates_int_value();
+    test_format_label_interpolates_float_value();
+    test_format_false_label_still_blits_static_text_verbatim();
     test_box_header_draws_its_title_text();
     test_widget_authored_color_is_what_gets_drawn();
     test_widget_default_colors_are_the_runtime_constants();

@@ -6,7 +6,7 @@
  * only; now label/header/button/box-header draw real glyphs over that
  * same fill when a widget has authored `text:` (janus_font.h), and
  * label/header additionally draw a live bound string value when there's
- * no authored `text:` (slice 2 — see read_bound_string below).
+ * no authored `text:` (slice 2 — see janus_read_bound_string below).
  * progress/gauge/checkbox/led remain the pre-existing exception for
  * non-text content — they read the live bound value and vary the fill
  * accordingly. Fill/text colors come from each widget's own `.color`/
@@ -15,7 +15,9 @@
  */
 #include "janus_runtime.h"
 
+#include "janus_bound.h"
 #include "janus_font.h"
+#include "janus_format.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -255,7 +257,7 @@ static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph,
  *
  * `from_flash` distinguishes the two possible sources of `text`: a
  * widget's authored `static_text` (generated, JANUS_PROGMEM on AVR — pass
- * true) vs. a live bound string (read_bound_string, the vendor's own
+ * true) vs. a live bound string (janus_read_bound_string, the vendor's own
  * mutable RAM struct — pass false). Reading a flash string with a plain
  * `*p` (or vice versa) is wrong on classic AVR, so callers must get this
  * right; off-AVR both paths behave identically either way.
@@ -366,48 +368,11 @@ static const janus_screen_desc_t *g_current_screen = NULL;
 static const janus_farptr_t *g_image_far = NULL;
 
 /* --------------------------------------------------------- bound reads --
- */
-static double read_bound_value(const janus_bind_t *bind, const void *bound_struct) {
-    if (bound_struct == NULL || bind->field_type == JANUS_FIELD_NONE) return 0.0;
-    const uint8_t *field = (const uint8_t *)bound_struct + bind->field_offset;
-    switch (bind->field_type) {
-        case JANUS_FIELD_INT: {
-            int v;
-            memcpy(&v, field, sizeof(v));
-            return (double)v;
-        }
-        case JANUS_FIELD_INT64: {
-            int64_t v;
-            memcpy(&v, field, sizeof(v));
-            return (double)v;
-        }
-        case JANUS_FIELD_FLOAT: {
-            float v;
-            memcpy(&v, field, sizeof(v));
-            return (double)v;
-        }
-        default:
-            return 0.0; /* string has no numeric value — see read_bound_string below */
-    }
-}
-
-/* Slice 2: label/header's bound-string case. The struct field is
- * `const char *` (emit_bindings_struct.py) — a pointer, not inline bytes,
- * so this reads the pointer itself rather than reinterpreting field bytes
- * as a number like read_bound_value does. Zero-initialized instances
- * (Stage 7 — Janus generates shape, not data) hold NULL here until
- * firmware populates them, and draw_string already no-ops on NULL, so an
- * unpopulated bound string renders as the plain fill, same as before this
- * existed. No truncation/copy needed: draw_string blits and clips
- * character-by-character straight from this pointer, so an arbitrary
- * runtime-length string never needs its length known upfront. */
-static const char *read_bound_string(const janus_bind_t *bind, const void *bound_struct) {
-    if (bound_struct == NULL || bind->field_type != JANUS_FIELD_STRING) return NULL;
-    const uint8_t *field = (const uint8_t *)bound_struct + bind->field_offset;
-    const char *value;
-    memcpy(&value, field, sizeof(value));
-    return value;
-}
+ * janus_read_bound_value / janus_read_bound_string live in janus_bound.c
+ * now (label_format task 1) — split out so janus_format.c can share the
+ * offsetof-into-bound_struct math without linking this whole module.
+ * Both behave exactly as the former file-static janus_read_bound_value /
+ * janus_read_bound_string did. */
 
 /* ------------------------------------------------- per-kind draw_<kind> --
  * Every widget's fill/text color comes from its own `.color` (ink /
@@ -417,24 +382,35 @@ static const char *read_bound_string(const janus_bind_t *bind, const void *bound
  * JANUS_COLOR_DEFAULT_FG/_BG when omitted. Never a runtime constant.
  */
 
-/* label/header: authored `text:` wins if present (unbound widgets, or a
- * widget authored with both — Janus.md's catalog documents `bind`/`text`
- * as one-or-the-other, but nothing at parse time forbids both, so this is
- * the deterministic tie-break); otherwise fall back to the live bound
- * string, if any. */
-static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
+/* label/header text resolution, in priority order:
+ *   1. `text_is_format` -> `static_text` is a printf-style template;
+ *      format it against `bind` into a stack buffer (janus_format_into)
+ *      and draw that (RAM, so from_flash = false).
+ *   2. plain authored `static_text` -> draw it verbatim from flash.
+ *      (A widget authored with both `text:` and `bind:` but no format
+ *      conversion lands here — static_text is the deterministic
+ *      tie-break, Janus.md's catalog documents them as one-or-the-other.)
+ *   3. otherwise the live bound string, if any. */
+static void draw_text_leaf(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
+
+    if (lw.text_is_format && lw.static_text != NULL) {
+        char buf[JANUS_FORMAT_BUF];
+        janus_format_into(buf, sizeof buf, lw.static_text, &lw.bind, bound_struct);
+        draw_string(lw.geometry, buf, lw.color, lw.bg_color, false, lw.font_size, lw.font_scale);
+        return;
+    }
+
     bool from_flash = lw.static_text != NULL;
-    const char *text = from_flash ? lw.static_text : read_bound_string(&lw.bind, bound_struct);
+    const char *text = from_flash ? lw.static_text : janus_read_bound_string(&lw.bind, bound_struct);
     draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
 }
+static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
+    draw_text_leaf(w, bound_struct);
+}
 static void draw_header(const janus_widget_desc_t *w, const void *bound_struct) {
-    janus_widget_desc_t lw = janus_widget_load(w);
-    fill_rect(lw.geometry, lw.bg_color);
-    bool from_flash = lw.static_text != NULL;
-    const char *text = from_flash ? lw.static_text : read_bound_string(&lw.bind, bound_struct);
-    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
+    draw_text_leaf(w, bound_struct);
 }
 static void draw_button(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
@@ -518,7 +494,7 @@ static void draw_divider(const janus_widget_desc_t *w) {
 
 static void draw_progress_or_gauge(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = read_bound_value(&lw.bind, bound_struct);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
     double span = (double)lw.bind.range_max - (double)lw.bind.range_min;
     double fraction = span != 0.0 ? (value - lw.bind.range_min) / span : 0.0;
     fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
@@ -526,13 +502,13 @@ static void draw_progress_or_gauge(const janus_widget_desc_t *w, const void *bou
 
 static void draw_checkbox(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = read_bound_value(&lw.bind, bound_struct);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
     fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
 }
 
 static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    int state = (int)read_bound_value(&lw.bind, bound_struct);
+    int state = (int)janus_read_bound_value(&lw.bind, bound_struct);
     uint16_t value = state <= 0 ? lw.bg_color : (state == 1 ? lw.color : JANUS_COLOR_LED_WARN);
     fill_rect(lw.geometry, value);
 }
@@ -543,19 +519,19 @@ static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
  * its own kind in a render. */
 static void draw_toggle(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = read_bound_value(&lw.bind, bound_struct);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
     fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
 }
 
 static void draw_badge(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = read_bound_value(&lw.bind, bound_struct);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
     fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
 }
 
 static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
-    double value = read_bound_value(&lw.bind, bound_struct);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
     double span = (double)lw.bind.range_max - (double)lw.bind.range_min;
     double fraction = span != 0.0 ? (value - lw.bind.range_min) / span : 0.0;
     fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
@@ -575,7 +551,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
 
 /* Checks (and, if set, clears) whether `bind`'s own field is marked dirty
  * in `bound_dirty` — same offsetof-into-a-generated-struct mechanism
- * read_bound_value already uses for the *value* struct, just a bool
+ * janus_read_bound_value already uses for the *value* struct, just a bool
  * instead. Always "yes, draw" for an unbound widget or a NULL
  * bound_dirty (the force-draw case) — nothing to check against, so the
  * safe default is to draw. */
