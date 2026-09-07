@@ -66,8 +66,31 @@ pixel log (`mock_driver.h`), no new fixtures.
   `janus_render_screen_async_start` + drain `janus_render_poll`; every
   drained op is `JANUS_ASYNC_OP_FILL`.
 
+## Notes — deviations from the sketch above
+
+- **Not `static`.** A unit test is "a second translation unit that needs
+  them", so the two helpers are `extern`, `janus_`-prefixed
+  (`janus_fill_rounded_rect` / `janus_fill_circle`), declared in a new
+  **internal** header `runtime/embedded_c/include/janus_draw.h` — *not*
+  the vendor-facing `janus_runtime.h`, so the "no public declaration"
+  constraint still holds. Definitions stay in `janus_runtime.c` next to
+  `fill_rect` as specified.
+- **Left-clip helper.** `fill_rect` does *not* actually guard negative
+  origins (the sketch assumed it did) — widget geometry is always
+  on-screen, but a rounded corner / circle can round past x = 0. A tiny
+  `fill_hspan` clips `x < 0` (and drops rows above y = 0) before calling
+  `fill_rect`. Still "only built out of `fill_rect`".
+- **Tests are `tests/test_draw.c`** (new `janus_draw_tests` ctest
+  target), not `test_runtime.c` — the helpers are called directly there.
+- **Async assertion deferred.** Nothing in the runtime calls these yet
+  and `g_async_enqueue` is private to `janus_runtime.c`, so the
+  "widget → async_start → every op is FILL" check moves to
+  **kind_visuals task 1** (toggle), where a real widget exercises them
+  through the queued path. Async-safety is structural meanwhile: the only
+  driver-touching call underneath is `fill_rect`.
+
 ## DoD
 
-Contract delivered · `ctest` green · `scripts/avr_gate.sh` green · no
-Python file touched · this file renamed `1-spans-and-shapes-done.md` ·
-commit + merge `1-spans-and-shapes → tasks`.
+Contract delivered · `ctest` green (9/9, incl. `janus_draw_tests`) ·
+`scripts/avr_gate.sh` green · no Python file touched · this file renamed
+`1-spans-and-shapes-done.md` · commit + merge `1-spans-and-shapes → tasks`.

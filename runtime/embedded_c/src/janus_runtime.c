@@ -16,6 +16,7 @@
 #include "janus_runtime.h"
 
 #include "janus_bound.h"
+#include "janus_draw.h"
 #include "janus_font.h"
 #include "janus_format.h"
 
@@ -186,6 +187,149 @@ static void fill_rect_fraction(janus_rect_t rect, double fraction,
     };
     fill_rect(filled, fill_value);
     fill_rect(empty, empty_value);
+}
+
+/* ------------------------------------------------------ shape primitives --
+ * janus_draw.h's helpers — see that header for the contract. Everything
+ * here decomposes to `fill_rect`, so the JANUS_RENDER_NONBLOCKING path
+ * captures them as ordinary JANUS_ASYNC_OP_FILL spans with no extra code.
+ *
+ * `isqrt32` is a plain bit-by-bit integer square root (no <math.h>): for
+ * the radii these primitives see (a widget dimension / 2, so well under
+ * 256) the operand `r*r - dy*dy` fits comfortably in int32. */
+static int16_t isqrt32(int32_t v) {
+    if (v <= 0) return 0;
+    int32_t rem = v, root = 0, bit = 1L << 30;
+    while (bit > v) bit >>= 2;
+    while (bit != 0) {
+        if (rem >= root + bit) {
+            rem -= root + bit;
+            root = (root >> 1) + bit;
+        } else {
+            root >>= 1;
+        }
+        bit >>= 2;
+    }
+    return (int16_t)root;
+}
+
+/* One horizontal run of `colour`, left-clipped to x >= 0 and dropped if
+ * its row is above the panel. `fill_rect` itself doesn't clip negative
+ * origins (widget geometry is always on-screen), but a circle/rounded
+ * corner can round past an edge, so the shape helpers clip here. */
+static void fill_hspan(int16_t x, int16_t y, int16_t w, uint16_t colour) {
+    if (y < 0 || w <= 0) return;
+    if (x < 0) { w = (int16_t)(w + x); x = 0; }
+    if (w <= 0) return;
+    janus_rect_t span = { x, y, w, 1 };
+    fill_rect(span, colour);
+}
+
+void janus_fill_rounded_rect(janus_rect_t rect, int16_t radius, uint16_t colour) {
+    if (rect.w <= 0 || rect.h <= 0) return;
+    int16_t max_r = (int16_t)((rect.w < rect.h ? rect.w : rect.h) / 2);
+    if (radius > max_r) radius = max_r;
+    if (radius <= 0) { fill_rect(rect, colour); return; }
+
+    /* centre band: full width, the rows the corners don't touch */
+    janus_rect_t band = {
+        rect.x, (int16_t)(rect.y + radius), rect.w, (int16_t)(rect.h - 2 * radius)
+    };
+    fill_rect(band, colour);
+
+    /* `radius` rounded rows, mirrored top and bottom — 2*radius spans,
+     * plus the band above == 2*radius + 1 fill_rect calls total */
+    for (int16_t dy = 1; dy <= radius; dy++) {
+        int16_t inset = (int16_t)(radius - isqrt32((int32_t)radius * radius - (int32_t)dy * dy));
+        int16_t span_w = (int16_t)(rect.w - 2 * inset);
+        int16_t x = (int16_t)(rect.x + inset);
+        fill_hspan(x, (int16_t)(rect.y + radius - dy), span_w, colour);
+        fill_hspan(x, (int16_t)(rect.y + rect.h - radius - 1 + dy), span_w, colour);
+    }
+}
+
+void janus_fill_circle(int16_t cx, int16_t cy, int16_t r, uint16_t colour) {
+    if (r <= 0) return;
+    for (int16_t dy = (int16_t)(-r); dy <= r; dy++) {
+        int16_t half = isqrt32((int32_t)r * r - (int32_t)dy * dy);
+        fill_hspan((int16_t)(cx - half), (int16_t)(cy + dy), (int16_t)(2 * half + 1), colour);
+    }
+}
+
+/* RGB565 channel-wise linear interpolation: t=0 -> a, t=255 -> b. Integer
+ * only — used for the LED's rim/highlight and the progress bar's gloss. */
+uint16_t janus_rgb565_lerp(uint16_t a, uint16_t b, uint8_t t) {
+    int ar = (a >> 11) & 0x1F, ag = (a >> 5) & 0x3F, ab = a & 0x1F;
+    int br = (b >> 11) & 0x1F, bg = (b >> 5) & 0x3F, bb = b & 0x1F;
+    int r = ar + (br - ar) * (int)t / 255;
+    int g = ag + (bg - ag) * (int)t / 255;
+    int bl = ab + (bb - ab) * (int)t / 255;
+    return (uint16_t)((r << 11) | (g << 5) | bl);
+}
+
+/* Vertical two-stop gradient: row 0 == `top`, last row == `bottom`, each
+ * an interpolated `fill_rect` span (so async-safe). h <= 1 is a flat
+ * `top` fill. */
+void janus_shade_rect_v(janus_rect_t rect, uint16_t top, uint16_t bottom) {
+    if (rect.w <= 0 || rect.h <= 0) return;
+    if (rect.h <= 1) { fill_rect(rect, top); return; }
+    for (int16_t i = 0; i < rect.h; i++) {
+        uint8_t t = (uint8_t)((int32_t)i * 255 / (rect.h - 1));
+        janus_rect_t row = { rect.x, (int16_t)(rect.y + i), rect.w, 1 };
+        fill_rect(row, janus_rgb565_lerp(top, bottom, t));
+    }
+}
+
+/* Integer Bresenham; each pixel is a 1x1 span through fill_hspan (so it
+ * left-clips x<0 / drops y<0 and stays async-safe). Pixel-at-a-time is
+ * deliberate — the only callers are VU scale ticks + one needle. */
+void janus_draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t colour) {
+    int16_t dx = (int16_t)(x1 - x0); if (dx < 0) dx = (int16_t)(-dx);
+    int16_t dy = (int16_t)(y1 - y0); if (dy < 0) dy = (int16_t)(-dy);
+    int16_t sx = x0 < x1 ? 1 : -1;
+    int16_t sy = y0 < y1 ? 1 : -1;
+    int16_t err = (int16_t)(dx - dy);
+    for (;;) {
+        fill_hspan(x0, y0, 1, colour);
+        if (x0 == x1 && y0 == y1) break;
+        int16_t e2 = (int16_t)(2 * err);
+        if (e2 > -dy) { err = (int16_t)(err - dy); x0 = (int16_t)(x0 + sx); }
+        if (e2 <  dx) { err = (int16_t)(err + dx); y0 = (int16_t)(y0 + sy); }
+    }
+}
+
+/* ---------------------------------------------------------- fixed-point sin --
+ * Quarter-wave Q15 table (sin(deg) * 32767, deg 0..90), flash-resident.
+ * janus_sin16/janus_cos16 fold the other three quadrants onto it. Used by
+ * the VU needle (vu_meter task 2); no libm, no runtime trig. */
+static const int16_t janus_sin_q15[91] JANUS_PROGMEM = {
+    0, 572, 1144, 1715, 2286, 2856, 3425, 3993, 4560, 5126,
+    5690, 6252, 6813, 7371, 7927, 8481, 9032, 9580, 10126, 10668,
+    11207, 11743, 12275, 12803, 13328, 13848, 14364, 14876, 15383, 15886,
+    16383, 16876, 17364, 17846, 18323, 18794, 19260, 19720, 20173, 20621,
+    21062, 21497, 21925, 22347, 22762, 23170, 23571, 23964, 24351, 24730,
+    25101, 25465, 25821, 26169, 26509, 26841, 27165, 27481, 27788, 28087,
+    28377, 28659, 28932, 29196, 29451, 29697, 29934, 30162, 30381, 30591,
+    30791, 30982, 31163, 31335, 31498, 31650, 31794, 31927, 32051, 32165,
+    32269, 32364, 32448, 32523, 32587, 32642, 32687, 32722, 32747, 32762,
+    32767,
+};
+
+static int16_t sin_q15_at(int idx) {
+    return (int16_t)JANUS_PGM_READ_U16(&janus_sin_q15[idx]);
+}
+
+int16_t janus_sin16(int16_t deg) {
+    int d = deg % 360;
+    if (d < 0) d += 360;
+    if (d <= 90)  return sin_q15_at(d);
+    if (d <= 180) return sin_q15_at(180 - d);
+    if (d <= 270) return (int16_t)(-sin_q15_at(d - 180));
+    return (int16_t)(-sin_q15_at(360 - d));
+}
+
+int16_t janus_cos16(int16_t deg) {
+    return janus_sin16((int16_t)(deg + 90));
 }
 
 /* --------------------------------------------------------- font tables --

@@ -20,11 +20,13 @@
 #include <avr/pgmspace.h>
 #define JANUS_PROGMEM PROGMEM
 #define JANUS_PGM_READ_U8(addr)  pgm_read_byte(addr)
+#define JANUS_PGM_READ_U16(addr) pgm_read_word(addr)
 #define JANUS_PGM_READ_PTR(addr) pgm_read_ptr(addr)
 #define JANUS_MEMCPY_P(dst, src, n) memcpy_P((dst), (src), (n))
 #else
 #define JANUS_PROGMEM
 #define JANUS_PGM_READ_U8(addr)  (*(const uint8_t *)(addr))
+#define JANUS_PGM_READ_U16(addr) (*(const uint16_t *)(addr))
 #define JANUS_PGM_READ_PTR(addr) (*(const void *const *)(addr))
 #define JANUS_MEMCPY_P(dst, src, n) memcpy((dst), (src), (n))
 #endif
