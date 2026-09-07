@@ -19,6 +19,13 @@
 
 #include "janus_runtime.h"   /* janus_bind_t */
 
+/* Stack buffer draw_label / draw_header format a template into, per draw.
+ * A rendered label longer than this is truncated here (and then clipped
+ * again by draw_string's own right-edge clip on any realistic widget
+ * width anyway) — 47 visible chars is well past what fits a 240/320-class
+ * panel row at either font size. */
+#define JANUS_FORMAT_BUF 48
+
 /* Formats `fmt` into `buf`, substituting the one bound value/string from
  * `bind` + `bound_struct`. Writes at most `cap - 1` characters plus a
  * terminating NUL and never past `cap`; returns the number of characters
