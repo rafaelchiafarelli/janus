@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#include "janus_draw.h"
 #include "janus_font.h"
 #include "janus_runtime.h"
 #include "mock_driver.h"
@@ -29,6 +30,65 @@ static int g_failures = 0;
         fprintf(stderr, "FAIL: %s (%s:%d)\n", #cond, __FILE__, __LINE__); \
     } \
 } while (0)
+
+/* ---- shared shape-render assertions (kind_visuals) ------------------ *
+ * The toggle/progress/led renders decompose to many fill_rect spans, so
+ * these scan the mock log by geometry / colour rather than by call
+ * count. Each span is a uniform fill, so `sample_pixel` is its colour. */
+
+/* was any pixel (px,py) painted at all, by any logged span? */
+static int rt_painted(int px, int py) {
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if ((int)c.x <= px && px < (int)(c.x + c.w) &&
+            (int)c.y <= py && py < (int)(c.y + c.h)) return 1;
+    }
+    return 0;
+}
+
+/* was (px,py) painted `colour` by some span (ignores later overpaint —
+ * "a colour pixel exists here", which is what the task assertions want) */
+static int rt_painted_colour(int px, int py, uint16_t colour) {
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if (c.sample_pixel != colour) continue;
+        if ((int)c.x <= px && px < (int)(c.x + c.w) &&
+            (int)c.y <= py && py < (int)(c.y + c.h)) return 1;
+    }
+    return 0;
+}
+
+/* does any span of colour `colour` touch the x-band [x_lo, x_hi)? */
+static int rt_colour_in_xband(uint16_t colour, int x_lo, int x_hi) {
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if (c.sample_pixel != colour) continue;
+        if ((int)c.x < x_hi && (int)(c.x + c.w) > x_lo) return 1;
+    }
+    return 0;
+}
+
+/* blocking render == async-drained render, span for span — the
+ * "drains only JANUS_ASYNC_OP_FILL" check: a non-fill op would replay
+ * differently (or not at all) through the queue. */
+static int rt_render_matches_async(const janus_screen_desc_t *screen) {
+    static mock_draw_call_t blocking[MOCK_DRIVER_LOG_CAPACITY];
+    mock_driver_reset();
+    janus_render_screen(screen);
+    uint16_t n = mock_driver_log_count;
+    for (uint16_t i = 0; i < n; i++) blocking[i] = mock_driver_log[i];
+
+    mock_driver_reset();
+    janus_render_screen_async_start(screen);
+    while (janus_render_poll()) { }
+    if (mock_driver_log_count != n || n == 0) return 0;
+    for (uint16_t i = 0; i < n; i++) {
+        mock_draw_call_t a = mock_driver_log[i], b = blocking[i];
+        if (a.x != b.x || a.y != b.y || a.w != b.w || a.h != b.h ||
+            a.sample_pixel != b.sample_pixel) return 0;
+    }
+    return 1;
+}
 
 /* ---- fixture 1: traversal reaches every widget ---- */
 static void test_traversal_reaches_every_widget(void) {
@@ -302,27 +362,50 @@ static void test_divider_always_draws_unconditionally(void) {
     CHECK(mock_driver_log_count == 4); /* 60px wide spans four 16px tiles (16+16+16+12) */
 }
 
-static void test_toggle_fill_tracks_live_value(void) {
+/* toggle now renders a switch: a rounded track (its colour = the showing
+ * state) + a circular knob that sits left when off, right when on. Knob
+ * colour is a lightened copy of the track. Geometry {0,0,60,16}: knob
+ * diameter 16, radius 7; off-knob centred at x=9 (covers ~[2,16]),
+ * on-knob at x=51 (covers ~[44,58]); x=20..40 mid-height is track-only. */
+static void test_toggle_renders_a_switch_tracking_state(void) {
     static const janus_widget_desc_t toggle = {
-        .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 12, 12 },
+        .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 60, 16 },
         .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
-        .color = 0x2222, .bg_color = 0xdddd,
+        .color = 0x001F, .bg_color = 0xF800,
     };
     static const janus_screen_desc_t screen = {
         .name = "Toggle", .widgets = &toggle, .widget_count = 1, .bound_struct = &g_demo,
     };
+    const uint16_t knob_off = janus_rgb565_lerp(0xF800, 0xFFFF, 96);
+    const uint16_t knob_on  = janus_rgb565_lerp(0x001F, 0xFFFF, 96);
 
     g_demo.level = 0;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint16_t sample_off = mock_driver_log[0].sample_pixel;
+    CHECK(rt_colour_in_xband(knob_off, 0, 20));    /* knob on the left */
+    CHECK(!rt_colour_in_xband(knob_off, 40, 60));  /* ...and not on the right */
+    CHECK(rt_painted_colour(20, 8, 0xF800));       /* track shows the OFF colour */
+    CHECK(!rt_painted(0, 0));                       /* pill track: corner is clipped off */
 
     g_demo.level = 1;
     mock_driver_reset();
     janus_render_screen(&screen);
-    uint16_t sample_on = mock_driver_log[0].sample_pixel;
+    CHECK(rt_colour_in_xband(knob_on, 40, 60));    /* knob on the right */
+    CHECK(!rt_colour_in_xband(knob_on, 0, 20));    /* ...and not on the left */
+    CHECK(rt_painted_colour(20, 8, 0x001F));       /* track shows the ON colour */
+}
 
-    CHECK(sample_off != sample_on);
+static void test_toggle_render_is_async_safe(void) {
+    static const janus_widget_desc_t toggle = {
+        .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 60, 16 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+        .color = 0x001F, .bg_color = 0xF800,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ToggleAsync", .widgets = &toggle, .widget_count = 1, .bound_struct = &g_demo,
+    };
+    g_demo.level = 1;
+    CHECK(rt_render_matches_async(&screen));
 }
 
 static void test_badge_fill_tracks_live_value(void) {
@@ -762,7 +845,8 @@ int main(void) {
     test_box_summary_renders_when_collapsed_and_expanded();
     test_switch_screen_draws_only_the_new_screen();
     test_divider_always_draws_unconditionally();
-    test_toggle_fill_tracks_live_value();
+    test_toggle_renders_a_switch_tracking_state();
+    test_toggle_render_is_async_safe();
     test_badge_fill_tracks_live_value();
     test_slider_fill_tracks_live_value();
     test_label_without_text_draws_only_the_background_fill();
