@@ -87,6 +87,12 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_render_async_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_render_async_tests PRIVATE -Wall -Wextra)
 
+    # janus_draw's helpers live in janus_runtime.o, which pulls the driver
+    # contract — so this links the mock, same as janus_runtime_tests.
+    add_executable(janus_draw_tests tests/test_draw.c)
+    target_link_libraries(janus_draw_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_draw_tests PRIVATE -Wall -Wextra)
+
     enable_testing()
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
     add_test(NAME janus_input_touch_tests COMMAND janus_input_touch_tests)
@@ -95,5 +101,6 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_input_buttons_tests COMMAND janus_input_buttons_tests)
     add_test(NAME janus_font_tests COMMAND janus_font_tests)
     add_test(NAME janus_format_tests COMMAND janus_format_tests)
+    add_test(NAME janus_draw_tests COMMAND janus_draw_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
 endif()
