@@ -669,11 +669,29 @@ static void draw_checkbox(const janus_widget_desc_t *w, const void *bound_struct
     fill_rect(lw.geometry, value != 0.0 ? lw.color : lw.bg_color);
 }
 
+/* led: a round, shaded indicator — a darker rim ring, the state-colour
+ * face on top, and a small lighter specular highlight up-and-left. State
+ * -> colour selection is unchanged (0 -> .bg_color, 1 -> .color, >=2 ->
+ * amber); this only changes how that colour is painted. Rim/highlight
+ * are derived from the state colour via janus_rgb565_lerp, so there's
+ * nothing new to author (ui_widgets/kind_visuals task 3). */
 static void draw_led(const janus_widget_desc_t *w, const void *bound_struct) {
     janus_widget_desc_t lw = janus_widget_load(w);
     int state = (int)janus_read_bound_value(&lw.bind, bound_struct);
-    uint16_t value = state <= 0 ? lw.bg_color : (state == 1 ? lw.color : JANUS_COLOR_LED_WARN);
-    fill_rect(lw.geometry, value);
+    uint16_t colour = state <= 0 ? lw.bg_color : (state == 1 ? lw.color : JANUS_COLOR_LED_WARN);
+
+    janus_rect_t r = lw.geometry;
+    int16_t cx = (int16_t)(r.x + r.w / 2);
+    int16_t cy = (int16_t)(r.y + r.h / 2);
+    int16_t rad = (int16_t)((r.w < r.h ? r.w : r.h) / 2);
+    if (rad <= 0) { fill_rect(r, colour); return; }
+
+    janus_fill_circle(cx, cy, rad, janus_rgb565_lerp(colour, 0x0000, 80));       /* rim */
+    janus_fill_circle(cx, cy, (int16_t)(rad - 1), colour);                        /* face */
+    int16_t hl_r = (int16_t)(rad / 3);
+    if (hl_r < 1) hl_r = 1;
+    janus_fill_circle((int16_t)(cx - rad / 3), (int16_t)(cy - rad / 3), hl_r,
+                      janus_rgb565_lerp(colour, 0xffff, 130));                    /* highlight */
 }
 
 /* badge/slider still reuse checkbox's / progress's bind logic as a plain
