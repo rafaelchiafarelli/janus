@@ -9,6 +9,7 @@ seeing every screen at once.
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from typing import Any
 import yaml
 
 from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, Widget
+
+log = logging.getLogger("janus.parse")
 
 _VALID_BIND_TYPES = {"string", "int", "int64", "float"}
 _VALID_DISPLAY_COLORS = {"mono", "gray", "rgb565"}
@@ -29,6 +32,12 @@ _VALID_RENDER_MODES = {"blocking", "non_blocking"}
 _REQUIRES_RANGE = {"progress", "gauge", "slider"}
 _CONTAINER_KINDS = {"column", "row", "box", "radiogroup", "navlist"}
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+# One printf-style conversion the runtime formatter (janus_format.c)
+# understands: an optional `.N` precision, an optional `l`/`ll` length,
+# then one of d/u/x/s/f. `%%` is stripped before this is applied (see
+# _strip_pct_pct) so it never counts as a conversion. label/header only.
+_FORMAT_CONV_RE = re.compile(r"%(?:\.\d)?l{0,2}[duxsf]")
+_FORMAT_TEXT_KINDS = {"label", "header"}
 # Native glyph dims per runtime/embedded_c/include/janus_font.h's two
 # tables. `large` is also the cap `font_scale` can't push a widget's
 # effective glyph size past — see _validate_widget's font_scale check for
@@ -85,6 +94,28 @@ def _check_radiobutton_value(radiobutton: Widget, bind_type: str) -> None:
         )
 
 
+def _strip_pct_pct(text: str) -> str:
+    """`%%` is a literal percent, not a conversion — remove the pairs
+    before looking for conversions so `"100%%"` doesn't read as one."""
+    return text.replace("%%", "")
+
+
+def _format_conversions(text: str) -> list[str]:
+    """The printf conversions in `text`, `%%` excluded. First one is the
+    one the runtime actually fills (a widget carries a single `bind`)."""
+    return _FORMAT_CONV_RE.findall(_strip_pct_pct(text))
+
+
+def _text_is_format(text: str | None) -> bool:
+    """A `text:` is a format template when it holds a real conversion or a
+    `%%` escape — either way the runtime must run it through
+    janus_format.c rather than blitting it verbatim. A bare `%` that
+    isn't a conversion (`"50% done"`) is left literal."""
+    if text is None:
+        return False
+    return bool(_format_conversions(text)) or "%%" in text
+
+
 def _validate_widget(widget: Widget) -> None:
     if widget.kind in _REQUIRES_RANGE and widget.range is None:
         raise ValueError(f"widget {widget.id!r} (kind={widget.kind!r}) requires `range`")
@@ -124,12 +155,54 @@ def _validate_widget(widget: Widget) -> None:
             f"widget {widget.id!r} (kind={widget.kind!r}) has `file` — only `image` "
             f"widgets take a source image file"
         )
+    _validate_format_text(widget)
     for child in widget.summary:
         if child.kind in _CONTAINER_KINDS:
             raise ValueError(
                 f"box {widget.id!r}'s summary widget {child.id!r} is a container "
                 f"(kind={child.kind!r}) — summary only holds leaf widgets, no nesting"
             )
+
+
+def _validate_format_text(widget: Widget) -> None:
+    """A `text:` carrying a real conversion (not just `%%`) is a format
+    template: it must be a label/header, must have a `bind`, and the
+    conversion must agree with the bound type (`%s`⇔string,
+    everything-else⇔numeric). A second conversion is a warning, not an
+    error — the runtime emits it literally."""
+    if widget.text is None:
+        return
+    convs = _format_conversions(widget.text)
+    if not convs:
+        return  # `%%`-only or no conversion — nothing to constrain
+
+    if widget.kind not in _FORMAT_TEXT_KINDS:
+        raise ValueError(
+            f"widget {widget.id!r} (kind={widget.kind!r}) has a format conversion in "
+            f"`text` {widget.text!r} — only {sorted(_FORMAT_TEXT_KINDS)} support format text"
+        )
+    if widget.bind is None:
+        raise ValueError(
+            f"widget {widget.id!r} `text` {widget.text!r} has a format conversion but no "
+            f"`bind` to fill it (use %% for a literal percent)"
+        )
+    wants_string = convs[0].endswith("s")
+    if wants_string and widget.bind.type != "string":
+        raise ValueError(
+            f"widget {widget.id!r} `text` {widget.text!r} uses %s but its bind type is "
+            f"{widget.bind.type!r}, not 'string'"
+        )
+    if not wants_string and widget.bind.type == "string":
+        raise ValueError(
+            f"widget {widget.id!r} `text` {widget.text!r} uses a numeric conversion "
+            f"({convs[0]!r}) but its bind type is 'string' — use %s"
+        )
+    if len(convs) > 1:
+        log.warning(
+            "widget %r `text` %r has %d conversions; only the first (%r) is filled, "
+            "the rest render literally",
+            widget.id, widget.text, len(convs), convs[0],
+        )
 
 
 def _resolve_image_file(value: str | None, base_dir: Path | None) -> str | None:
@@ -151,6 +224,7 @@ def _parse_widget(data: dict[str, Any], base_dir: Path | None = None) -> Widget:
         id=data.get("id", ""),
         bind=_parse_binding(data.get("bind")),
         text=data.get("text"),
+        text_is_format=_text_is_format(data.get("text")),
         asset=data.get("asset"),
         image_file=_resolve_image_file(data.get("file"), base_dir),
         value=data.get("value"),
