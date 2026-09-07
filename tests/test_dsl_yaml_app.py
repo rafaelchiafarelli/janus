@@ -126,6 +126,27 @@ class TestAppFromDictDisplay(unittest.TestCase):
         with self.assertRaises(ValueError):
             app_from_dict(data, self._screens())
 
+    def test_background_defaults_to_none(self) -> None:
+        data = {"screens": [], "display": {"size": {"w": 240, "h": 320}}}
+        app = app_from_dict(data, self._screens())
+        self.assertIsNone(app.display.background)
+
+    def test_background_parsed_when_given(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}, "background": "#001122"},
+        }
+        app = app_from_dict(data, self._screens())
+        self.assertEqual(app.display.background, "#001122")
+
+    def test_invalid_background_rejected(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}, "background": "black"},
+        }
+        with self.assertRaises(ValueError):
+            app_from_dict(data, self._screens())
+
 
 class TestAppFromDictInput(unittest.TestCase):
     def _screens(self) -> list[Screen]:

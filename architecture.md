@@ -457,7 +457,8 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
 - `janus_display_config.gen.h` — only written when `app.display` is set:
   `JANUS_DISPLAY_WIDTH`/`HEIGHT` + `JANUS_DISPLAY_COLOR*`/`BUS*`/
   `CONTROLLER*` `#define`s (see Stage 2's display bounds check and
-  Janus.md's "Display config" section). Implemented:
+  Janus.md's "Display config" section), plus `JANUS_DISPLAY_BACKGROUND`
+  (packed RGB565) when `display.background` is set. Implemented:
   `emit_display_config(display)`. Every known `color`/`bus`/`controller`
   value is always defined (so driver code can compare against any of
   them); the *selection* macro (`JANUS_DISPLAY_BUS`/`_CONTROLLER`) is only
@@ -466,6 +467,16 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   data for hand-written vendor driver code to consume — the fixed runtime
   library never reads it, and no driver body is generated from the
   selection (human-owned, see Janus.md Open Questions).
+- `display.background` (optional, `#RRGGBB`) — the canvas colour. When
+  set, Stage 3b *also* emits `JANUS_DISPLAY_BACKGROUND` +
+  `JANUS_DISPLAY_PANEL_W`/`_H` into `janus_render_config.gen.h` (the
+  build-config header the fixed runtime `#include`s via `__has_include`),
+  so `janus_clear_screen` can do a true full-panel erase in that colour on
+  a screen switch. This is the **only** path by which panel dimensions
+  reach the otherwise display-size-agnostic runtime — declaring
+  `background` is the explicit opt-in. Without it, `janus_clear_screen`
+  stays best-effort (a union-of-top-level-widget-rects fill in the first
+  widget's `bg`).
 
 **`.bound_struct` resolution (v1: one message per screen).** Each
 widget's `.bind.field_offset = offsetof({message}_t, {field})` assumes
@@ -641,7 +652,7 @@ bool display_busy(void);
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* navigate: clears focus, erases the outgoing screen (janus_clear_screen), renders the new one */
-void janus_clear_screen(const janus_screen_desc_t *screen);          /* one fill over the union of the screen's top-level rects (anchored at origin — covers inter-widget gaps + ragged edges), in the first top-level widget's bg; runtime has no panel size/canvas colour for a true full-panel fill; public for hand-driven screen changes */
+void janus_clear_screen(const janus_screen_desc_t *screen);          /* full-panel fill in JANUS_DISPLAY_BACKGROUND if app.yaml set display.background (janus_render_config.gen.h carries it + panel size); else best-effort: one fill over the union of the screen's top-level rects (origin-anchored — covers gaps + ragged edges) in the first widget's bg. public for hand-driven screen changes */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads the state above; Stage 6 hit-testing needs it */
 

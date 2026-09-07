@@ -320,8 +320,10 @@ def _parse_display(data: dict[str, Any] | None) -> DisplayConfig | None:
             f"{sorted(_VALID_RENDER_MODES)}"
         )
     w, h = _parse_size(data["size"])
+    background = _parse_color(data.get("background"))  # None -> None; validates #RRGGBB otherwise
     return DisplayConfig(
-        width=w, height=h, color=color, bus=bus, controller=controller, render_mode=render_mode
+        width=w, height=h, color=color, bus=bus, controller=controller,
+        render_mode=render_mode, background=background,
     )
 
 

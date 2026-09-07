@@ -974,10 +974,22 @@ void janus_render_screen_if_dirty(const janus_screen_desc_t *screen) {
  * (e.g. an encoder driving a tab bar directly). */
 void janus_clear_screen(const janus_screen_desc_t *screen) {
     if (screen == NULL) return;
+
+#if defined(JANUS_DISPLAY_BACKGROUND) && defined(JANUS_DISPLAY_PANEL_W) && defined(JANUS_DISPLAY_PANEL_H)
+    /* app.yaml declared `display.background` — janus_render_config.gen.h
+     * then also carries the panel size, so a true full-panel erase in the
+     * authored canvas colour is possible (the only path where the fixed
+     * runtime uses panel dimensions). */
+    (void)screen;
+    janus_rect_t panel = { 0, 0, JANUS_DISPLAY_PANEL_W, JANUS_DISPLAY_PANEL_H };
+    fill_rect(panel, (uint16_t)JANUS_DISPLAY_BACKGROUND);
+    return;
+#else
     janus_screen_desc_t ls = janus_screen_load(screen);
     if (ls.widget_count == 0) return;
 
-    /* One fill over the union of every top-level widget's rect, anchored
+    /* No declared canvas colour: best-effort. One fill over the union of
+     * every top-level widget's rect, anchored
      * at the origin — so it also covers the GAP between widgets and any
      * ragged right/bottom edge that a per-widget fill would leave showing
      * the previous screen. The colour is the first top-level widget's own
@@ -998,6 +1010,7 @@ void janus_clear_screen(const janus_screen_desc_t *screen) {
     }
     janus_rect_t all = { 0, 0, max_x, max_y };
     fill_rect(all, erase_colour);
+#endif  /* JANUS_DISPLAY_BACKGROUND && panel size */
 }
 
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {

@@ -390,6 +390,7 @@ display:
   bus: spi         # spi | i2c | parallel — optional
   controller: st7789v   # optional — see the closed list below
   render_mode: non_blocking   # blocking | non_blocking, default blocking
+  background: "#000000"       # optional #RRGGBB canvas colour — see below
 ```
 
 ## Display config (settled 2026-08-20; bus/controller added 2026-08-20)
@@ -429,11 +430,22 @@ overflow against (see `architecture.md` Stage 2 for the exact check).
   behind `JANUS_RENDER_NONBLOCKING`, so a `blocking` project links none
   of it — required to fit an ATmega2560's 8 KiB SRAM once any real baked
   `image` pulls `blit_image` in.
+- **`background: "#RRGGBB"`** (optional, added 2026-09-07) — the canvas
+  colour. When set it's packed to RGB565 and emitted into *both*
+  `janus_display_config.gen.h` (for vendor driver code) and
+  `janus_render_config.gen.h` as `JANUS_DISPLAY_BACKGROUND` alongside
+  `JANUS_DISPLAY_PANEL_W`/`_H` — the fixed runtime reads that copy so
+  `janus_clear_screen` (called on every `janus_switch_screen`) can do a
+  true full-panel erase in that colour, instead of its best-effort
+  union-of-widget-rects fallback. This is the only path by which panel
+  dimensions reach the otherwise display-size-agnostic runtime, so
+  declaring `background` is the explicit opt-in to that coupling.
 
-**What "implemented" means here, precisely:** all five fields are parsed,
+**What "implemented" means here, precisely:** all six fields are parsed,
 validated, and emitted as plain data in `janus_display_config.gen.h`
-(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`)
-— consumed by hand-written vendor driver code (except `render_mode`, which
+(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`,
+plus `BACKGROUND` when set) — consumed by hand-written vendor driver code
+(except `render_mode`, which
 Stage 8's scaffold consumes to pick a `main.c`, *and* — since
 channel_icons task 3 — re-emits as a separate one-line
 `janus_render_config.gen.h` inside the vendored `runtime/include/` that
@@ -563,7 +575,7 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
 
 - **Input modality is pluggable, exactly as sketched below, and turned out not to need a rewrite of anything already built.** Touch is "hit-test a point against the geometry rects already in `screen_table.gen.c`, find the widget, dispatch its action" (`janus_input_touch.c`, unchanged). Encoder/buttons instead need a *focus order* — which widgets are focusable, in what sequence a rotation or a next/prev button moves between them — baked at generation time by Stage 3b's `_assign_focus_order` (a pre-order tree walk assigning sequential indices to the exact same set touch already dispatches on: `box` headers and any leaf with `on_press`/`navigate`; nothing new to author in YAML). All three modalities resolve to the identical `janus_input_result_t` and get dispatched the same way downstream — only the "which widget got selected" front-end differs per modality, confirming the original sketch's core claim.
 - **Encoder and buttons share almost their entire core**, not just the dispatch step: `janus_input_focus.c` (new, fixed library) owns `janus_focus_move`/`janus_focus_activate` — moving/wrapping among a screen's focusable widgets and resolving whatever's currently focused. `janus_input_encoder.h` and `janus_input_buttons.h` are thin, header-only driver contracts (`janus_encoder_poll`/`janus_buttons_poll`, no `.c` — same shape as `draw_area_sync`/`janus_touch_poll`, vendor-implemented); encoder rotation and button NEXT/PREV both just call `janus_focus_move`, encoder click and button SELECT both call `janus_focus_activate`. Push buttons were scoped as **next/prev/select**, not one-button-per-action — a direct-mapped GPIO→action scheme (bypassing focus entirely) was considered and rejected as a separate, larger, human-authored feature, not part of this pass.
-- **Focus needs a visual highlight to be usable at all** — touch doesn't (you're pointing straight at the widget), but nothing pointed at which widget was selected before this landed. `janus_runtime.c` gained `janus_set_focus`/`janus_get_focus`: a 6px ring (`JANUS_FOCUS_RING_W`) inset along the widget's edges with a darker "shade" outer line so it reads as a raised frame (2026-09-07 — was a 1px flat line), drawn over whatever the widget's own `draw_<kind>()` already painted, tile-scoped (same spirit as `janus_toggle_box`'s redraw, not a full repaint), cleared automatically on `janus_switch_screen` so a stale pointer from the outgoing screen is never redrawn onto the new one. `janus_switch_screen` also erases the *outgoing* screen first (`janus_clear_screen` — one fill over the union of the screen's top-level widget rects, anchored at the origin so inter-widget gaps and ragged edges are covered too, in the first top-level widget's `bg`; the fixed runtime has no panel size or canvas colour for a real full-panel fill, so a project that needs a specific erase colour authors `bg:` on its first widget — by convention a full-width status/header bar). `janus_clear_screen` is public for projects that drive tab changes by hand. **This is still best-effort** — a proper full-panel erase wants an explicit `display.background:` colour in the DSL (not yet built).
+- **Focus needs a visual highlight to be usable at all** — touch doesn't (you're pointing straight at the widget), but nothing pointed at which widget was selected before this landed. `janus_runtime.c` gained `janus_set_focus`/`janus_get_focus`: a 6px ring (`JANUS_FOCUS_RING_W`) inset along the widget's edges with a darker "shade" outer line so it reads as a raised frame (2026-09-07 — was a 1px flat line), drawn over whatever the widget's own `draw_<kind>()` already painted, tile-scoped (same spirit as `janus_toggle_box`'s redraw, not a full repaint), cleared automatically on `janus_switch_screen` so a stale pointer from the outgoing screen is never redrawn onto the new one. `janus_switch_screen` also erases the *outgoing* screen first via `janus_clear_screen`: if `app.yaml` declared **`display.background: "#RRGGBB"`** (2026-09-07) the runtime does a true full-panel fill in that colour — `display.background` is emitted into `janus_render_config.gen.h` as `JANUS_DISPLAY_BACKGROUND` alongside `JANUS_DISPLAY_PANEL_W`/`_H`, the one path by which panel dimensions reach the otherwise display-size-agnostic fixed runtime, so declaring it is the explicit opt-in. Without `display.background` it's best-effort: one fill over the union of the screen's top-level widget rects (origin-anchored, so inter-widget gaps and ragged edges are covered) in the first widget's `bg` (author `bg:` on a full-width status/header bar to control it). `janus_clear_screen` is public for projects that drive tab changes by hand.
 - **Which modality a project uses is declared, not baked into every project unconditionally.** `main.c`'s event loop used to poll touch unconditionally, which would have forced every project to implement drivers for hardware it might not have once a second modality existed. `app.yaml`'s `input: { modality: touch | encoder | buttons }` (default `touch`) picks which of three static scaffolds — `main_touch.c.tmpl` / `main_encoder.c.tmpl` / `main_buttons.c.tmpl` — Stage 8 writes.
 - **Wiring a button to a user-defined action reuses the schema-ownership split already established for harpia Includes**, applied to actions: Janus generates a stable, cheap-to-regenerate **action ID enum** (one entry per distinct `on_press`/`navigate` value across all screens, e.g. `JANUS_ACTION_REBOOT`), and each widget descriptor carries `.action = JANUS_ACTION_REBOOT` (an int, not a string). The human writes **one** hand-maintained, never-regenerated function — `void janus_handle_action(janus_action_t action)` — with one `case` per action, exactly like the human's root `.harpia` file: Janus owns the enum (regenerated in full every time, trivial since it's just names), the human owns the dispatch body. Adding a new action-producing widget means the enum picks up one new value and the human adds one `case` — not a regeneration of "the entire action set," and never touches the human's existing cases.
 

@@ -568,10 +568,15 @@ def emit_display_config(display: DisplayConfig) -> str:
         f"{render_mode_defines}\n"
         f"#define JANUS_DISPLAY_RENDER_MODE {_DISPLAY_RENDER_MODE_MACRO[display.render_mode]}\n",
     ]
+    if display.background is not None:
+        # Parity with the other selection-as-data macros — undefined, not
+        # defaulted, when the field is absent. (The fixed runtime reads
+        # its own copy from janus_render_config.gen.h, not this header.)
+        parts.append(f"#define JANUS_DISPLAY_BACKGROUND 0x{_pack_rgb565(display.background):04x}\n")
     return "\n".join(parts)
 
 
-def emit_render_config(render_mode: RenderMode) -> str:
+def emit_render_config(render_mode: RenderMode, display: "DisplayConfig | None" = None) -> str:
     """The body of `janus_render_config.gen.h` — a *build-config* header
     the fixed runtime library itself pulls in (via `__has_include`, see
     janus_runtime.h), distinct from emit_display_config's plain data for
@@ -581,16 +586,31 @@ def emit_render_config(render_mode: RenderMode) -> str:
     one links none of it — most importantly not the 6912-byte
     `g_async_ops` buffer, which would otherwise overflow an 8 KiB SRAM
     part (channel_icons task 3). Emitted for `blocking` too (macro left
-    undefined) so the `#include` is never a dangling reference."""
+    undefined) so the `#include` is never a dangling reference.
+
+    Also carries `display.background` when set: JANUS_DISPLAY_BACKGROUND
+    (packed RGB565) plus JANUS_DISPLAY_PANEL_W/H, which together let the
+    fixed runtime's janus_clear_screen do a true full-panel erase. These
+    are the *only* case where panel dimensions reach the otherwise
+    display-size-agnostic runtime — declaring `background` is the opt-in."""
     if render_mode == "non_blocking":
-        return (
-            "/* app.yaml: display.render_mode: non_blocking */\n"
-            "#define JANUS_RENDER_NONBLOCKING 1\n"
-        )
-    return (
-        "/* app.yaml: display.render_mode: blocking — the fixed runtime's\n"
-        " * polled/async render path is left out of the build. */\n"
-    )
+        lines = [
+            "/* app.yaml: display.render_mode: non_blocking */",
+            "#define JANUS_RENDER_NONBLOCKING 1",
+        ]
+    else:
+        lines = [
+            "/* app.yaml: display.render_mode: blocking — the fixed runtime's",
+            " * polled/async render path is left out of the build. */",
+        ]
+    if display is not None and display.background is not None:
+        lines += [
+            "/* app.yaml: display.background — full-panel erase colour for janus_clear_screen */",
+            f"#define JANUS_DISPLAY_BACKGROUND 0x{_pack_rgb565(display.background):04x}",
+            f"#define JANUS_DISPLAY_PANEL_W {display.width}",
+            f"#define JANUS_DISPLAY_PANEL_H {display.height}",
+        ]
+    return "\n".join(lines) + "\n"
 
 
 # ------------------------------------------------------------- app table --
