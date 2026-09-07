@@ -831,6 +831,21 @@ redrawn on top of the incoming screen's freshly rendered content. Only
 focusable, so the redraw never needs `bind` data — `read_bound_value`/
 `read_bound_string` are never called from this path.
 
+**Nav strip rendering (nav_tabs epic task 2).** `janus_render_nav_bar(app)`
+(internal `draw_nav_bar`) paints the app-level tab strip into its band:
+one `fill_rect` per `app->nav_tabs` cell (baked geometry, loaded pgm-safe
+via `janus_nav_tab_load`), the title centered at `medium` with no
+auto-shrink (every tab must read at one size), and — on the cell whose
+`target == app->active_screen` — an active fill plus a
+`JANUS_NAV_ACCENT_H` (6px) bottom accent bar; inactive cells get a 1px
+baseline. Colours/heights are fixed runtime constants (`JANUS_COLOR_NAV_*`,
+decision 2), same "Janus-owned affordance" status as `JANUS_COLOR_FOCUS_RING`.
+It is **not** called from `janus_render_screen` (screen-scoped, no `app`)
+— `janus_switch_screen[_async_start]` call it right after rendering the
+incoming screen, and a scaffold calls it once after the first
+`janus_render_screen`; a periodic `janus_render_*_if_dirty` sweep never
+touches it.
+
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
 DESIGN.md's actual rendering logic lives, finally for real (not the

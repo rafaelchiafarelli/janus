@@ -1013,6 +1013,44 @@ void janus_clear_screen(const janus_screen_desc_t *screen) {
 #endif  /* JANUS_DISPLAY_BACKGROUND && panel size */
 }
 
+/* ------------------------------------------------------------ nav strip --
+ * app.yaml `nav: { kind: tabs }`. Geometry is baked (janus_nav_tab_t per
+ * cell, equal widths across the panel — stage2_layout); this just paints
+ * it. Fixed colours / accent height, deliberately not authorable
+ * (nav_tabs epic decision 2) — same "Janus-owned UI affordance" spirit as
+ * JANUS_COLOR_FOCUS_RING. Labels render at `medium` centered (a nav band
+ * is short and wide) and DON'T auto-shrink — every tab must read at the
+ * same size, so an over-long one clips (author fewer/shorter titles). */
+#define JANUS_COLOR_NAV_BG         ((uint16_t)0x18e3)  /* inactive cell — dark grey */
+#define JANUS_COLOR_NAV_BG_ACTIVE  ((uint16_t)0x39e7)  /* active cell — lighter grey */
+#define JANUS_COLOR_NAV_INK        ((uint16_t)0xad55)  /* inactive label — mid grey */
+#define JANUS_COLOR_NAV_INK_ACTIVE ((uint16_t)0xffff)  /* active label — white */
+#define JANUS_COLOR_NAV_ACCENT     ((uint16_t)0x07ff)  /* active underline — cyan (focus-ring family) */
+#define JANUS_NAV_ACCENT_H 6
+
+static void draw_nav_bar(const janus_app_t *app) {
+    if (app == NULL || app->nav_tabs == NULL) return;
+    for (uint16_t i = 0; i < app->nav_tab_count; i++) {
+        janus_nav_tab_t tab = janus_nav_tab_load(&app->nav_tabs[i]);
+        bool active = (tab.target == (int16_t)app->active_screen);
+        uint16_t bg = active ? JANUS_COLOR_NAV_BG_ACTIVE : JANUS_COLOR_NAV_BG;
+
+        fill_rect(tab.rect, bg);
+        draw_string(tab.rect, tab.title,
+                    active ? JANUS_COLOR_NAV_INK_ACTIVE : JANUS_COLOR_NAV_INK, bg,
+                    /*from_flash=*/true, JANUS_FONT_SIZE_MEDIUM, 1,
+                    /*center=*/true, /*allow_shrink=*/false);
+
+        int16_t h = active ? (int16_t)JANUS_NAV_ACCENT_H : (int16_t)1;
+        janus_rect_t under = { tab.rect.x, (int16_t)(tab.rect.y + tab.rect.h - h), tab.rect.w, h };
+        fill_rect(under, active ? JANUS_COLOR_NAV_ACCENT : JANUS_COLOR_NAV_INK);
+    }
+}
+
+void janus_render_nav_bar(const janus_app_t *app) {
+    draw_nav_bar(app);
+}
+
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     if (screen_index >= app->screen_count) return;
     /* Clear focus *before* switching — g_focused_widget would otherwise
@@ -1028,6 +1066,7 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     janus_clear_screen(janus_app_get_screen(app, app->active_screen));
     app->active_screen = screen_index;
     janus_render_screen(janus_app_get_screen(app, screen_index));
+    draw_nav_bar(app);   /* strip lives in its own band above the screen; repaint the active tab */
 }
 
 #if defined(JANUS_RENDER_NONBLOCKING)
@@ -1081,6 +1120,7 @@ void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index) {
     janus_set_focus(NULL);   /* same reasoning as janus_switch_screen */
     janus_clear_screen(janus_app_get_screen(app, app->active_screen));  /* erase outgoing (synchronous, one-shot) */
     app->active_screen = screen_index;
+    draw_nav_bar(app);   /* synchronous, one-shot — like the clear above; the screen render below is the async part */
     janus_render_screen_async_start(janus_app_get_screen(app, screen_index));
 }
 #endif  /* JANUS_RENDER_NONBLOCKING */

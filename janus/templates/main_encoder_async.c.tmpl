@@ -13,6 +13,7 @@ int main(void) {
     display_driver_init();
     const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
     janus_render_screen_async_start(screen);
+    janus_render_nav_bar(&janus_app);   /* app-level tab strip (no-op if app.yaml has no `nav:`) */
     janus_focus_move(screen, 0);   /* establish initial focus */
 
     while (1) {

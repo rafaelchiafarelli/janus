@@ -249,6 +249,12 @@ static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *s
     return out;
 }
 
+static inline janus_nav_tab_t janus_nav_tab_load(const janus_nav_tab_t *tab) {
+    janus_nav_tab_t out;
+    JANUS_MEMCPY_P(&out, tab, sizeof(out));
+    return out;
+}
+
 /* driver contract, carried forward from the original prototype's DESIGN.md.
  * Implemented by vendor/host code, never by the fixed library itself.
  * `pixels` is `w * h` RGB565 values, row-major (row 0 first, left-to-right
@@ -292,6 +298,19 @@ void janus_toggle_box(const janus_widget_desc_t *box);               /* re-rende
  * it's also public for a project that drives screen changes by hand (an
  * encoder wired straight to a tab bar, say). NULL is a no-op. */
 void janus_clear_screen(const janus_screen_desc_t *screen);
+
+/* Paints the app-level nav strip (app.yaml `nav: { kind: tabs }`) into
+ * its band at the top of the panel — one cell per `app->nav_tabs` entry
+ * (baked geometry), title centered; the cell whose `target` equals
+ * `app->active_screen` gets the active fill + a bottom accent bar. No-op
+ * if the app has no nav (`nav_tabs == NULL`). Repaint-on-change, not
+ * per-frame: janus_switch_screen[_async_start] call it after rendering
+ * the incoming screen, and a scaffold calls it once after the first
+ * janus_render_screen. It is deliberately NOT part of janus_render_screen
+ * (screen-scoped, no `app`), so a periodic janus_render_*_if_dirty sweep
+ * never repaints it. Colours / band height are fixed runtime constants
+ * (nav_tabs epic decision 2). (task 2.) */
+void janus_render_nav_bar(const janus_app_t *app);
 
 /* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its
  * always-visible `summary` plus its `children` if currently expanded,
