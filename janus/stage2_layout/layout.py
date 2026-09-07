@@ -72,7 +72,15 @@ def _resolve_leaf_size(widget: Widget) -> tuple[int, int]:
 def _header_height(widget: Widget) -> int:
     """`box`'s header strip is normally `BOX_HEADER_H`, but grows to fit
     the tallest `summary` widget if any are taller than that (a box with
-    no `summary` lays out byte-identical to before this existed)."""
+    no `summary` lays out byte-identical to before this existed).
+
+    A box with nothing to show in the strip — not collapsible, no title
+    `text`, no `summary` — gets a zero-height strip: it's a pure grouping
+    container, so reserving (and painting) 16px above its children just
+    ate content area for no visual (2026-09-07). The runtime skips
+    painting a zero-height strip; see draw_box_header."""
+    if not widget.collapsible and not widget.text and not widget.summary:
+        return 0
     if not widget.summary:
         return BOX_HEADER_H
     tallest = max(_resolve_leaf_size(c)[1] for c in widget.summary)

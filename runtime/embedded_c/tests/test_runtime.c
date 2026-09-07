@@ -230,8 +230,9 @@ static void test_render_widget_draws_only_that_widget(void) {
 
 /* ---- fixture 2c: dirty-aware rendering — a bound leaf only redraws when
  * firmware has actually marked its field's bit dirty; the bit is
- * consumed (cleared) on that redraw. Unbound (static) leaves always
- * draw regardless — nothing ever marks them dirty, by design. ---- */
+ * consumed (cleared) on that redraw. On a *dirty sweep* (real
+ * bound_dirty) an unbound (static) leaf is skipped — its pixels can't
+ * change — while the force path (NULL bound_dirty) still draws it. ---- */
 typedef struct { int level; } dirty_demo_t;
 typedef struct { bool level; } dirty_demo_dirty_t;
 
@@ -274,6 +275,21 @@ static void test_unbound_widget_always_draws_via_if_dirty(void) {
     mock_driver_reset();
     janus_render_widget_if_dirty(&w, NULL, NULL);
     CHECK(mock_driver_log_count > 0);    /* still draws every time -- nothing ever marks it clean */
+}
+
+static void test_unbound_widget_skipped_on_a_dirty_sweep(void) {
+    /* Same static label, but through a real bound_dirty struct: a repeated
+     * dirty sweep must not repaint it (2026-09-07 -- stops a
+     * timer-refreshed header flickering its unchanging text). */
+    static dirty_demo_t data = { .level = 0 };
+    static dirty_demo_dirty_t dirty = { .level = false };
+    static const janus_widget_desc_t w = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "hi", .geometry = { 0, 0, 20, 10 },
+    };
+
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, &data, &dirty);
+    CHECK(mock_driver_log_count == 0);   /* unbound + dirty-aware sweep -> skipped */
 }
 
 static void test_render_screen_if_dirty_respects_the_bit(void) {
@@ -375,10 +391,12 @@ static void test_box_summary_renders_when_collapsed_and_expanded(void) {
     CHECK(mock_driver_log_count == 5);
 }
 
-/* ---- fixture 4: only the active screen ever gets drawn ---- */
-static void test_switch_screen_draws_only_the_new_screen(void) {
+/* ---- fixture 4: switching erases the outgoing screen, then draws only
+ * the new one's widgets (never re-renders the old screen's content). ---- */
+static void test_switch_screen_erases_old_then_draws_new(void) {
     static const janus_widget_desc_t s1_widget = {
         .kind = JANUS_WIDGET_LABEL, .id = "s1w", .geometry = { 0, 0, 10, 10 },
+        .bg_color = 0x1234,
     };
     static const janus_widget_desc_t s2_widget = {
         .kind = JANUS_WIDGET_LABEL, .id = "s2w", .geometry = { 0, 0, 10, 10 },
@@ -393,7 +411,8 @@ static void test_switch_screen_draws_only_the_new_screen(void) {
     mock_driver_reset();
     janus_switch_screen(&app, 1);
     CHECK(app.active_screen == 1);
-    CHECK(mock_driver_log_count == 1);     /* only s2's one widget, not s1's */
+    CHECK(mock_driver_log_count == 2);          /* 1 erase of s1's rect + 1 draw of s2's widget */
+    CHECK(mock_driver_log[0].sample_pixel == 0x1234);  /* the erase uses s1's own bg colour */
 }
 
 /* ---- fixture 5: divider/toggle/badge/slider — the four "low effort"
@@ -610,20 +629,65 @@ static void test_label_with_text_draws_one_glyph_call_per_character(void) {
     CHECK(count_glyph_sized_calls() == 2);
 }
 
-static void test_text_wider_than_widget_clips_without_wrapping(void) {
-    /* Rect only fits one glyph column (w=21 = 1px left pad + 20): 'A'
-     * draws, 'B' would start past the right edge and must be dropped, not
-     * wrapped or squeezed. */
+static void test_text_wider_than_widget_shrinks_to_fit(void) {
+    /* "AB" at large (1px pad + 2*20 + 1 gap = 42px) doesn't fit w=24, so
+     * draw_string steps the font down: large -> medium makes it
+     * 1 + 2*10 + 1 = 22px, which fits. Both glyphs draw, at the medium
+     * size — nothing at large, nothing clipped (2026-09-07: render-time
+     * auto-shrink). */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 21, 10 },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 24, 16 },
     };
     static const janus_screen_desc_t screen = {
-        .name = "Clipped", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+        .name = "Shrunk", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
     };
 
     mock_driver_reset();
     janus_render_screen(&screen);
-    CHECK(count_glyph_sized_calls() == 1);
+    CHECK(count_glyph_sized_calls() == 0);                                             /* nothing at large */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 2);
+}
+
+static void test_text_still_clips_once_at_the_smallest_size(void) {
+    /* "ABCD" can't fit w=21 even at medium (4*(10+1)-1 = 43px) and there's
+     * no smaller table, so the old clip behaviour still applies at the
+     * floor: only the glyphs that fit are drawn ('A' at x=1, 'B' would
+     * start at x=12 and end at 22 > 21 -> dropped). */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "ABCD", .geometry = { 0, 0, 21, 16 },
+        .font_size = JANUS_FONT_SIZE_MEDIUM,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ClippedFloor", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 1);
+}
+
+static void test_button_text_is_centered(void) {
+    /* A short label in a wide button sits centered, not jammed against the
+     * left edge (2026-09-07). "A" is one 20px glyph in a 60px button:
+     * left-aligned x would be 1; centered x is 0 + (60 - 20)/2 = 20. */
+    static const janus_widget_desc_t button = {
+        .kind = JANUS_WIDGET_BUTTON, .id = "b", .static_text = "A", .geometry = { 0, 0, 60, 28 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "CenteredBtn", .widgets = &button, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    int found = 0;
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        if (mock_driver_log[i].w == JANUS_FONT_LARGE_GLYPH_W &&
+            mock_driver_log[i].h == JANUS_FONT_LARGE_GLYPH_H) {
+            found = 1;
+            CHECK(mock_driver_log[i].x == 20);   /* centered, not 1 */
+        }
+    }
+    CHECK(found);
 }
 
 /* ---- fixture 6b: font_size/font_scale (2026-09-05: medium/large tables +
@@ -942,11 +1006,12 @@ int main(void) {
     test_render_widget_draws_only_that_widget();
     test_render_widget_if_dirty_skips_unchanged_field();
     test_unbound_widget_always_draws_via_if_dirty();
+    test_unbound_widget_skipped_on_a_dirty_sweep();
     test_render_screen_if_dirty_respects_the_bit();
     test_box_collapse_and_toggle();
     test_toggle_box_clears_vacated_body_on_collapse();
     test_box_summary_renders_when_collapsed_and_expanded();
-    test_switch_screen_draws_only_the_new_screen();
+    test_switch_screen_erases_old_then_draws_new();
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
     test_toggle_render_is_async_safe();
@@ -956,7 +1021,9 @@ int main(void) {
     test_slider_fill_tracks_live_value();
     test_label_without_text_draws_only_the_background_fill();
     test_label_with_text_draws_one_glyph_call_per_character();
-    test_text_wider_than_widget_clips_without_wrapping();
+    test_text_wider_than_widget_shrinks_to_fit();
+    test_text_still_clips_once_at_the_smallest_size();
+    test_button_text_is_centered();
     test_medium_font_size_draws_medium_sized_glyph();
     test_font_scale_multiplies_medium_up_to_large_footprint();
     test_font_scale_beyond_the_cap_is_clamped_not_overflowed();

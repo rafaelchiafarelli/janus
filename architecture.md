@@ -355,7 +355,12 @@ generic `Widget.text` field already shared by `label`/`header`/`button`.
 Its content area is offset below a fixed-height header strip
 (`BOX_HEADER_H`, a layout constant, not part of the IR contract); `box`'s
 `geometry_collapsed` covers the header strip only, `geometry` covers
-header + body.
+header + body. **A box with nothing to put in that strip — not
+`collapsible`, no `text` title, no `summary` (added 2026-09-07) — is laid
+out with a zero-height `geometry_collapsed`** so a pure grouping container
+doesn't carve 16px off its own content area; the runtime
+(`draw_box_header`) paints no strip in that case and, if the box is
+focused, rings its full body instead.
 
 **`box.summary` (added 2026-09-05):** an optional list of leaf widgets
 always rendered inside the header strip, regardless of collapse state —
@@ -635,7 +640,8 @@ bool display_busy(void);
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
-void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus first */
+void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* navigate: clears focus, erases the outgoing screen (janus_clear_screen), renders the new one */
+void janus_clear_screen(const janus_screen_desc_t *screen);          /* repaints each top-level widget's rect with its own bg — the runtime has no panel size/canvas colour for a true full-panel fill; public for hand-driven screen changes */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads the state above; Stage 6 hit-testing needs it */
 
@@ -772,8 +778,14 @@ pointer (`g_focused_widget`), not a table. `janus_set_focus(w)` compares
 `w` against it, redraws the previous widget unfocused and `w` focused
 (each via the normal `render_widget` for that one widget — no dedicated
 "focused" draw path; `draw_button`/`draw_box_header` just check `w ==
-g_focused_widget` internally and add a thin border via `draw_focus_ring`
-when true), and updates the pointer. `janus_switch_screen` calls
+g_focused_widget` internally and add a marker via `draw_focus_ring` when
+true), and updates the pointer. The marker is a `JANUS_FOCUS_RING_W` (4)
+px ring inset along the widget's own edges, drawn as concentric 1px
+rectangles with a darker outermost "shade" line so it reads as a raised
+frame (2026-09-07 — was a 1px flat line). It's inset (not outside the
+rect) because the unfocus redraw only repaints the previously focused
+widget's own rect; it does cover the widget's outermost few px of content
+while focused, a deliberate trade for a legible marker. `janus_switch_screen` calls
 `janus_set_focus(NULL)` before rendering the new screen — without this, a
 focus pointer from the outgoing screen's static widget array would get
 redrawn on top of the incoming screen's freshly rendered content. Only
@@ -807,13 +819,19 @@ punctuation, true upper/lowercase letters (no case-folding), and the
 Latin-1 accented set for Western European languages (123 glyphs total —
 see `janus_font.h`; **strings must be Latin-1-encoded, not UTF-8**, since
 this module maps one `char` to one glyph). `draw_string()` blits
-left-aligned, vertically centered, and clips (never wraps or shrinks the
-font) once a character would run past the widget's `geometry` — Janus
-never auto-sizes text at generation time (`Janus.md`'s deferred
-auto-sizing note), so overflow is an expected v1 case: `examples/
-host_demo`'s own `diagnostics_box` (24px wide) clips "Diagnostics" down to
-"Diag" for exactly this reason, verified against the real generated
-output, not just unit tests.
+vertically centered, left-aligned by default (buttons pass a `center`
+flag — a nav tab like "PWM" then sits centered, not against the left
+edge). **Render-time auto-shrink (2026-09-07):** if the run overflows the
+widget's `geometry.w` it steps the font down — `font_scale` toward 1
+first, then `large` → `medium` — and only clips (drop trailing
+characters, never wrap) once it's already at `medium`/scale 1. This is a
+*draw-time fit only*; Stage 2 geometry is still computed from the
+authored `font_size` — Janus never auto-sizes text *at generation time*
+(`Janus.md`'s deferred auto-sizing note still holds for layout), a shrunk
+label just stops spilling out of the box it was given. `examples/
+host_demo`'s own `diagnostics_box` (24px wide) still can't fit
+"Diagnostics" even at the smallest size, so it clips to a few characters
+there — verified against the real generated output, not just unit tests.
 
 Stage 3b bakes `.static_text` from `Widget.text` for every widget
 (`emit_embedded_c.py`'s `_widget_init`) — previously `Widget.text` was
