@@ -54,8 +54,8 @@ class TestRenderMainCEncoder(unittest.TestCase):
         self.assertIn('#include "janus_input_encoder.h"', out)
         self.assertIn('#include "janus_input_focus.h"', out)
         self.assertIn("janus_encoder_poll(&event, &delta)", out)
-        self.assertIn("janus_focus_move(screen, delta);", out)
-        self.assertIn("janus_focus_activate(screen)", out)
+        self.assertIn("janus_focus_move(&janus_app, delta);", out)
+        self.assertIn("janus_focus_activate(&janus_app)", out)
         self.assertIn("case JANUS_INPUT_ACTION:", out)
 
     def test_braces_balance(self) -> None:
@@ -68,9 +68,9 @@ class TestRenderMainCButtons(unittest.TestCase):
         self.assertIn('#include "janus_input_buttons.h"', out)
         self.assertIn('#include "janus_input_focus.h"', out)
         self.assertIn("janus_buttons_poll(&event)", out)
-        self.assertIn("janus_focus_move(screen, 1);", out)
-        self.assertIn("janus_focus_move(screen, -1);", out)
-        self.assertIn("janus_focus_activate(screen)", out)
+        self.assertIn("janus_focus_move(&janus_app, 1);", out)
+        self.assertIn("janus_focus_move(&janus_app, -1);", out)
+        self.assertIn("janus_focus_activate(&janus_app)", out)
 
     def test_braces_balance(self) -> None:
         self.assertTrue(_balanced_braces(render_main_c("buttons")))
@@ -87,7 +87,10 @@ class TestRenderMainCNonBlocking(unittest.TestCase):
     def test_encoder_and_buttons_also_use_async_render_entry_points(self) -> None:
         for modality in ("encoder", "buttons"):
             out = render_main_c(modality, "non_blocking")
-            self.assertIn("janus_render_screen_async_start(screen);", out)
+            self.assertIn(
+                "janus_render_screen_async_start(janus_app_get_screen(&janus_app, janus_app.active_screen));",
+                out,
+            )
             self.assertIn("janus_render_poll();", out)
             self.assertIn("janus_switch_screen_async_start(&janus_app, (uint16_t)hit.navigate_target);", out)
 

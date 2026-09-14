@@ -1050,9 +1050,9 @@ baked `janus_nav_tabs[]` cells — a tap in a cell → `JANUS_INPUT_NAVIGATE`
 for that tab's `target`. A scaffold checks this *before*
 `janus_touch_hit_test` (the band is app-owned, above the screen).
 `janus_nav_next(app)`/`janus_nav_prev(app)` (`janus_runtime.c`) are the
-non-touch counterpart — cycle the active tab, for a project with a
-control to spare; making the tabs reachable from the *single*-control
-encoder/button scaffolds via focus is a follow-up (nav_tabs epic task 4).
+non-touch counterpart — cycle the active tab immediately, for a project
+with a control to spare. The *single*-control encoder/button scaffolds
+instead reach the tabs through focus (nav_tabs epic task 4, below).
 
 **Touch — hit-testing** (`janus_touch_hit_test`, `janus_input_touch.c`):
 point-in-rect against the already-baked absolute geometry, deepest match
@@ -1076,12 +1076,12 @@ driver contract): `bool janus_touch_poll(int16_t *x, int16_t *y)` —
 vendor/host-provided, non-blocking, mirrors `display_busy()`'s polling
 style. Returns true and fills `x`/`y` once per new touch.
 
-**Encoder/buttons — shared focus core** (`janus_input_focus.h`/`.c`, new):
-`janus_focus_move(screen, delta)` and `janus_focus_activate(screen)`,
-used identically by both modalities — encoder rotation and button
-NEXT/PREV both call `janus_focus_move` (`+1`/`-1`), encoder click and
-button SELECT both call `janus_focus_activate`. Internally, a
-depth-first, left-to-right walk (`walk_focusable`) mirrors
+**Encoder/buttons — shared focus core** (`janus_input_focus.h`/`.c`):
+`janus_focus_move(app, delta)` and `janus_focus_activate(app)`, used
+identically by both modalities — encoder rotation and button NEXT/PREV
+both call `janus_focus_move` (`+1`/`-1`), encoder click and button SELECT
+both call `janus_focus_activate`. Internally, a depth-first, left-to-right
+walk (`walk_focusable`, over `app`'s active screen) mirrors
 `hit_test_widget`'s own traversal and its collapsed-box skip rule exactly
 — `focus_order` was baked assuming every box is reachable, so the walk
 has to apply the same runtime skip touch does, or a collapsed box's
@@ -1101,6 +1101,42 @@ leaf case uses, but returns `JANUS_INPUT_NONE` if that widget isn't
 actually reachable on `screen` right now (stale — e.g. its box was
 collapsed since it was focused, or focus belongs to a screen that's since
 been switched away from).
+
+**Nav strip — folded into focus (nav_tabs epic task 4, settled/implemented
+2026-09-07/14):** an app with `nav: { kind: tabs }` gives its single-
+control encoder/button scaffolds a way to reach the tabs without a second
+control — both entry points above take the whole `janus_app_t`, not just
+the active screen, specifically so they can also reach `app->nav_tabs`.
+Moving past the last (or before the first) focusable widget lands focus
+"on the nav bar" as a whole rather than on any one widget; from there,
+`janus_focus_move` cycles a *previewed* tab (`janus_get_nav_focus()` /
+`janus_set_nav_focus()`, `janus_runtime.c` — a sibling to
+`janus_get_focus`/`janus_set_focus` for the one piece of focus state
+that isn't a `janus_widget_desc_t`) instead of a widget, independent of
+the screen's own widget count. This is **preview, commit on
+activate**: rotating or NEXT/PREV while nav-focused only moves the ring
+across tab cells, never switches screens — `janus_focus_activate`
+finding the nav strip focused is what actually calls
+`janus_switch_screen(app, previewed.target)` then `janus_focus_move(app,
+0)` to re-establish focus on the incoming screen, and it reports
+`JANUS_INPUT_NONE` back (already fully handled, nothing left for the
+caller's dispatch switch). Falling off either end of the tab run hands
+focus back to a real widget — off the bottom (rotating further backward)
+lands on the screen's last widget, off the top (forward) on its first —
+the mirror image of how the strip was entered, so a widget ⇄ nav
+boundary is crossable in either direction without a dead end. The
+previewed-tab cursor starts, each time the strip is entered fresh, at
+whichever tab's `target` is the current `active_screen` — so arriving at
+the bar always previews "where we already are," never tab 0
+unconditionally. No new state lives in `janus_input_focus.c` itself
+(true to its "decides *which*, never *how*" split) — `previewed_tab` is
+`janus_runtime.c`'s `g_focused_nav_index`, drawn by folding one more
+self-check into `draw_nav_bar` (same pattern `draw_button`/
+`draw_box_header` already use for `g_focused_widget`), so the ring
+survives any repaint that happens to touch the strip rather than needing
+a bespoke draw call. Touch's `janus_nav_hit_test` is unaffected — a tap
+still commits immediately, no preview state, since touch has no
+"currently focused" concept to fold into.
 
 **Encoder/buttons driver contracts** (`janus_input_encoder.h` /
 `janus_input_buttons.h`): header-only, no `.c` — same shape as

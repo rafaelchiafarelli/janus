@@ -502,6 +502,11 @@ static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16
  * mutable focus state the whole module needs; draw_button/draw_box_header
  * below just compare their own pointer against it. */
 static const janus_widget_desc_t *g_focused_widget = NULL;
+/* nav_tabs epic task 4 sibling to g_focused_widget: which app->nav_tabs
+ * cell is previewed while the nav strip itself holds focus (-1 when it
+ * doesn't). Never both this and g_focused_widget hold a "live" value at
+ * once — janus_input_focus.c always clears one before setting the other. */
+static int16_t g_focused_nav_index = -1;
 
 /* A JANUS_FOCUS_RING_W-thick ring inset along the widget's own edges,
  * drawn as `t` concentric 1px rectangles: the outermost is a darker
@@ -1044,6 +1049,15 @@ static void draw_nav_bar(const janus_app_t *app) {
         int16_t h = active ? (int16_t)JANUS_NAV_ACCENT_H : (int16_t)1;
         janus_rect_t under = { tab.rect.x, (int16_t)(tab.rect.y + tab.rect.h - h), tab.rect.w, h };
         fill_rect(under, active ? JANUS_COLOR_NAV_ACCENT : JANUS_COLOR_NAV_INK);
+
+        /* Focus ring on the previewed cell (nav_tabs epic task 4) — same
+         * self-check-against-the-mutable-global pattern draw_button /
+         * draw_box_header use for g_focused_widget, so the ring survives
+         * whatever triggered this repaint rather than needing its own
+         * separate draw call. Independent of `active`: the previewed tab
+         * and the currently active screen's tab are different cells until
+         * janus_focus_activate commits. */
+        if ((int16_t)i == g_focused_nav_index) draw_focus_ring(tab.rect);
     }
 }
 
@@ -1161,6 +1175,17 @@ void janus_set_focus(const janus_widget_desc_t *widget) {
 
 const janus_widget_desc_t *janus_get_focus(void) {
     return g_focused_widget;
+}
+
+void janus_set_nav_focus(const janus_app_t *app, int16_t index) {
+    if (app == NULL || app->nav_tabs == NULL) return;
+    if (g_focused_nav_index == index) return;
+    g_focused_nav_index = index;
+    draw_nav_bar(app);   /* repaints every cell — clears the old ring and/or paints the new one */
+}
+
+int16_t janus_get_nav_focus(void) {
+    return g_focused_nav_index;
 }
 
 void janus_toggle_box(const janus_widget_desc_t *box) {
