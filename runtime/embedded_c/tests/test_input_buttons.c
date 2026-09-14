@@ -56,10 +56,15 @@ static const janus_widget_desc_t widgets[] = {
 static const janus_screen_desc_t screen = {
     .name = "Buttons", .widgets = widgets, .widget_count = 2, .bound_struct = NULL,
 };
+static const janus_screen_desc_t *const screens[] = { &screen };
+static janus_app_t app = {
+    .screens = screens, .screen_count = 1, .active_screen = 0,
+    .nav_tabs = NULL, .nav_tab_count = 0, .nav_titles = NULL,
+};
 
 static void test_next_then_select_activates_the_second_widget(void) {
     janus_render_screen(&screen);
-    janus_focus_move(&screen, 0); /* establish initial focus, as main_buttons.c does on boot */
+    janus_focus_move(&app, 0); /* establish initial focus, as main_buttons.c does on boot */
 
     mock_buttons_reset();
     mock_buttons_queue(JANUS_BUTTON_NEXT);
@@ -68,22 +73,22 @@ static void test_next_then_select_activates_the_second_widget(void) {
     janus_button_event_t event;
     CHECK(janus_buttons_poll(&event) == true);
     CHECK(event == JANUS_BUTTON_NEXT);
-    janus_focus_move(&screen, 1);
+    janus_focus_move(&app, 1);
 
     CHECK(janus_buttons_poll(&event) == true);
     CHECK(event == JANUS_BUTTON_SELECT);
-    janus_input_result_t hit = janus_focus_activate(&screen);
+    janus_input_result_t hit = janus_focus_activate(&app);
     CHECK(hit.kind == JANUS_INPUT_ACTION);
     CHECK(hit.action == 20);
 }
 
 static void test_prev_wraps_backward(void) {
     janus_render_screen(&screen);
-    janus_set_focus(NULL);         /* clear whatever a previous test left focused */
-    janus_focus_move(&screen, 0);  /* -> "a" (nothing focused, so delta==0 lands on index 0) */
-    janus_focus_move(&screen, -1); /* PREV from "a" wraps to "b" */
+    janus_set_focus(NULL);      /* clear whatever a previous test left focused */
+    janus_focus_move(&app, 0);  /* -> "a" (nothing focused, so delta==0 lands on index 0) */
+    janus_focus_move(&app, -1); /* PREV from "a" wraps to "b" */
 
-    janus_input_result_t hit = janus_focus_activate(&screen);
+    janus_input_result_t hit = janus_focus_activate(&app);
     CHECK(hit.kind == JANUS_INPUT_ACTION);
     CHECK(hit.action == 20);
 }

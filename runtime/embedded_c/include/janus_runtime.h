@@ -400,4 +400,16 @@ bool janus_box_is_expanded(const janus_widget_desc_t *box);
 void janus_set_focus(const janus_widget_desc_t *widget);
 const janus_widget_desc_t *janus_get_focus(void);
 
+/* nav_tabs epic task 4: the nav strip's own focus ring — a sibling to
+ * janus_set_focus/janus_get_focus for the one case that isn't a
+ * janus_widget_desc_t (the strip has no widget descriptor of its own).
+ * `index` is which `app->nav_tabs` cell is previewed (the tab a
+ * rotation/NEXT-PREV would commit to on activate, not yet
+ * `app->active_screen` until then); -1 clears it. janus_input_focus.c is
+ * the only caller — it owns deciding *when* the nav strip is focused,
+ * this only draws the result, same "runtime draws, input resolves" split
+ * as janus_set_focus. No-op if the app has no nav. */
+void janus_set_nav_focus(const janus_app_t *app, int16_t index);
+int16_t janus_get_nav_focus(void);
+
 #endif /* JANUS_RUNTIME_H */

@@ -59,10 +59,15 @@ static const janus_widget_desc_t widgets[] = {
 static const janus_screen_desc_t screen = {
     .name = "Encoder", .widgets = widgets, .widget_count = 2, .bound_struct = NULL,
 };
+static const janus_screen_desc_t *const screens[] = { &screen };
+static janus_app_t app = {
+    .screens = screens, .screen_count = 1, .active_screen = 0,
+    .nav_tabs = NULL, .nav_tab_count = 0, .nav_titles = NULL,
+};
 
 static void test_rotate_event_moves_focus_via_the_shared_core(void) {
     janus_render_screen(&screen);
-    janus_focus_move(&screen, 0); /* establish initial focus, as main_encoder.c does on boot */
+    janus_focus_move(&app, 0); /* establish initial focus, as main_encoder.c does on boot */
 
     mock_encoder_reset();
     mock_encoder_queue_rotate(1);
@@ -70,9 +75,9 @@ static void test_rotate_event_moves_focus_via_the_shared_core(void) {
     int16_t delta;
     CHECK(janus_encoder_poll(&event, &delta) == true);
     CHECK(event == JANUS_ENCODER_ROTATE);
-    janus_focus_move(&screen, delta);
+    janus_focus_move(&app, delta);
 
-    janus_input_result_t hit = janus_focus_activate(&screen);
+    janus_input_result_t hit = janus_focus_activate(&app);
     CHECK(hit.kind == JANUS_INPUT_ACTION);
     CHECK(hit.action == 20); /* moved from "a" to "b" */
 }
