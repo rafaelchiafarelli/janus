@@ -398,6 +398,19 @@ Project-level nav (not an in-screen widget kind):
 |---|---|---|
 | `tabs` | `targets: [{screen, title}]` in `app.yaml` | switches between **full top-level screens** by name, not sub-panels. Only one screen's widgets are ever live at once — device holds a small `active_screen` index and redraws from that screen's precomputed geometry table on switch, using the same tiled-redraw mechanism as everything else (fits the ~2 KiB transient-buffer budget: no room for two screens' framebuffers at once). **Requires a `display:` block** (a tab strip is laid out across the panel width). Janus reserves a fixed `NAV_BAR_H` band at the top of every screen, bakes a `janus_nav_tabs[]` descriptor (per-tab rect + title + target index), and the fixed runtime's `janus_render_nav_bar(app)` paints it — equal cells, centered titles, the active tab (== `active_screen`) accented — on every `janus_switch_screen` and once at startup (the scaffolds call it), never per frame. A tap in a tab navigates (`janus_nav_hit_test`, wired into the touch scaffolds); `janus_nav_next(app)`/`janus_nav_prev(app)` cycle tabs immediately, for a project with a spare control. A *single*-control encoder/button scaffold instead reaches the tabs through focus: moving past the last (or before the first) focusable widget lands on the strip as a whole, a further move there previews a tab without switching, and SELECT/click commits it (`janus_focus_move`/`janus_focus_activate` taking the whole `app`, nav_tabs epic task 4 — see architecture.md Stage 6). |
 
+**How to use:** declare `nav: { kind: tabs, targets: [...] }` +
+`display:` in `app.yaml` (see the full example just below) — nothing
+else to author. The generated scaffolds (`main_touch[_async].c.tmpl`,
+`main_encoder[_async].c.tmpl`, `main_buttons[_async].c.tmpl`) already
+call `janus_render_nav_bar` at startup/on switch and either
+`janus_nav_hit_test` (touch, checked before the screen's own hit-test)
+or the focus-stop path (encoder/buttons) — a fresh project regenerated
+from scratch needs no hand-wiring. `examples/host_demo`'s `src/main.c`
+predates the touch scaffold's nav wiring and needed a one-time manual
+catch-up to match it (2026-09-15) — a reminder that any project's
+already-scaffolded, hand-frozen `main.c` needs the same catch-up by hand
+if it was written before `nav:` was added to its `app.yaml`.
+
 **Project layout is multi-file**, one screen per file, matching harpia's own multi-Include precedent (`test.harpia` importing `file{1,2,3}.harpia`):
 
 ```
