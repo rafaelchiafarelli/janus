@@ -21,8 +21,6 @@ full-row-height per-channel mode icons hit two hard limits at once:
 
 ## Epics
 
-- **channel_icons** — both of the above, scoped tightly around making the
-  PWM channel icons work on the board. *(done, merged)*
 - **nav_tabs** — render `app.nav: { kind: tabs }` as a real persistent tab
   strip Janus draws + wires, so consumers stop hand-authoring a per-screen
   `row` of tab buttons. *(planned — 3 tasks; 4 open decisions in

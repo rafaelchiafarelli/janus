@@ -319,6 +319,37 @@ Original scoping, for the record:
     runtime check, neither of which a pruned node has). A whole screen
     can't be `hidden` — drop it from `app.yaml` instead.
 
+    **How to use — an enabled/disabled icon pair in one slot:** author
+    both variants at the same position with only one `hidden: false`
+    (the other `true`), then flip which is hidden and regenerate when the
+    authored state changes — there is no on-device toggle in v1:
+
+    ```yaml
+    - kind: row
+      children:
+        - kind: image
+          id: ch0_icon_on
+          file: "assets/variable_single.png"
+          size: { w: 64, h: 64 }
+          hidden: false
+        - kind: image
+          id: ch0_icon_off
+          file: "assets/variable_single_disabled.png"
+          size: { w: 64, h: 64 }
+          hidden: true
+    ```
+
+    Only the surviving (non-hidden) widget reaches layout/emit — the
+    hidden one costs nothing (no geometry, no baked pixel array, no
+    harpia field). This is also the pattern that lets a heavy `image`
+    widget's baked RGB565 array live anywhere in flash: it's emitted
+    into its own `.janus_img` section (not near `PROGMEM`) and reached
+    through a generated `resolve_images()` + `image_slot` index, both
+    fully automatic — nothing to author beyond `file:`/`size` on the
+    `image` widget itself (see the `image` row in the widget catalog
+    above and `architecture.md` Stage 3b "Near-flash budget" / "Far-flash
+    addressing" for the mechanism).
+
 ## v1 widget catalog
 
 Containers (structural, no harpia output):
