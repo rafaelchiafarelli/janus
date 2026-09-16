@@ -583,6 +583,7 @@ typedef enum {
     JANUS_WIDGET_CHECKBOX, JANUS_WIDGET_RADIOBUTTON, JANUS_WIDGET_RADIOGROUP,
     JANUS_WIDGET_LED, JANUS_WIDGET_BOX, JANUS_WIDGET_COLUMN, JANUS_WIDGET_ROW,
     JANUS_WIDGET_DIVIDER, JANUS_WIDGET_TOGGLE, JANUS_WIDGET_BADGE, JANUS_WIDGET_SLIDER,
+    JANUS_WIDGET_VU,
 } janus_widget_kind_t;
 
 typedef enum { JANUS_FIELD_NONE, JANUS_FIELD_INT, JANUS_FIELD_INT64, JANUS_FIELD_FLOAT, JANUS_FIELD_STRING } janus_field_type_t;
@@ -855,11 +856,12 @@ drives `draw_area_sync` directly; the non-blocking path
 `draw_area_async`/`display_busy` instead — both are real now (2026-08-22).
 Leaf rendering fills `geometry` with the widget's own authored `.color`/
 `.bg_color` (RGB565, see "Color" above), except `progress`/`gauge`/
-`slider` (fraction of range, `.color` for the filled portion) and
-`checkbox`/`toggle`/`badge` (checked/unchecked) which read the *live*
-bound value and vary the fill accordingly — the concrete difference from
-the original prototype's "empty buffer regardless of screen contents"
-stub.
+`slider` (fraction of range, `.color` for the filled portion),
+`checkbox`/`toggle`/`badge` (checked/unchecked), and `vu` (needle angle
+from the live value within `range` — ui_widgets/vu_meter task 2) which
+read the *live* bound value and vary the fill/angle accordingly — the
+concrete difference from the original prototype's "empty buffer
+regardless of screen contents" stub.
 
 **Glyph rendering (2026-08-19, slice 1; slice 2 completed 2026-08-20;
 widened to full occidental Latin coverage 2026-08-22) — both static text
