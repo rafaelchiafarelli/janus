@@ -62,6 +62,21 @@ class TestRangeValidation(unittest.TestCase):
         ])
         screen_from_dict(data)  # must not raise
 
+    def test_vu_without_range_rejected(self) -> None:
+        data = _screen([
+            {"kind": "vu", "id": "v", "bind": {"message": "m", "field": "f", "type": "float"},
+             "size": {"w": 80, "h": 48}},
+        ])
+        with self.assertRaises(ValueError):
+            screen_from_dict(data)
+
+    def test_vu_with_range_and_size_accepted(self) -> None:
+        data = _screen([
+            {"kind": "vu", "id": "v", "bind": {"message": "m", "field": "f", "type": "float"},
+             "range": {"min": 0, "max": 100}, "size": {"w": 80, "h": 48}},
+        ])
+        screen_from_dict(data)  # must not raise
+
 
 class TestRadiobuttonValueValidation(unittest.TestCase):
     def test_mismatched_value_type_rejected(self) -> None:

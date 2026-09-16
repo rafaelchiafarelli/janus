@@ -21,9 +21,9 @@ NAV_TAB_MIN_W = 24
 _LEAF_KINDS = {
     "label", "header", "button", "image", "progress", "gauge",
     "checkbox", "radiobutton", "led",
-    "divider", "toggle", "badge", "slider",
+    "divider", "toggle", "badge", "slider", "vu",
 }
-_REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led", "badge", "slider"}
+_REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led", "badge", "slider", "vu"}
 _DEFAULT_SIZE = {
     # label/header/button draw glyph text (JANUS_FONT_GLYPH_W/H = 20x28 —
     # runtime/embedded_c/include/janus_font.h), so their defaults must fit

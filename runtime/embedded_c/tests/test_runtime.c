@@ -642,6 +642,27 @@ static void test_led_render_is_async_safe(void) {
     CHECK(rt_render_matches_async(&g_led_screen));
 }
 
+/* vu (vu_meter task 1): face-fill stub only — no needle yet (task 2).
+ * Confirms JANUS_WIDGET_VU is actually wired into both render_widget
+ * switches (the dirty-check list and the dispatch table), not silently
+ * dropped by the compiler's exhaustive-enum switch. */
+static void test_vu_stub_fills_geometry_with_bg_color(void) {
+    static const janus_widget_desc_t vu = {
+        .kind = JANUS_WIDGET_VU, .id = "v", .geometry = { 0, 0, 20, 20 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+        .color = 0x001F, .bg_color = 0xF800,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "VuStub", .widgets = &vu, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    g_demo.level = 42;   /* stub ignores the bound value entirely */
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(rt_painted_colour(10, 10, 0xF800));  /* bg_color fill across the geometry */
+    CHECK(!rt_painted(25, 10));                /* nothing drawn outside it */
+}
+
 static void test_badge_fill_tracks_live_value(void) {
     static const janus_widget_desc_t badge = {
         .kind = JANUS_WIDGET_BADGE, .id = "b", .geometry = { 0, 0, 8, 8 },
@@ -1154,6 +1175,7 @@ int main(void) {
     test_toggle_render_is_async_safe();
     test_led_shaded_disc_per_state();
     test_led_render_is_async_safe();
+    test_vu_stub_fills_geometry_with_bg_color();
     test_badge_fill_tracks_live_value();
     test_slider_fill_tracks_live_value();
     test_label_without_text_draws_only_the_background_fill();

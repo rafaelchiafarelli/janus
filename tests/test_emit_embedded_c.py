@@ -275,6 +275,10 @@ class TestEmitEmbeddedCLowEffortKinds(unittest.TestCase):
                     kind="slider", id="s", size=(60, 10), range=(0, 100),
                     bind=Binding(message="dev", field="level", type="int"),
                 ),
+                Widget(
+                    kind="vu", id="v", size=(80, 48), range=(0, 100),
+                    bind=Binding(message="dev", field="vu_level", type="float"),
+                ),
             ]),
         ))
         self.out = emit_screen(screen)
@@ -284,6 +288,12 @@ class TestEmitEmbeddedCLowEffortKinds(unittest.TestCase):
         self.assertIn("JANUS_WIDGET_TOGGLE", self.out)
         self.assertIn("JANUS_WIDGET_BADGE", self.out)
         self.assertIn("JANUS_WIDGET_SLIDER", self.out)
+        self.assertIn("JANUS_WIDGET_VU", self.out)
+
+    def test_vu_reuses_progress_style_bind_with_range(self) -> None:
+        self.assertIn("offsetof(dev_t, vu_level)", self.out)
+        segment = _widget_segment(self.out, "v", 360)
+        self.assertIn(".range_min = 0, .range_max = 100", segment)
 
     def test_toggle_and_badge_reuse_checkbox_style_int_bind(self) -> None:
         self.assertIn("offsetof(dev_t, on)", self.out)
