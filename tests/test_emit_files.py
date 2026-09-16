@@ -201,6 +201,16 @@ class TestEmitFiles(unittest.TestCase):
         self.assertNotIn("JANUS_DISPLAY_BACKGROUND", out)
         self.assertTrue(_balanced_braces(out))
 
+    def test_render_config_header_carries_panel_size_when_status_is_set(self) -> None:
+        # the status band needs the panel width too, same as nav
+        out = render_render_config_header(
+            "blocking", DisplayConfig(width=320, height=480, color="rgb565"), has_status=True
+        )
+        self.assertIn("#define JANUS_DISPLAY_PANEL_W 320", out)
+        self.assertIn("#define JANUS_DISPLAY_PANEL_H 480", out)
+        self.assertNotIn("JANUS_DISPLAY_BACKGROUND", out)
+        self.assertTrue(_balanced_braces(out))
+
     def test_render_config_header_carries_background_and_panel_size_when_set(self) -> None:
         out = render_render_config_header(
             "blocking",

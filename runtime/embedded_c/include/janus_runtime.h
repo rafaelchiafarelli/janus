@@ -214,6 +214,18 @@ typedef struct {
     int16_t target;
 } janus_nav_tab_t;
 
+/* The app-level status band (app.yaml `status: { text: "..." }`).
+ * Geometry is baked at generation time — a full-width band at the true
+ * top of the panel (STATUS_BAR_H tall; above the nav strip when app.nav
+ * is also set, per stage2_layout; architecture.md Stage 2). `text` is
+ * flash-resident on AVR, same caveat as janus_nav_tab_t.title. Rendered
+ * by draw_status_bar (status_bar epic task 2) — no runtime code reads
+ * this yet as of task 1. */
+typedef struct {
+    janus_rect_t rect;
+    const char *text;
+} janus_status_bar_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;   /* generated as a JANUS_PROGMEM pointer table on
                                                    * AVR — read via janus_app_get_screen(app, i)
@@ -223,6 +235,7 @@ typedef struct {
                                        * `nav_tabs` below (nav order + baked geometry). */
     const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM array in nav order; NULL if app.nav is unset */
     uint16_t nav_tab_count;          /* 0 if app.nav is unset */
+    const janus_status_bar_t *status_bar; /* JANUS_PROGMEM, singular; NULL if app.status is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -253,6 +266,12 @@ static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *s
 static inline janus_nav_tab_t janus_nav_tab_load(const janus_nav_tab_t *tab) {
     janus_nav_tab_t out;
     JANUS_MEMCPY_P(&out, tab, sizeof(out));
+    return out;
+}
+
+static inline janus_status_bar_t janus_status_bar_load(const janus_status_bar_t *bar) {
+    janus_status_bar_t out;
+    JANUS_MEMCPY_P(&out, bar, sizeof(out));
     return out;
 }
 
@@ -312,6 +331,19 @@ void janus_clear_screen(const janus_screen_desc_t *screen);
  * never repaints it. Colours / band height are fixed runtime constants
  * (nav_tabs epic decision 2). (task 2.) */
 void janus_render_nav_bar(const janus_app_t *app);
+
+/* Paints the app-level status band (app.yaml `status: { text: "..." }`) —
+ * full-width fill + centered text, fixed colours (status_bar epic
+ * decision 3, reusing the nav strip's own inactive-bg/active-label
+ * pair). No-op if the app has no status (`status_bar == NULL`).
+ * Repaint-on-change, not per-frame — same call sites as
+ * janus_render_nav_bar (janus_switch_screen[_async_start], and a
+ * scaffold once after the first janus_render_screen) — deliberately
+ * *not* also called from janus_set_nav_focus: the status band's static
+ * text never depends on which nav tab is previewed, so a repaint there
+ * would just be wasted work, not a correctness fix like it is for
+ * draw_nav_bar. (status_bar epic task 2.) */
+void janus_render_status_bar(const janus_app_t *app);
 
 /* Switch to the tab one cell after / before (nav order, wrapping) the one
  * currently showing `app->active_screen` — a full janus_switch_screen

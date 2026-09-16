@@ -556,6 +556,52 @@ static void test_switch_screen_repaints_the_nav_strip(void) {
     CHECK(rt_sample_at(20, 24) != a_accent);    /* and left A's cell */
 }
 
+/* ---- fixture 4c: the app-level status band (status_bar epic task 2) ----
+ * one full-width band, STATUS_BAR_H (20) tall, at the true top (y=0). */
+static const janus_status_bar_t rt_status_bar = { { 0, 0, 120, 20 }, "Status: OK" };
+
+static void test_status_bar_renders_full_width_band_with_text(void) {
+    janus_app_t app = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .status_bar = &rt_status_bar,
+        .screen_count = 3, .active_screen = 0,
+    };
+
+    mock_driver_reset();
+    janus_render_status_bar(&app);
+
+    /* one fill spanning the whole 120px band */
+    CHECK(rt_painted(2, 4) && rt_painted(118, 4));
+    /* the text blits as medium-glyph title tiles, same shape draw_nav_bar's
+     * titles use */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) > 0);
+}
+
+static void test_status_bar_no_op_without_status(void) {
+    janus_app_t no_status = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .status_bar = NULL,
+        .screen_count = 3, .active_screen = 0,
+    };
+    mock_driver_reset();
+    janus_render_status_bar(&no_status);
+    janus_render_status_bar(NULL);
+    CHECK(mock_driver_log_count == 0);
+}
+
+static void test_switch_screen_repaints_the_status_bar(void) {
+    janus_app_t app = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .status_bar = &rt_status_bar,
+        .screen_count = 3, .active_screen = 0,
+    };
+    janus_set_focus(NULL);
+    mock_driver_reset();
+    janus_switch_screen(&app, 1);
+    /* the band repaints on every switch — still there after moving screens */
+    CHECK(rt_painted(2, 4) && rt_painted(118, 4));
+}
+
 /* ---- fixture 5: divider/toggle/badge/slider — the four "low effort"
  * kinds added on top of Stage 4/6, each reusing an existing bind shape. */
 static void test_divider_always_draws_unconditionally(void) {
@@ -1272,6 +1318,9 @@ int main(void) {
     test_nav_bar_renders_cells_and_marks_the_active_tab();
     test_nav_bar_no_op_without_nav();
     test_switch_screen_repaints_the_nav_strip();
+    test_status_bar_renders_full_width_band_with_text();
+    test_status_bar_no_op_without_status();
+    test_switch_screen_repaints_the_status_bar();
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
     test_toggle_render_is_async_safe();

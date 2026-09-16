@@ -221,23 +221,42 @@ class App:
     display: DisplayConfig | None  # None if app.yaml omits `display:`
     input_modality: Literal["touch", "encoder", "buttons"] = "touch"
     nav_bar: list[NavTab] | None = None  # laid-out tab strip, filled after layout (build_nav_bar); not authored
+    status: StatusConfig | None = None   # app.yaml `status: { text: "..." }`; app-level only, never per-screen
+    status_bar: StatusBar | None = None  # laid-out status band, filled after layout (build_status_bar); not authored
 ```
 
 **`nav` → nav strip (nav_tabs epic).** When `app.nav` is set, Stage 1
 requires a `display:` block (a full-width tab strip has no width to lay
 across otherwise) and rejects a `nav` target that isn't one of the app's
 screens or a tab count that can't get `NAV_TAB_MIN_W` px per cell. Stage 2
-then (a) reserves a `NAV_BAR_H`-tall band at `y = 0` on every screen —
-`layout_screen(screen, display, has_nav=True)` offsets the screen root to
-`y = NAV_BAR_H` and takes the band out of the height a top-level `fill:`
-child sees; the screen's own authored `header`/`status_bar` row is
-unchanged, it just starts below the strip — and (b) `build_nav_bar(app)`
-lays the tabs out as equal-width cells across `display.width` (last cell
-absorbs the width remainder), each `NAV_BAR_H` tall, in `nav` order, each
-carrying its target screen's index. `NAV_BAR_H` / `NAV_TAB_MIN_W` are
-fixed layout constants (no `nav:` styling fields — nav_tabs epic decision
-2). Task 1 is geometry + the baked descriptor only; `draw_nav_bar` and
-the input wiring are later tasks.
+then (a) reserves a `NAV_BAR_H`-tall band on every screen — `layout_screen`
+offsets the screen root by `NAV_BAR_H` (plus `STATUS_BAR_H` too, if
+`app.status` is also set — see below) and takes the band out of the
+height a top-level `fill:` child sees; the screen's own authored `header`
+row is unchanged, it just starts below both bands — and (b)
+`build_nav_bar(app)` lays the tabs out as equal-width cells across
+`display.width` (last cell absorbs the width remainder), each `NAV_BAR_H`
+tall, at `y = STATUS_BAR_H` if `app.status` is set or `y = 0` otherwise,
+in `nav` order, each carrying its target screen's index. `NAV_BAR_H` /
+`NAV_TAB_MIN_W` are fixed layout constants (no `nav:` styling fields —
+nav_tabs epic decision 2). Task 1 is geometry + the baked descriptor
+only; `draw_nav_bar` and the input wiring are later tasks.
+
+**`status` → status band (status_bar epic, added 2026-09-15).**
+App-level-only chrome — never a per-screen widget, the same relationship
+`nav` has to the runtime's tab strip (settled with Rafael 2026-09-15,
+`initiatives/janus_handoff/README.md` item 2: per-screen hand-authored
+status rows had already drifted out of sync across a real project's
+screens). When `app.status` is set, Stage 1 requires a `display:` block,
+same reasoning as `nav`. Stage 2's `build_status_bar(app)` lays out a
+single full-width band, `STATUS_BAR_H` tall, always at `y = 0` — it is
+the true top of the panel; the nav strip is what shifts down when both
+are set, not the other way round. `STATUS_BAR_H` is a fixed layout
+constant (status_bar epic decision 3), and `status.text` is static only
+in v1 — no bound field (decision/out-of-scope: nothing in the field
+needs live content yet, per the "add the capability when something needs
+it" pattern the rest of Janus follows). Task 1 is geometry + the baked
+descriptor only; `draw_status_bar` and its wiring are task 2.
 
 ---
 
@@ -474,7 +493,11 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   `rect` + flash `title` + `target` screen index, in `nav` order) with
   `.nav_tab_count`. `nav_tabs[]` titles are flash-resident (the render
   path will pgm-read them); the legacy screen-parallel `nav_titles` stays
-  plain. Implemented: `emit_app_table(app)` (calls `build_nav_bar`);
+  plain. Also, when `app.status` is set, a single `janus_app_status_bar_desc`
+  (`JANUS_PROGMEM janus_status_bar_t`: baked `rect` + flash `text`) with
+  `.status_bar` pointing at it (`NULL` otherwise — no array/count pair,
+  unlike `nav_tabs`, since there's exactly one status band). Implemented:
+  `emit_app_table(app)` (calls `build_nav_bar`/`build_status_bar`);
   raises if `app.nav` doesn't cover every screen.
 - `janus_display_config.gen.h` — only written when `app.display` is set:
   `JANUS_DISPLAY_WIDTH`/`HEIGHT` + `JANUS_DISPLAY_COLOR*`/`BUS*`/
@@ -659,11 +682,14 @@ typedef struct {
 
 typedef struct { janus_rect_t rect; const char *title; int16_t target; } janus_nav_tab_t;
 
+typedef struct { janus_rect_t rect; const char *text; } janus_status_bar_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;
     const char *const *nav_titles;   /* legacy screen-parallel title lookup; NULL if app.nav is unset */
     const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM, nav order, baked geometry; NULL if app.nav is unset */
     uint16_t nav_tab_count;          /* 0 if app.nav is unset */
+    const janus_status_bar_t *status_bar; /* JANUS_PROGMEM, singular; NULL if app.status is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -832,6 +858,19 @@ redrawn on top of the incoming screen's freshly rendered content. Only
 focusable, so the redraw never needs `bind` data — `read_bound_value`/
 `read_bound_string` are never called from this path.
 
+**Headerless box unfocus (fixes/000004, 2026-09-15).** A `box` with no
+header strip (`geometry_collapsed.h == 0` — no `text:`/`summary:`) rings
+its *full body* on focus (`draw_box_header`'s `has_strip ? geometry_collapsed
+: geometry`), but paints nothing at all on the plain `render_widget` the
+unfocus redraw above relies on (`draw_box_header` only has a painting
+branch when `has_strip` is true) — so the stale ring survived a focus move
+to another widget. Every other focusable kind avoids this because its own
+normal draw already repaints the exact band the ring sits in; a headerless
+box is the one case nothing does. `janus_set_focus` now does an explicit
+`fill_rect(lp.geometry, lp.bg_color)` on the outgoing widget first, but only
+for this case — same fix `janus_toggle_box` already applied for the
+identical reason.
+
 **Nav strip rendering (nav_tabs epic task 2).** `janus_render_nav_bar(app)`
 (internal `draw_nav_bar`) paints the app-level tab strip into its band:
 one `fill_rect` per `app->nav_tabs` cell (baked geometry, loaded pgm-safe
@@ -846,6 +885,20 @@ It is **not** called from `janus_render_screen` (screen-scoped, no `app`)
 incoming screen, and a scaffold calls it once after the first
 `janus_render_screen`; a periodic `janus_render_*_if_dirty` sweep never
 touches it.
+
+**Status band rendering (status_bar epic task 2, 2026-09-15).**
+`janus_render_status_bar(app)` (internal `draw_status_bar`) paints the
+app-level status band the same way: one `fill_rect` over `app->status_bar`'s
+baked rect (loaded pgm-safe via `janus_status_bar_load`), text centered at
+`medium` with no auto-shrink. `JANUS_COLOR_STATUS_BG`/`_INK` fixed runtime
+constants (decision 3) reuse the nav strip's own inactive-bg/active-label
+pair, so the two bands read as one chrome family. Same non-`janus_render_screen`
+placement and call sites as the nav strip — `janus_switch_screen[_async_start]`
+and a scaffold's startup call — with one deliberate difference:
+`janus_set_nav_focus`'s repaint (which exists to move the nav strip's
+focus-preview ring between cells) does **not** also redraw the status
+band, since the band's static text never depends on nav-focus state and
+repainting it there would just be wasted work.
 
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where

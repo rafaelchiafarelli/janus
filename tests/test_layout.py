@@ -2,10 +2,12 @@ import unittest
 from pathlib import Path
 
 from janus.stage1_parse.dsl_yaml import parse_app, parse_screen
-from janus.ir import App, DisplayConfig, NavTarget, Rect, Screen, Widget
+from janus.ir import App, DisplayConfig, NavTarget, Rect, Screen, StatusConfig, Widget
 from janus.stage2_layout.layout import (
     NAV_BAR_H,
+    STATUS_BAR_H,
     build_nav_bar,
+    build_status_bar,
     check_fits_display,
     layout_screen,
 )
@@ -404,6 +406,70 @@ class TestLayoutNavBar(unittest.TestCase):
         app = self._nav_app()
         app.nav = None
         self.assertIsNone(build_nav_bar(app))
+
+
+class TestLayoutStatusBar(unittest.TestCase):
+    def _screen(self) -> Screen:
+        return Screen(
+            name="S",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="column", id="body", fill=True, children=[
+                    Widget(kind="label", id="l", text="hi", size=(100, 20)),
+                ]),
+            ]),
+        )
+
+    def test_no_status_lays_out_unchanged(self) -> None:
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        s = layout_screen(self._screen(), d, has_status=False)
+        self.assertEqual(s.root.geometry.y, 0)
+        self.assertEqual(s.root.children[0].geometry.h, 300)
+
+    def test_status_alone_offsets_root_and_shrinks_fill_height(self) -> None:
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        s = layout_screen(self._screen(), d, has_status=True)
+        self.assertEqual(s.root.geometry.y, STATUS_BAR_H)
+        self.assertEqual(s.root.children[0].geometry.h, 300 - STATUS_BAR_H)
+        self.assertEqual(s.root.geometry.y + s.root.geometry.h, 300)
+
+    def test_status_and_nav_stack_bands_status_on_top(self) -> None:
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        s = layout_screen(self._screen(), d, has_nav=True, has_status=True)
+        self.assertEqual(s.root.geometry.y, STATUS_BAR_H + NAV_BAR_H)
+        self.assertEqual(s.root.children[0].geometry.h, 300 - STATUS_BAR_H - NAV_BAR_H)
+
+    def test_check_fits_display_counts_the_status_band(self) -> None:
+        s = Screen(name="S", root=Widget(kind="column", id="root", children=[
+            Widget(kind="label", id="l", text="x", size=(50, 300)),
+        ]))
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        layout_screen(s, d, has_status=True)
+        with self.assertRaises(ValueError):
+            check_fits_display(s, d)
+
+    def _status_app(self) -> App:
+        screens = [Screen(name="Alpha", root=Widget(kind="column", id="r", children=[]))]
+        return App(
+            screens=screens,
+            status=StatusConfig(text="Status: OK"),
+            display=DisplayConfig(width=320, height=480, color="rgb565"),
+        )
+
+    def test_build_status_bar_full_width_at_top(self) -> None:
+        bar = build_status_bar(self._status_app())
+        self.assertEqual(bar.rect, Rect(x=0, y=0, w=320, h=STATUS_BAR_H))
+        self.assertEqual(bar.text, "Status: OK")
+
+    def test_build_status_bar_none_without_status(self) -> None:
+        app = self._status_app()
+        app.status = None
+        self.assertIsNone(build_status_bar(app))
+
+    def test_nav_bar_shifts_down_when_status_also_set(self) -> None:
+        app = self._status_app()
+        app.nav = [NavTarget(screen="Alpha", title="A")]
+        tabs = build_nav_bar(app)
+        self.assertEqual(tabs[0].rect.y, STATUS_BAR_H)
 
 
 if __name__ == "__main__":
