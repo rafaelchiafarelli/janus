@@ -22,6 +22,7 @@ void display_driver_init(void);
 static void render_and_summarize(const char *label) {
     mock_driver_reset();
     janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));
+    janus_render_nav_bar(&janus_app);   /* app-level tab strip (no-op if app.yaml has no `nav:`) */
 
     printf("%s: %u draw_area_sync call(s)\n", label, (unsigned)mock_driver_log_count);
     for (uint16_t i = 0; i < mock_driver_log_count; i++) {
@@ -42,8 +43,14 @@ static void simulate_tap(int16_t x, int16_t y) {
     int16_t tx, ty;
     if (!janus_touch_poll(&tx, &ty)) return;
 
-    const janus_screen_desc_t *screen = janus_app_get_screen(&janus_app, janus_app.active_screen);
-    janus_input_result_t hit = janus_touch_hit_test(screen, tx, ty);
+    /* the app-level tab strip outranks screen content (it's a
+     * separate band above the screen) — check it first */
+    janus_input_result_t hit = janus_nav_hit_test(&janus_app, tx, ty);
+    if (hit.kind == JANUS_INPUT_NONE) {
+        const janus_screen_desc_t *screen =
+            janus_app_get_screen(&janus_app, janus_app.active_screen);
+        hit = janus_touch_hit_test(screen, tx, ty);
+    }
     switch (hit.kind) {
         case JANUS_INPUT_ACTION:
             printf("tap (%d,%d): ACTION -> janus_handle_action\n", tx, ty);
@@ -82,6 +89,10 @@ int main(void) {
 
     printf("\n");
     simulate_tap(5, 70);    /* inside pwm_ch0_enabled toggle: {0,64,28,18} — bind-only, no touch action */
+
+    printf("\n");
+    simulate_tap(159, 14); /* nav strip's "SERIAL" cell: {106,0,106,28} */
+    render_and_summarize("re-render after the nav tap (switched to BusStatus)");
 
     return 0;
 }

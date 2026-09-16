@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, Widget
+from ..stage2_layout.layout import NAV_TAB_MIN_W
 
 log = logging.getLogger("janus.parse")
 
@@ -29,7 +30,7 @@ _VALID_DISPLAY_CONTROLLERS = {
 }
 _VALID_INPUT_MODALITIES = {"touch", "encoder", "buttons"}
 _VALID_RENDER_MODES = {"blocking", "non_blocking"}
-_REQUIRES_RANGE = {"progress", "gauge", "slider"}
+_REQUIRES_RANGE = {"progress", "gauge", "slider", "vu"}
 _CONTAINER_KINDS = {"column", "row", "box", "radiogroup", "navlist"}
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 # One printf-style conversion the runtime formatter (janus_format.c)
@@ -320,8 +321,10 @@ def _parse_display(data: dict[str, Any] | None) -> DisplayConfig | None:
             f"{sorted(_VALID_RENDER_MODES)}"
         )
     w, h = _parse_size(data["size"])
+    background = _parse_color(data.get("background"))  # None -> None; validates #RRGGBB otherwise
     return DisplayConfig(
-        width=w, height=h, color=color, bus=bus, controller=controller, render_mode=render_mode
+        width=w, height=h, color=color, bus=bus, controller=controller,
+        render_mode=render_mode, background=background,
     )
 
 
@@ -339,21 +342,42 @@ def _parse_input_modality(data: dict[str, Any] | None) -> str:
 def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
     """`screens` are already-parsed `Screen` objects, in `app.yaml`'s
     `screens:` order — `parse_app` is what actually reads each file."""
+    display = _parse_display(data.get("display"))
+    screen_names = {s.name for s in screens}
+
     nav_data = data.get("nav")
     nav = None
     if nav_data is not None:
         nav = [
             NavTarget(screen=t["screen"], title=t["title"]) for t in nav_data["targets"]
         ]
+        # The tab strip is laid out across the panel width — no panel, no
+        # strip (nav_tabs epic, decision 1).
+        if display is None:
+            raise ValueError(
+                "app.nav needs a `display:` block with `size` — the tab strip "
+                "is laid out across the panel width"
+            )
+        for t in nav:
+            if t.screen not in screen_names:
+                raise ValueError(
+                    f"app.nav target {t.screen!r} isn't one of this app's screens"
+                )
+        per_tab = display.width // len(nav)
+        if per_tab < NAV_TAB_MIN_W:
+            raise ValueError(
+                f"app.nav has {len(nav)} tabs but the {display.width}px panel only "
+                f"leaves {per_tab}px each (minimum {NAV_TAB_MIN_W}px; v1 has no tab "
+                f"scrolling)"
+            )
 
-    screen_names = {s.name for s in screens}
     for screen in screens:
         _check_navigate_targets(screen.root, screen_names)
 
     return App(
         screens=screens,
         nav=nav,
-        display=_parse_display(data.get("display")),
+        display=display,
         input_modality=_parse_input_modality(data.get("input")),
     )
 

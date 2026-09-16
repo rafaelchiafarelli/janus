@@ -1,0 +1,6 @@
+screen: Bravo
+layout: column
+fill: true
+children:
+  - { kind: header, id: bravo_header, text: "Bravo", font_size: medium, size: { w: 120, h: 20 } }
+  - { kind: label, id: bravo_body, text: "Bravo body", font_size: medium, size: { w: 200, h: 18 } }

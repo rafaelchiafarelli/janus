@@ -72,6 +72,10 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_input_buttons_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_input_buttons_tests PRIVATE -Wall -Wextra)
 
+    add_executable(janus_nav_focus_tests tests/test_nav_focus.c)
+    target_link_libraries(janus_nav_focus_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_nav_focus_tests PRIVATE -Wall -Wextra)
+
     add_executable(janus_font_tests tests/test_font.c)
     target_link_libraries(janus_font_tests PRIVATE janus_runtime)
     target_compile_options(janus_font_tests PRIVATE -Wall -Wextra)
@@ -87,6 +91,25 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_render_async_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_render_async_tests PRIVATE -Wall -Wextra)
 
+    # janus_clear_screen's full-panel path is #ifdef'd on macros a project
+    # only gets from janus_render_config.gen.h when it declares
+    # display.background. Recompile janus_runtime.c straight into this
+    # target with those macros forced, rather than linking the library
+    # (built without them). Mock sources are compiled in directly for the
+    # same reason — janus_host_mock links the plain janus_runtime.
+    add_executable(janus_clear_screen_bg_tests
+        tests/test_clear_screen_bg.c
+        src/janus_runtime.c src/janus_input_touch.c src/janus_input_focus.c
+        src/janus_font.c src/janus_bound.c src/janus_format.c
+        host_mock/mock_driver.c host_mock/mock_touch.c
+        host_mock/mock_encoder.c host_mock/mock_buttons.c)
+    target_include_directories(janus_clear_screen_bg_tests PRIVATE include host_mock)
+    target_compile_definitions(janus_clear_screen_bg_tests PRIVATE
+        JANUS_RENDER_NONBLOCKING
+        JANUS_DISPLAY_BACKGROUND=0x4321
+        JANUS_DISPLAY_PANEL_W=48 JANUS_DISPLAY_PANEL_H=32)
+    target_compile_options(janus_clear_screen_bg_tests PRIVATE -Wall -Wextra)
+
     # janus_draw's helpers live in janus_runtime.o, which pulls the driver
     # contract — so this links the mock, same as janus_runtime_tests.
     add_executable(janus_draw_tests tests/test_draw.c)
@@ -99,8 +122,10 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_input_focus_tests COMMAND janus_input_focus_tests)
     add_test(NAME janus_input_encoder_tests COMMAND janus_input_encoder_tests)
     add_test(NAME janus_input_buttons_tests COMMAND janus_input_buttons_tests)
+    add_test(NAME janus_nav_focus_tests COMMAND janus_nav_focus_tests)
     add_test(NAME janus_font_tests COMMAND janus_font_tests)
     add_test(NAME janus_format_tests COMMAND janus_format_tests)
     add_test(NAME janus_draw_tests COMMAND janus_draw_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
+    add_test(NAME janus_clear_screen_bg_tests COMMAND janus_clear_screen_bg_tests)
 endif()

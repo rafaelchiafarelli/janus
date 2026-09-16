@@ -58,6 +58,20 @@ static int rt_painted_colour(int px, int py, uint16_t colour) {
     return 0;
 }
 
+/* the colour of the last span painted over (px,py), or 0 if none did */
+static uint16_t rt_sample_at(int px, int py) {
+    uint16_t v = 0;
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if ((int)c.x <= px && px < (int)(c.x + c.w) &&
+            (int)c.y <= py && py < (int)(c.y + c.h)) v = c.sample_pixel;
+    }
+    return v;
+}
+
+/* glyph-blit counters — defined with the font fixtures further down */
+static int count_calls_of_size(uint16_t w, uint16_t h);
+
 /* does any span of colour `colour` touch the x-band [x_lo, x_hi)? */
 static int rt_colour_in_xband(uint16_t colour, int x_lo, int x_hi) {
     for (uint16_t i = 0; i < mock_driver_log_count; i++) {
@@ -66,6 +80,33 @@ static int rt_colour_in_xband(uint16_t colour, int x_lo, int x_hi) {
         if ((int)c.x < x_hi && (int)(c.x + c.w) > x_lo) return 1;
     }
     return 0;
+}
+
+/* is some `colour` pixel within `tol` (Chebyshev) of `(x, y)`? Used by the
+ * vu needle tests: ticks and the needle share `.color` and the same outer
+ * radius (`len`), so a farthest-pixel scan can't tell them apart — instead
+ * probe an *inner* radius (well under the ticks' 0.9*len..len band) that
+ * only the needle's own hub-to-tip line ever reaches. */
+static int rt_colour_near(uint16_t colour, int x, int y, int tol) {
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if (c.sample_pixel != colour) continue;
+        int dx = (int)c.x - x;
+        int dy = (int)c.y - y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        if (dx <= tol && dy <= tol) return 1;
+    }
+    return 0;
+}
+
+/* same ray formula draw_vu uses internally (janus_runtime.c's vu_ray_x/y,
+ * static there) — reimplemented here against the public janus_sin16/
+ * janus_cos16 so the test can predict where the needle lands at a given
+ * angle without reaching into runtime internals. */
+static void rt_vu_ray_point(int hub_x, int hub_y, int16_t len, int16_t deg, int *out_x, int *out_y) {
+    *out_x = hub_x + (int)(((int32_t)len * janus_sin16(deg)) >> 15);
+    *out_y = hub_y - (int)(((int32_t)len * janus_cos16(deg)) >> 15);
 }
 
 /* blocking render == async-drained render, span for span — the
@@ -230,8 +271,9 @@ static void test_render_widget_draws_only_that_widget(void) {
 
 /* ---- fixture 2c: dirty-aware rendering — a bound leaf only redraws when
  * firmware has actually marked its field's bit dirty; the bit is
- * consumed (cleared) on that redraw. Unbound (static) leaves always
- * draw regardless — nothing ever marks them dirty, by design. ---- */
+ * consumed (cleared) on that redraw. On a *dirty sweep* (real
+ * bound_dirty) an unbound (static) leaf is skipped — its pixels can't
+ * change — while the force path (NULL bound_dirty) still draws it. ---- */
 typedef struct { int level; } dirty_demo_t;
 typedef struct { bool level; } dirty_demo_dirty_t;
 
@@ -274,6 +316,21 @@ static void test_unbound_widget_always_draws_via_if_dirty(void) {
     mock_driver_reset();
     janus_render_widget_if_dirty(&w, NULL, NULL);
     CHECK(mock_driver_log_count > 0);    /* still draws every time -- nothing ever marks it clean */
+}
+
+static void test_unbound_widget_skipped_on_a_dirty_sweep(void) {
+    /* Same static label, but through a real bound_dirty struct: a repeated
+     * dirty sweep must not repaint it (2026-09-07 -- stops a
+     * timer-refreshed header flickering its unchanging text). */
+    static dirty_demo_t data = { .level = 0 };
+    static dirty_demo_dirty_t dirty = { .level = false };
+    static const janus_widget_desc_t w = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "hi", .geometry = { 0, 0, 20, 10 },
+    };
+
+    mock_driver_reset();
+    janus_render_widget_if_dirty(&w, &data, &dirty);
+    CHECK(mock_driver_log_count == 0);   /* unbound + dirty-aware sweep -> skipped */
 }
 
 static void test_render_screen_if_dirty_respects_the_bit(void) {
@@ -375,10 +432,12 @@ static void test_box_summary_renders_when_collapsed_and_expanded(void) {
     CHECK(mock_driver_log_count == 5);
 }
 
-/* ---- fixture 4: only the active screen ever gets drawn ---- */
-static void test_switch_screen_draws_only_the_new_screen(void) {
+/* ---- fixture 4: switching erases the outgoing screen, then draws only
+ * the new one's widgets (never re-renders the old screen's content). ---- */
+static void test_switch_screen_erases_old_then_draws_new(void) {
     static const janus_widget_desc_t s1_widget = {
         .kind = JANUS_WIDGET_LABEL, .id = "s1w", .geometry = { 0, 0, 10, 10 },
+        .bg_color = 0x1234,
     };
     static const janus_widget_desc_t s2_widget = {
         .kind = JANUS_WIDGET_LABEL, .id = "s2w", .geometry = { 0, 0, 10, 10 },
@@ -393,7 +452,108 @@ static void test_switch_screen_draws_only_the_new_screen(void) {
     mock_driver_reset();
     janus_switch_screen(&app, 1);
     CHECK(app.active_screen == 1);
-    CHECK(mock_driver_log_count == 1);     /* only s2's one widget, not s1's */
+    CHECK(mock_driver_log_count == 2);          /* 1 union-bbox erase of s1 + 1 draw of s2's widget */
+    CHECK(mock_driver_log[0].sample_pixel == 0x1234);  /* the erase uses s1's first widget's bg colour */
+}
+
+/* the erase is one fill over the union of the outgoing screen's top-level
+ * rects, anchored at the origin — so it also covers the GAP between them
+ * and any ragged right/bottom edge a per-widget fill would leave. */
+static void test_switch_screen_erase_covers_gaps_and_ragged_edges(void) {
+    static const janus_widget_desc_t s1_a = {
+        .kind = JANUS_WIDGET_LABEL, .id = "a", .geometry = { 0, 0, 10, 10 }, .bg_color = 0x0777,
+    };
+    static const janus_widget_desc_t s1_b = {
+        .kind = JANUS_WIDGET_LABEL, .id = "b", .geometry = { 0, 20, 40, 10 }, .bg_color = 0x0777,
+    };
+    static const janus_widget_desc_t s1_widgets[] = { s1_a, s1_b };
+    static const janus_widget_desc_t s2_widget = {
+        .kind = JANUS_WIDGET_LABEL, .id = "s2w", .geometry = { 0, 0, 4, 4 },
+    };
+    static const janus_screen_desc_t s1 = { .name = "S1", .widgets = s1_widgets, .widget_count = 2 };
+    static const janus_screen_desc_t s2 = { .name = "S2", .widgets = &s2_widget, .widget_count = 1 };
+    static const janus_screen_desc_t *const screens[] = { &s1, &s2 };
+    janus_app_t app = {
+        .screens = screens, .nav_titles = NULL, .screen_count = 2, .active_screen = 0,
+    };
+
+    mock_driver_reset();
+    janus_switch_screen(&app, 1);
+    CHECK(rt_painted_colour(5, 15, 0x0777));    /* the gap between the two rows */
+    CHECK(rt_painted_colour(30, 5, 0x0777));    /* ragged edge past the narrow first row */
+}
+
+/* ---- fixture 4b: the app-level nav strip (nav_tabs epic task 2) ----
+ * 3 tabs, 40px cells across a 120px band, NAV_BAR_H (28) tall. targets
+ * are screen indices in nav order; the cell whose target == active_screen
+ * is the "active" one. */
+static const janus_nav_tab_t rt_nav_tabs[] = {
+    { { 0,  0, 40, 28 }, "A", 0 },
+    { { 40, 0, 40, 28 }, "B", 1 },
+    { { 80, 0, 40, 28 }, "C", 2 },
+};
+static const janus_screen_desc_t rt_nav_s0 = { .name = "S0", .widget_count = 0 };
+static const janus_screen_desc_t rt_nav_s1 = { .name = "S1", .widget_count = 0 };
+static const janus_screen_desc_t rt_nav_s2 = { .name = "S2", .widget_count = 0 };
+static const janus_screen_desc_t *const rt_nav_screens[] = { &rt_nav_s0, &rt_nav_s1, &rt_nav_s2 };
+
+static void test_nav_bar_renders_cells_and_marks_the_active_tab(void) {
+    janus_app_t app = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .nav_tabs = rt_nav_tabs, .nav_tab_count = 3,
+        .screen_count = 3, .active_screen = 1,
+    };
+
+    mock_driver_reset();
+    janus_render_nav_bar(&app);
+
+    /* one fill per cell, spanning the whole 120px band, no gap */
+    CHECK(rt_painted(2, 4) && rt_painted(60, 4) && rt_painted(118, 4));
+    /* three medium-glyph title blits (one char each) */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 3);
+
+    /* active cell (tab B, target 1) reads different from an inactive one */
+    uint16_t active_body = rt_sample_at(60, 4);
+    uint16_t inactive_body = rt_sample_at(20, 4);
+    CHECK(active_body != inactive_body);
+
+    /* accent bar: a ~6px band along the bottom of the active cell only */
+    CHECK(rt_sample_at(60, 24) != active_body);            /* accent colour, not the cell body */
+    CHECK(rt_sample_at(60, 24) == rt_sample_at(60, 27));   /* same accent colour top-to-bottom of the bar */
+    CHECK(rt_sample_at(20, 24) == inactive_body);          /* inactive cell: no accent band this high */
+}
+
+static void test_nav_bar_no_op_without_nav(void) {
+    janus_app_t no_nav = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .nav_tabs = NULL, .nav_tab_count = 0,
+        .screen_count = 3, .active_screen = 0,
+    };
+    mock_driver_reset();
+    janus_render_nav_bar(&no_nav);
+    janus_render_nav_bar(NULL);
+    CHECK(mock_driver_log_count == 0);
+}
+
+static void test_switch_screen_repaints_the_nav_strip(void) {
+    janus_app_t app = {
+        .screens = rt_nav_screens, .nav_titles = NULL,
+        .nav_tabs = rt_nav_tabs, .nav_tab_count = 3,
+        .screen_count = 3, .active_screen = 0,
+    };
+    /* active tab A -> its cell [0,40) carries the accent at y=24 */
+    janus_set_focus(NULL);   /* drop any stale focus a prior fixture left set */
+    mock_driver_reset();
+    janus_render_nav_bar(&app);
+    uint16_t a_accent = rt_sample_at(20, 24);
+    uint16_t a_body = rt_sample_at(20, 4);
+    CHECK(a_accent != a_body);
+
+    mock_driver_reset();
+    janus_switch_screen(&app, 2);          /* -> active tab C, cell [80,120) */
+    CHECK(app.active_screen == 2);
+    CHECK(rt_sample_at(100, 24) == a_accent);   /* accent moved to C's cell */
+    CHECK(rt_sample_at(20, 24) != a_accent);    /* and left A's cell */
 }
 
 /* ---- fixture 5: divider/toggle/badge/slider — the four "low effort"
@@ -509,6 +669,102 @@ static void test_led_render_is_async_safe(void) {
     CHECK(rt_render_matches_async(&g_led_screen));
 }
 
+/* vu: analog needle over a 90 degree tick arc (vu_meter task 2). Geometry
+ * {0,0,80,48}: hub at (40,47) (bottom-centre), len = min(40,48) - 2 = 38.
+ * value==min -> needle at -45 deg (up-left), value==max -> +45 deg
+ * (up-right), midpoint -> 0 deg (straight up). Ticks share `.color` with
+ * the needle and sit at the same outer radius, so "the farthest `.color`
+ * pixel from the hub" may land on a tick instead of the needle tip at an
+ * extreme value — harmless here, since the nearest tick at an extreme
+ * points the same general direction the needle does. */
+#define VU_COLOR 0x001F
+#define VU_BG    0xF800
+#define VU_HUB_X 40
+#define VU_HUB_Y 47
+#define VU_LEN   38   /* min(r.w/2, r.h) - 2 = min(40, 48) - 2 */
+#define VU_INNER_R 15 /* well under the ticks' 0.9*VU_LEN..VU_LEN band (~34..38) */
+
+static const janus_widget_desc_t g_vu = {
+    .kind = JANUS_WIDGET_VU, .id = "v", .geometry = { 0, 0, 80, 48 },
+    .bind = {
+        .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
+        .range_min = 0, .range_max = 100,
+    },
+    .color = VU_COLOR, .bg_color = VU_BG,
+};
+static const janus_screen_desc_t g_vu_screen = {
+    .name = "Vu", .widgets = &g_vu, .widget_count = 1, .bound_struct = &g_demo,
+};
+
+static void test_vu_face_fill_under_the_needle(void) {
+    g_demo.level = 50;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_painted_colour(0, 0, VU_BG));    /* far corner: face fill, untouched by needle/ticks/hub */
+    CHECK(!rt_painted(85, 20));               /* nothing drawn outside the geometry */
+}
+
+static void test_vu_needle_points_up_left_at_range_min(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, -45, &ex, &ey);
+    CHECK(ex < VU_HUB_X);
+    CHECK(ey < VU_HUB_Y);
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_needle_points_up_right_at_range_max(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, 45, &ex, &ey);
+    CHECK(ex > VU_HUB_X);
+    CHECK(ey < VU_HUB_Y);
+
+    g_demo.level = 100;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_needle_points_straight_up_at_midpoint(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, 0, &ex, &ey);
+    CHECK(ex - VU_HUB_X <= 2 && VU_HUB_X - ex <= 2);
+    CHECK(ey < VU_HUB_Y);
+
+    g_demo.level = 50;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_clamps_above_range_max(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, 45, &ex, &ey);
+
+    g_demo.level = 150;   /* above range_max=100 — must render exactly like level == 100 */
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_hub_painted_for_every_value(void) {
+    int values[] = { 0, 25, 50, 75, 100 };
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        g_demo.level = values[i];
+        mock_driver_reset();
+        janus_render_screen(&g_vu_screen);
+        CHECK(rt_painted_colour(VU_HUB_X, VU_HUB_Y, VU_COLOR));
+    }
+}
+
+static void test_vu_render_is_async_safe(void) {
+    g_demo.level = 50;
+    CHECK(rt_render_matches_async(&g_vu_screen));
+}
+
 static void test_badge_fill_tracks_live_value(void) {
     static const janus_widget_desc_t badge = {
         .kind = JANUS_WIDGET_BADGE, .id = "b", .geometry = { 0, 0, 8, 8 },
@@ -610,20 +866,84 @@ static void test_label_with_text_draws_one_glyph_call_per_character(void) {
     CHECK(count_glyph_sized_calls() == 2);
 }
 
-static void test_text_wider_than_widget_clips_without_wrapping(void) {
-    /* Rect only fits one glyph column (w=21 = 1px left pad + 20): 'A'
-     * draws, 'B' would start past the right edge and must be dropped, not
-     * wrapped or squeezed. */
+static void test_text_wider_than_widget_shrinks_to_fit(void) {
+    /* "AB" at large (1px pad + 2*20 + 1 gap = 42px) doesn't fit w=24, so
+     * draw_string steps the font down: large -> medium makes it
+     * 1 + 2*10 + 1 = 22px, which fits. Both glyphs draw, at the medium
+     * size — nothing at large, nothing clipped (2026-09-07: render-time
+     * auto-shrink). */
     static const janus_widget_desc_t label = {
-        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 21, 10 },
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "AB", .geometry = { 0, 0, 24, 16 },
     };
     static const janus_screen_desc_t screen = {
-        .name = "Clipped", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+        .name = "Shrunk", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
     };
 
     mock_driver_reset();
     janus_render_screen(&screen);
-    CHECK(count_glyph_sized_calls() == 1);
+    CHECK(count_glyph_sized_calls() == 0);                                             /* nothing at large */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 2);
+}
+
+static void test_text_still_clips_once_at_the_smallest_size(void) {
+    /* "ABCD" can't fit w=21 even at medium (4*(10+1)-1 = 43px) and there's
+     * no smaller table, so the old clip behaviour still applies at the
+     * floor: only the glyphs that fit are drawn ('A' at x=1, 'B' would
+     * start at x=12 and end at 22 > 21 -> dropped). */
+    static const janus_widget_desc_t label = {
+        .kind = JANUS_WIDGET_LABEL, .id = "l", .static_text = "ABCD", .geometry = { 0, 0, 21, 16 },
+        .font_size = JANUS_FONT_SIZE_MEDIUM,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ClippedFloor", .widgets = &label, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 1);
+}
+
+static void test_button_text_overflow_clips_not_shrinks(void) {
+    /* A button does NOT auto-shrink (unlike label/header) — a tab bar must
+     * keep one consistent size, so an over-long button label clips at the
+     * authored font instead of silently dropping to medium (2026-09-07
+     * round 2). "ABCD" at large needs 1 + 4*20 + 3 = 84px; in w=45 only
+     * 'A' (x=1..21) and 'B' (x=22..42) fit, 'C' would end at 63 > 45. */
+    static const janus_widget_desc_t button = {
+        .kind = JANUS_WIDGET_BUTTON, .id = "b", .static_text = "ABCD", .geometry = { 0, 0, 45, 28 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ClipBtn", .widgets = &button, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(count_glyph_sized_calls() == 2);   /* still at large, just clipped */
+    CHECK(count_calls_of_size(JANUS_FONT_MEDIUM_GLYPH_W, JANUS_FONT_MEDIUM_GLYPH_H) == 0);
+}
+
+static void test_button_text_is_centered(void) {
+    /* A short label in a wide button sits centered, not jammed against the
+     * left edge (2026-09-07). "A" is one 20px glyph in a 60px button:
+     * left-aligned x would be 1; centered x is 0 + (60 - 20)/2 = 20. */
+    static const janus_widget_desc_t button = {
+        .kind = JANUS_WIDGET_BUTTON, .id = "b", .static_text = "A", .geometry = { 0, 0, 60, 28 },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "CenteredBtn", .widgets = &button, .widget_count = 1, .bound_struct = NULL,
+    };
+
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    int found = 0;
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        if (mock_driver_log[i].w == JANUS_FONT_LARGE_GLYPH_W &&
+            mock_driver_log[i].h == JANUS_FONT_LARGE_GLYPH_H) {
+            found = 1;
+            CHECK(mock_driver_log[i].x == 20);   /* centered, not 1 */
+        }
+    }
+    CHECK(found);
 }
 
 /* ---- fixture 6b: font_size/font_scale (2026-09-05: medium/large tables +
@@ -942,21 +1262,36 @@ int main(void) {
     test_render_widget_draws_only_that_widget();
     test_render_widget_if_dirty_skips_unchanged_field();
     test_unbound_widget_always_draws_via_if_dirty();
+    test_unbound_widget_skipped_on_a_dirty_sweep();
     test_render_screen_if_dirty_respects_the_bit();
     test_box_collapse_and_toggle();
     test_toggle_box_clears_vacated_body_on_collapse();
     test_box_summary_renders_when_collapsed_and_expanded();
-    test_switch_screen_draws_only_the_new_screen();
+    test_switch_screen_erases_old_then_draws_new();
+    test_switch_screen_erase_covers_gaps_and_ragged_edges();
+    test_nav_bar_renders_cells_and_marks_the_active_tab();
+    test_nav_bar_no_op_without_nav();
+    test_switch_screen_repaints_the_nav_strip();
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
     test_toggle_render_is_async_safe();
     test_led_shaded_disc_per_state();
     test_led_render_is_async_safe();
+    test_vu_face_fill_under_the_needle();
+    test_vu_needle_points_up_left_at_range_min();
+    test_vu_needle_points_up_right_at_range_max();
+    test_vu_needle_points_straight_up_at_midpoint();
+    test_vu_clamps_above_range_max();
+    test_vu_hub_painted_for_every_value();
+    test_vu_render_is_async_safe();
     test_badge_fill_tracks_live_value();
     test_slider_fill_tracks_live_value();
     test_label_without_text_draws_only_the_background_fill();
     test_label_with_text_draws_one_glyph_call_per_character();
-    test_text_wider_than_widget_clips_without_wrapping();
+    test_text_wider_than_widget_shrinks_to_fit();
+    test_text_still_clips_once_at_the_smallest_size();
+    test_button_text_overflow_clips_not_shrinks();
+    test_button_text_is_centered();
     test_medium_font_size_draws_medium_sized_glyph();
     test_font_scale_multiplies_medium_up_to_large_footprint();
     test_font_scale_beyond_the_cap_is_clamped_not_overflowed();

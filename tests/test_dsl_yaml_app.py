@@ -8,10 +8,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestParseApp(unittest.TestCase):
-    def test_reads_screens_in_order_and_nav(self) -> None:
+    def test_reads_screens_in_order(self) -> None:
         app = parse_app(FIXTURES / "app.yaml")
-
         self.assertEqual([s.name for s in app.screens], ["UserProfile", "BoxDemo"])
+        self.assertIsNone(app.nav)  # the bare fixture declares no nav
+
+    def test_reads_nav_targets_in_order(self) -> None:
+        # nav requires a display (decision 1) — app_with_display.yaml has both
+        app = parse_app(FIXTURES / "app_with_display.yaml")
         self.assertEqual(
             app.nav,
             [
@@ -51,6 +55,45 @@ class TestAppFromDictNavValidation(unittest.TestCase):
     def test_no_nav_key_means_no_tabs(self) -> None:
         app = app_from_dict({"screens": []}, self._screens(None))
         self.assertIsNone(app.nav)
+
+    def _nav_data(self, **extra):
+        return {
+            "screens": [],
+            "nav": {"kind": "tabs", "targets": [
+                {"screen": "One", "title": "1"}, {"screen": "Two", "title": "2"},
+            ]},
+            **extra,
+        }
+
+    def test_nav_with_display_accepted(self) -> None:
+        data = self._nav_data(display={"size": {"w": 240, "h": 320}})
+        app = app_from_dict(data, self._screens(None))
+        self.assertEqual([t.title for t in app.nav], ["1", "2"])
+
+    def test_nav_without_display_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            app_from_dict(self._nav_data(), self._screens(None))
+
+    def test_nav_target_not_a_screen_rejected(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}},
+            "nav": {"kind": "tabs", "targets": [{"screen": "Ghost", "title": "g"}]},
+        }
+        with self.assertRaises(ValueError):
+            app_from_dict(data, self._screens(None))
+
+    def test_too_many_tabs_for_panel_width_rejected(self) -> None:
+        # 12 tabs on a 240px panel -> 20px each, under the 24px minimum
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}},
+            "nav": {"kind": "tabs", "targets": [
+                {"screen": "One", "title": str(i)} for i in range(12)
+            ]},
+        }
+        with self.assertRaises(ValueError):
+            app_from_dict(data, self._screens(None))
 
 
 class TestAppFromDictDisplay(unittest.TestCase):
@@ -122,6 +165,27 @@ class TestAppFromDictDisplay(unittest.TestCase):
         data = {
             "screens": [],
             "display": {"size": {"w": 240, "h": 320}, "render_mode": "polled"},
+        }
+        with self.assertRaises(ValueError):
+            app_from_dict(data, self._screens())
+
+    def test_background_defaults_to_none(self) -> None:
+        data = {"screens": [], "display": {"size": {"w": 240, "h": 320}}}
+        app = app_from_dict(data, self._screens())
+        self.assertIsNone(app.display.background)
+
+    def test_background_parsed_when_given(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}, "background": "#001122"},
+        }
+        app = app_from_dict(data, self._screens())
+        self.assertEqual(app.display.background, "#001122")
+
+    def test_invalid_background_rejected(self) -> None:
+        data = {
+            "screens": [],
+            "display": {"size": {"w": 240, "h": 320}, "background": "black"},
         }
         with self.assertRaises(ValueError):
             app_from_dict(data, self._screens())

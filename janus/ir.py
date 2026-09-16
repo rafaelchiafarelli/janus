@@ -128,6 +128,18 @@ class NavTarget:
 
 
 @dataclass
+class NavTab:
+    """One laid-out tab of the app-level nav strip — not authored. Built
+    by stage2_layout.build_nav_bar from `App.nav` + `App.display`: equal-
+    width cells across the panel, `NAV_BAR_H` tall at y=0. Baked into the
+    generated app table (`janus_nav_tabs[]`) for the runtime's
+    draw_nav_bar (nav_tabs epic)."""
+    rect: "Rect"
+    title: str
+    target_screen_index: int
+
+
+@dataclass
 class DisplayConfig:
     width: int
     height: int
@@ -147,6 +159,15 @@ class DisplayConfig:
     # instead (see Stage 8's scaffold_main.py) — declared, not baked into
     # every project unconditionally, same "input.modality" precedent.
     render_mode: RenderMode = "blocking"
+    # "#RRGGBB" canvas/background colour, packed to RGB565 at Stage 3b.
+    # Optional — when set, it's emitted into janus_render_config.gen.h
+    # (JANUS_DISPLAY_BACKGROUND, alongside JANUS_DISPLAY_PANEL_W/H) so the
+    # fixed runtime's janus_clear_screen can do a true full-panel erase in
+    # that colour on a screen switch; without it the runtime stays
+    # display-size-agnostic and janus_clear_screen falls back to a
+    # best-effort union-of-top-level-widget-rects fill. Declaring this is
+    # the explicit opt-in to the runtime knowing the panel size.
+    background: Optional[str] = None
 
 
 @dataclass
@@ -157,3 +178,7 @@ class App:
     # which physical input a generated project's main.c polls (Stage 6/8)
     # — one modality per project, default touch (today's only behavior).
     input_modality: InputModality = "touch"
+    # Laid-out tab strip — populated after layout (cli.generate /
+    # stage2_layout.build_nav_bar), never authored. None when `nav` is
+    # unset. emit_app_table bakes it into `janus_nav_tabs[]`.
+    nav_bar: Optional[list[NavTab]] = None

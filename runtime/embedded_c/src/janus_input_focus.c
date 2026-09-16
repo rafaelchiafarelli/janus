@@ -75,11 +75,51 @@ static const janus_widget_desc_t *widget_at(const janus_screen_desc_t *screen, i
     return ctx.found;
 }
 
-void janus_focus_move(const janus_screen_desc_t *screen, int16_t delta) {
+/* Index of `app`'s nav_tabs entry whose target is the currently active
+ * screen — where the previewed-tab cursor starts on entering the nav
+ * strip (nav_tabs epic task 4 decision), same lookup nav_step() in
+ * janus_runtime.c does for janus_nav_next/prev, duplicated here rather
+ * than shared since both are a three-line loop over a baked array. Only
+ * ever called with a non-empty nav_tabs, so falling through the loop
+ * (a screen with no matching tab — shouldn't happen; generation always
+ * baked one) defaults to tab 0 rather than an out-of-range index. */
+static int16_t nav_start_index(const janus_app_t *app) {
+    for (uint16_t i = 0; i < app->nav_tab_count; i++) {
+        if (janus_nav_tab_load(&app->nav_tabs[i]).target == (int16_t)app->active_screen) return (int16_t)i;
+    }
+    return 0;
+}
+
+void janus_focus_move(janus_app_t *app, int16_t delta) {
+    const janus_screen_desc_t *screen = janus_app_get_screen(app, app->active_screen);
+    bool has_nav = (app->nav_tabs != NULL && app->nav_tab_count > 0);
+    int16_t nav_idx = janus_get_nav_focus();
+
+    if (nav_idx >= 0) {
+        /* Already previewing a tab: `delta` cycles it within its own run
+         * — independent of the screen's widget count — and falling off
+         * either end hands focus back to a real widget instead of
+         * wrapping among tabs forever, the mirror of how the strip was
+         * entered below. */
+        int32_t next = (int32_t)nav_idx + delta;
+        count_ctx_t counted = { 0 };
+        walk_screen(screen, count_visit, &counted);
+        if (next < 0 || next >= (int32_t)app->nav_tab_count) {
+            janus_set_nav_focus(app, -1);
+            janus_set_focus(counted.count > 0
+                             ? widget_at(screen, next < 0 ? counted.count - 1 : 0)
+                             : NULL);
+            return;
+        }
+        janus_set_nav_focus(app, (int16_t)next);
+        return;
+    }
+
     count_ctx_t counted = { 0 };
     walk_screen(screen, count_visit, &counted);
     if (counted.count <= 0) {
         janus_set_focus(NULL);
+        if (has_nav) janus_set_nav_focus(app, nav_start_index(app));
         return;
     }
 
@@ -88,17 +128,33 @@ void janus_focus_move(const janus_screen_desc_t *screen, int16_t delta) {
      * index 0 regardless of delta's sign or magnitude — the "establish
      * focus" bootstrap janus_input_focus.h's delta==0 idiom relies on. */
     int32_t next = current < 0 ? 0 : (current + delta);
+
+    if (has_nav && (next < 0 || next >= counted.count)) {
+        janus_set_focus(NULL);
+        janus_set_nav_focus(app, nav_start_index(app));
+        return;
+    }
     next = (int32_t)(((next % counted.count) + counted.count) % counted.count);
 
     janus_set_focus(widget_at(screen, next));
 }
 
-janus_input_result_t janus_focus_activate(const janus_screen_desc_t *screen) {
+janus_input_result_t janus_focus_activate(janus_app_t *app) {
     janus_input_result_t result = {
         .kind = JANUS_INPUT_NONE, .widget = NULL,
         .action = JANUS_ACTION_ID_NONE, .navigate_target = -1,
     };
 
+    int16_t nav_idx = janus_get_nav_focus();
+    if (nav_idx >= 0) {
+        janus_nav_tab_t tab = janus_nav_tab_load(&app->nav_tabs[nav_idx]);
+        janus_set_nav_focus(app, -1);
+        janus_switch_screen(app, (uint16_t)tab.target);
+        janus_focus_move(app, 0);
+        return result;
+    }
+
+    const janus_screen_desc_t *screen = janus_app_get_screen(app, app->active_screen);
     const janus_widget_desc_t *w = janus_get_focus();
     if (w == NULL || focus_position(screen, w) < 0) return result;
 

@@ -5,17 +5,25 @@ Pure, deterministic: walks a Screen's widget tree bottom-up, filling in
 """
 from __future__ import annotations
 
-from ..ir import DisplayConfig, Rect, Screen, Widget
+from ..ir import App, DisplayConfig, NavTab, Rect, Screen, Widget
 
 GAP = 4
 BOX_HEADER_H = 16
+# app-level nav strip (app.nav: { kind: tabs }). Fixed constants for v1 —
+# not authorable (nav_tabs epic, decision 2). The strip is its own band
+# at y=0 across the full panel width; every screen's own content (its
+# authored header/status_bar row included) starts at y = NAV_BAR_H.
+NAV_BAR_H = 28
+# smallest per-tab cell width worth laying out — more tabs than the panel
+# can give this many px each is a parse-time error (no scrolling in v1).
+NAV_TAB_MIN_W = 24
 
 _LEAF_KINDS = {
     "label", "header", "button", "image", "progress", "gauge",
     "checkbox", "radiobutton", "led",
-    "divider", "toggle", "badge", "slider",
+    "divider", "toggle", "badge", "slider", "vu",
 }
-_REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led", "badge", "slider"}
+_REQUIRES_EXPLICIT_SIZE = {"progress", "gauge", "image", "led", "badge", "slider", "vu"}
 _DEFAULT_SIZE = {
     # label/header/button draw glyph text (JANUS_FONT_GLYPH_W/H = 20x28 —
     # runtime/embedded_c/include/janus_font.h), so their defaults must fit
@@ -32,14 +40,24 @@ _DEFAULT_SIZE = {
 }
 
 
-def layout_screen(screen: Screen, display: DisplayConfig | None = None) -> Screen:
+def layout_screen(
+    screen: Screen, display: DisplayConfig | None = None, has_nav: bool = False
+) -> Screen:
     """`display`, when given, is what a top-level `fill: true` widget
     grows against — without it (today's default), `fill` on any widget
     whose ancestor chain never reaches a known size raises ValueError;
-    every other widget lays out exactly as before regardless."""
+    every other widget lays out exactly as before regardless.
+
+    `has_nav` (app.nav set) offsets the screen root down by `NAV_BAR_H`
+    and takes that band out of the height a top-level `fill:` child sees
+    — the nav strip owns y in `[0, NAV_BAR_H)`. Default False, so every
+    existing call and every no-nav screen lays out byte-identical."""
     avail_w = display.width if display is not None else None
     avail_h = display.height if display is not None else None
-    _layout_widget(screen.root, x=0, y=0, avail_w=avail_w, avail_h=avail_h)
+    top = NAV_BAR_H if has_nav else 0
+    if has_nav and avail_h is not None:
+        avail_h -= NAV_BAR_H
+    _layout_widget(screen.root, x=0, y=top, avail_w=avail_w, avail_h=avail_h)
     return screen
 
 
@@ -49,13 +67,42 @@ def check_fits_display(screen: Screen, display: DisplayConfig) -> None:
     real panel size to validate against; there's nothing to check
     otherwise. Raises rather than silently clipping — matches the
     parse-time "validate, don't default" rule this pipeline uses
-    elsewhere (architecture.md Stage 1)."""
+    elsewhere (architecture.md Stage 1). Uses the root's `x`/`y` too, so a
+    nav-offset root (y = NAV_BAR_H) is measured to its real bottom."""
     root = screen.root.geometry
-    if root.w > display.width or root.h > display.height:
+    if root.x + root.w > display.width or root.y + root.h > display.height:
         raise ValueError(
-            f"screen {screen.name!r} needs {root.w}x{root.h}, which doesn't fit "
-            f"the declared display size {display.width}x{display.height}"
+            f"screen {screen.name!r} needs {root.x + root.w}x{root.y + root.h}, which "
+            f"doesn't fit the declared display size {display.width}x{display.height}"
         )
+
+
+def build_nav_bar(app: App) -> list[NavTab] | None:
+    """The laid-out tab strip for `app.nav` — equal-width cells across
+    `app.display.width`, `NAV_BAR_H` tall at y=0, the last cell absorbing
+    the width remainder (same rule as `_distribute_fill`). `None` when
+    `app.nav` is unset, or `app.display` is missing (a real project can't
+    reach here — Stage 1 rejects `nav` without `display` — but a
+    hand-built `App` in a unit test can, and a strip with no panel width
+    to lay across just isn't a thing)."""
+    if app.nav is None or app.display is None:
+        return None
+    name_to_idx = {s.name: i for i, s in enumerate(app.screens)}
+    n = len(app.nav)
+    cell_w, remainder = divmod(app.display.width, n)
+    tabs: list[NavTab] = []
+    x = 0
+    for i, target in enumerate(app.nav):
+        w = cell_w + (remainder if i == n - 1 else 0)
+        tabs.append(
+            NavTab(
+                rect=Rect(x=x, y=0, w=w, h=NAV_BAR_H),
+                title=target.title,
+                target_screen_index=name_to_idx[target.screen],
+            )
+        )
+        x += w
+    return tabs
 
 
 def _resolve_leaf_size(widget: Widget) -> tuple[int, int]:
@@ -72,7 +119,15 @@ def _resolve_leaf_size(widget: Widget) -> tuple[int, int]:
 def _header_height(widget: Widget) -> int:
     """`box`'s header strip is normally `BOX_HEADER_H`, but grows to fit
     the tallest `summary` widget if any are taller than that (a box with
-    no `summary` lays out byte-identical to before this existed)."""
+    no `summary` lays out byte-identical to before this existed).
+
+    A box with nothing to show in the strip — not collapsible, no title
+    `text`, no `summary` — gets a zero-height strip: it's a pure grouping
+    container, so reserving (and painting) 16px above its children just
+    ate content area for no visual (2026-09-07). The runtime skips
+    painting a zero-height strip; see draw_box_header."""
+    if not widget.collapsible and not widget.text and not widget.summary:
+        return 0
     if not widget.summary:
         return BOX_HEADER_H
     tallest = max(_resolve_leaf_size(c)[1] for c in widget.summary)

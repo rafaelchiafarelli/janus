@@ -30,7 +30,13 @@
  * `image` widget pulls `blit_image` in (channel_icons task 3). Define it
  * on the command line (`-DJANUS_RENDER_NONBLOCKING`) to force the async
  * path in without the generated header — that's what the runtime's own
- * async test target does. */
+ * async test target does.
+ *
+ * The same generated header also carries JANUS_DISPLAY_BACKGROUND (packed
+ * RGB565) plus JANUS_DISPLAY_PANEL_W/H when app.yaml declared
+ * `display.background` — the only case where panel dimensions reach this
+ * otherwise display-size-agnostic library, used by janus_clear_screen for
+ * a full-panel erase. Absent -> janus_clear_screen stays best-effort. */
 #if defined(__has_include)
 #  if __has_include("janus_render_config.gen.h")
 #    include "janus_render_config.gen.h"
@@ -43,6 +49,7 @@ typedef enum {
     JANUS_WIDGET_CHECKBOX, JANUS_WIDGET_RADIOBUTTON, JANUS_WIDGET_RADIOGROUP,
     JANUS_WIDGET_LED, JANUS_WIDGET_BOX, JANUS_WIDGET_COLUMN, JANUS_WIDGET_ROW,
     JANUS_WIDGET_DIVIDER, JANUS_WIDGET_TOGGLE, JANUS_WIDGET_BADGE, JANUS_WIDGET_SLIDER,
+    JANUS_WIDGET_VU,
 } janus_widget_kind_t;
 
 typedef enum {
@@ -192,11 +199,30 @@ typedef struct {
     const janus_farptr_t *image_far;
 } janus_screen_desc_t;
 
+/* One tab of the app-level nav strip (app.yaml `nav: { kind: tabs }`).
+ * Geometry is baked at generation time — equal-width cells across the
+ * panel, laid out at y=0 in a band `NAV_BAR_H` tall that every screen's
+ * own content sits below (stage2_layout; architecture.md Stage 2).
+ * `title` is flash-resident on AVR, same caveat as janus_widget_desc_t.id
+ * (read it pgm-aware). `target` is the index into janus_app_t.screens
+ * this tab navigates to. The whole `janus_nav_tabs[]` array is
+ * JANUS_PROGMEM. Rendered by draw_nav_bar (nav_tabs epic task 2) — no
+ * runtime code reads this yet as of task 1. */
+typedef struct {
+    janus_rect_t rect;
+    const char *title;
+    int16_t target;
+} janus_nav_tab_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;   /* generated as a JANUS_PROGMEM pointer table on
                                                    * AVR — read via janus_app_get_screen(app, i)
                                                    * below, never a plain array index */
-    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset (no tab bar) */
+    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset. Legacy
+                                       * screen-parallel title lookup — the renderable strip is
+                                       * `nav_tabs` below (nav order + baked geometry). */
+    const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM array in nav order; NULL if app.nav is unset */
+    uint16_t nav_tab_count;          /* 0 if app.nav is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -221,6 +247,12 @@ static inline janus_widget_desc_t janus_widget_load(const janus_widget_desc_t *w
 static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *screen) {
     janus_screen_desc_t out;
     JANUS_MEMCPY_P(&out, screen, sizeof(out));
+    return out;
+}
+
+static inline janus_nav_tab_t janus_nav_tab_load(const janus_nav_tab_t *tab) {
+    janus_nav_tab_t out;
+    JANUS_MEMCPY_P(&out, tab, sizeof(out));
     return out;
 }
 
@@ -249,8 +281,48 @@ const janus_screen_desc_t *janus_app_get_screen(const janus_app_t *app, uint16_t
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
-void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate */
+void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus, then erases the outgoing screen, then renders the new one */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
+
+/* Erases `screen` before the incoming one is drawn.
+ *   - If app.yaml declared `display.background`, janus_render_config.gen.h
+ *     carries JANUS_DISPLAY_BACKGROUND + JANUS_DISPLAY_PANEL_W/H and this
+ *     does a true full-panel fill in that colour (the one place the fixed
+ *     runtime uses panel dimensions).
+ *   - Otherwise it's best-effort: one fill over the union of the screen's
+ *     top-level widget rects (anchored at the origin, so inter-widget
+ *     gaps and ragged edges are covered), in the first top-level widget's
+ *     own bg — the runtime has no canvas colour of its own, so author
+ *     `bg:` on that widget (by convention a full-width status/header bar)
+ *     to control the colour.
+ * janus_switch_screen[_async_start] call this on the outgoing screen;
+ * it's also public for a project that drives screen changes by hand (an
+ * encoder wired straight to a tab bar, say). NULL is a no-op. */
+void janus_clear_screen(const janus_screen_desc_t *screen);
+
+/* Paints the app-level nav strip (app.yaml `nav: { kind: tabs }`) into
+ * its band at the top of the panel — one cell per `app->nav_tabs` entry
+ * (baked geometry), title centered; the cell whose `target` equals
+ * `app->active_screen` gets the active fill + a bottom accent bar. No-op
+ * if the app has no nav (`nav_tabs == NULL`). Repaint-on-change, not
+ * per-frame: janus_switch_screen[_async_start] call it after rendering
+ * the incoming screen, and a scaffold calls it once after the first
+ * janus_render_screen. It is deliberately NOT part of janus_render_screen
+ * (screen-scoped, no `app`), so a periodic janus_render_*_if_dirty sweep
+ * never repaints it. Colours / band height are fixed runtime constants
+ * (nav_tabs epic decision 2). (task 2.) */
+void janus_render_nav_bar(const janus_app_t *app);
+
+/* Switch to the tab one cell after / before (nav order, wrapping) the one
+ * currently showing `app->active_screen` — a full janus_switch_screen
+ * under the hood (erases the old screen, renders the new one, repaints
+ * the strip). For a project with a control to spare for tab-cycling
+ * (ArduinoIHM's second encoder, say); the single-control scaffolds reach
+ * the tabs through focus instead. No-op if the app has no nav. Focus on
+ * the new screen is the caller's to re-establish, same as
+ * janus_switch_screen. (nav_tabs epic task 3.) */
+void janus_nav_next(janus_app_t *app);
+void janus_nav_prev(janus_app_t *app);
 
 /* Renders exactly one widget (added 2026-09-05) — and, for a `box`, its
  * always-visible `summary` plus its `children` if currently expanded,
@@ -277,12 +349,14 @@ void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_st
  * Firmware sets a field's bit (e.g. `pwm_dirty.ch0_frequency = true`)
  * whenever it writes a new value into the matching `bound_struct` field
  * — nothing here does value comparison, it only trusts what firmware
- * reports changed. Unbound (static) leaves and containers always draw
- * regardless (nothing ever marks them dirty, and they're cheap/one-shot
- * by nature) — this is purely about skipping *unchanged bound data* on a
- * repeated sweep, e.g. a header redrawn on a timer. `janus_toggle_box`/
- * `janus_set_focus` are unaffected — collapse/focus state changing is
- * its own reason to redraw regardless of any field's dirty bit. */
+ * reports changed. Containers always recurse; an *unbound* (static) leaf
+ * is skipped on a dirty sweep (added 2026-09-07) — its pixels never
+ * change after the first full janus_render_screen, so repainting it every
+ * tick only made a timer-refreshed header/status bar flicker its own
+ * unchanging text. `janus_toggle_box`/`janus_set_focus` are unaffected —
+ * collapse/focus state changing is its own reason to redraw regardless of
+ * any field's dirty bit, and both use the force-draw (NULL bound_dirty)
+ * path where every leaf still draws. */
 void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void *bound_struct, void *bound_dirty);
 void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
 
@@ -326,5 +400,17 @@ bool janus_box_is_expanded(const janus_widget_desc_t *box);
  * stale pointer from the old screen's tree is never redrawn. */
 void janus_set_focus(const janus_widget_desc_t *widget);
 const janus_widget_desc_t *janus_get_focus(void);
+
+/* nav_tabs epic task 4: the nav strip's own focus ring — a sibling to
+ * janus_set_focus/janus_get_focus for the one case that isn't a
+ * janus_widget_desc_t (the strip has no widget descriptor of its own).
+ * `index` is which `app->nav_tabs` cell is previewed (the tab a
+ * rotation/NEXT-PREV would commit to on activate, not yet
+ * `app->active_screen` until then); -1 clears it. janus_input_focus.c is
+ * the only caller — it owns deciding *when* the nav strip is focused,
+ * this only draws the result, same "runtime draws, input resolves" split
+ * as janus_set_focus. No-op if the app has no nav. */
+void janus_set_nav_focus(const janus_app_t *app, int16_t index);
+int16_t janus_get_nav_focus(void);
 
 #endif /* JANUS_RUNTIME_H */

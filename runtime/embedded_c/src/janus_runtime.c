@@ -389,15 +389,41 @@ static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph,
     draw_area_sync((uint16_t)x, (uint16_t)y, (uint16_t)scaled_w, (uint16_t)scaled_h, g_tile_buffer);
 }
 
-/* Draws `text` left-aligned, vertically centered in `rect`, in `fg` over a
- * `bg` that must match whatever solid fill the caller already painted
- * `rect` with (unlit glyph pixels reuse it, so the glyph blends into that
- * backdrop instead of punching a mismatched hole in it). No-op if `text`
- * is NULL (unbound widgets keep rendering as a plain solid fill).
- * Clips, never wraps or shrinks the font, once a character would run
- * past `rect`'s right edge — Janus never auto-sizes text at generation
- * time (Janus.md's deferred auto-sizing note), so overflow here is a
- * real, expected v1 case, not a bug to fix in this runtime.
+/* Width in px of `text`'s drawable run at `glyph_w` + `scale` inter-glyph
+ * spacing (no trailing gap). from_flash picks the read idiom, same as
+ * draw_string's own loop. */
+static int32_t text_run_px(const char *text, bool from_flash, int16_t glyph_w, uint8_t scale) {
+    int32_t n = 0;
+    for (const char *p = text; ; p++) {
+        char c = from_flash ? (char)JANUS_PGM_READ_U8(p) : *p;
+        if (c == '\0') break;
+        n += glyph_w + scale;
+    }
+    if (n > 0) n -= scale;
+    return n;
+}
+
+/* Draws `text` vertically centered in `rect`, in `fg` over a `bg` that
+ * must match whatever solid fill the caller already painted `rect` with
+ * (unlit glyph pixels reuse it, so the glyph blends into that backdrop
+ * instead of punching a mismatched hole in it). No-op if `text` is NULL
+ * (unbound widgets keep rendering as a plain solid fill).
+ *
+ * Horizontally left-aligned (1px indent) unless `center` is set, in which
+ * case the run is centered in `rect.w` — buttons pass `center` so a short
+ * label (a nav tab like "PWM") sits centered instead of floating against
+ * the left edge (2026-09-07).
+ *
+ * When `allow_shrink` is set, auto-shrinks to fit `rect.w`: if the run
+ * overflows it steps the font down — `font_scale` toward 1 first, then
+ * `large` -> `medium` — and only clips once it's already at `medium`/
+ * scale 1. Render-time fit only; Stage 2 geometry is unchanged (still
+ * computed from the authored font_size — Janus.md's deferred auto-sizing
+ * note still holds for layout), so a shrunk label just stops spilling out
+ * of its box. label/header pass `allow_shrink`; button does NOT — a row
+ * of buttons (a tab bar) must stay one consistent size, so an over-long
+ * button label clips rather than silently rendering smaller than its
+ * neighbours (2026-09-07 round 2).
  *
  * `from_flash` distinguishes the two possible sources of `text`: a
  * widget's authored `static_text` (generated, JANUS_PROGMEM on AVR — pass
@@ -415,12 +441,27 @@ static void draw_glyph(int16_t x, int16_t y, const uint8_t *glyph,
  * initialized `.font_scale` — see janus_font.h), so it protects its own
  * buffer regardless. */
 static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16_t bg, bool from_flash,
-                         janus_font_size_t font_size, uint8_t scale) {
+                         janus_font_size_t font_size, uint8_t scale, bool center, bool allow_shrink) {
     if (text == NULL) return;
     if (scale < 1) scale = 1;
 
     janus_font_metrics_t m = font_metrics(font_size);
     while (scale > 1 && (int32_t)(m.w * scale) * (m.h * scale) > JANUS_TILE_BUFFER_PIXELS) scale--;
+
+    /* shrink one step at a time until the run fits rect.w (scale first,
+     * then large -> medium); stop at medium/scale 1 and let the loop
+     * below clip, same as before this existed. `rect.w - 1` accounts for
+     * the 1px left pad the draw loop starts every string with. */
+    while (allow_shrink && text_run_px(text, from_flash, (int16_t)(m.w * scale), scale) > rect.w - 1) {
+        if (scale > 1) {
+            scale--;
+        } else if (font_size != JANUS_FONT_SIZE_MEDIUM) {
+            font_size = JANUS_FONT_SIZE_MEDIUM;
+            m = font_metrics(font_size);
+        } else {
+            break;
+        }
+    }
 
     int16_t glyph_w = (int16_t)(m.w * scale);
     int16_t glyph_h = (int16_t)(m.h * scale);
@@ -428,6 +469,10 @@ static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16
     int16_t y = (int16_t)(rect.y + (rect.h - glyph_h) / 2);
     if (y < rect.y) y = rect.y;
     int16_t x = (int16_t)(rect.x + 1);
+    if (center) {
+        int16_t cx = (int16_t)(rect.x + (rect.w - (int16_t)text_run_px(text, from_flash, glyph_w, scale)) / 2);
+        if (cx > x) x = cx;
+    }
     int16_t right = (int16_t)(rect.x + rect.w);
 
     for (const char *p = text; ; p++) {
@@ -448,23 +493,52 @@ static void draw_string(janus_rect_t rect, const char *text, uint16_t fg, uint16
  * deliberately not authorable per-widget — it's a Janus-owned UI
  * affordance, not widget content.
  */
-#define JANUS_COLOR_FOCUS_RING ((uint16_t)0x07ff)  /* cyan */
+#define JANUS_COLOR_FOCUS_RING  ((uint16_t)0x07ff)  /* cyan */
+#define JANUS_COLOR_FOCUS_SHADE ((uint16_t)0x0208)  /* darker cyan — the ring's shade edge */
+#define JANUS_FOCUS_RING_W 6                         /* ring thickness, px */
 
 /* Only button and box are ever focusable (Stage 3b's _assign_focus_order
  * — everything else keeps JANUS_FOCUS_NONE), so this is the one piece of
  * mutable focus state the whole module needs; draw_button/draw_box_header
  * below just compare their own pointer against it. */
 static const janus_widget_desc_t *g_focused_widget = NULL;
+/* nav_tabs epic task 4 sibling to g_focused_widget: which app->nav_tabs
+ * cell is previewed while the nav strip itself holds focus (-1 when it
+ * doesn't). Never both this and g_focused_widget hold a "live" value at
+ * once — janus_input_focus.c always clears one before setting the other. */
+static int16_t g_focused_nav_index = -1;
 
+/* A JANUS_FOCUS_RING_W-thick ring inset along the widget's own edges,
+ * drawn as `t` concentric 1px rectangles: the outermost is a darker
+ * "shade" so the ring reads as a raised frame rather than a flat line,
+ * the rest the bright ring colour. Drawn inside the rect (not outside it)
+ * on purpose — janus_set_focus clears an old ring by repainting the
+ * previously focused widget's own rect, which only covers pixels within
+ * that rect. `t` is clamped so a small widget still gets a ring instead
+ * of overlapping spans. Redrawn over whatever the widget's own
+ * draw_<kind>() already painted; the ring does cover its outermost few px
+ * of content while focused — a deliberate trade for a legible 4px marker
+ * (see Janus.md). */
 static void draw_focus_ring(janus_rect_t r) {
-    janus_rect_t top    = { r.x, r.y, r.w, 1 };
-    janus_rect_t bottom = { r.x, (int16_t)(r.y + r.h - 1), r.w, 1 };
-    janus_rect_t left   = { r.x, r.y, 1, r.h };
-    janus_rect_t right  = { (int16_t)(r.x + r.w - 1), r.y, 1, r.h };
-    fill_rect(top, JANUS_COLOR_FOCUS_RING);
-    fill_rect(bottom, JANUS_COLOR_FOCUS_RING);
-    fill_rect(left, JANUS_COLOR_FOCUS_RING);
-    fill_rect(right, JANUS_COLOR_FOCUS_RING);
+    if (r.w <= 0 || r.h <= 0) return;
+    int16_t t = JANUS_FOCUS_RING_W;
+    if (2 * t > r.w) t = (int16_t)(r.w / 2);
+    if (2 * t > r.h) t = (int16_t)(r.h / 2);
+    if (t <= 0) return;
+
+    for (int16_t i = 0; i < t; i++) {
+        uint16_t c = (i == 0) ? JANUS_COLOR_FOCUS_SHADE : JANUS_COLOR_FOCUS_RING;
+        int16_t inner_w = (int16_t)(r.w - 2 * i);
+        int16_t inner_h = (int16_t)(r.h - 2 * i);
+        janus_rect_t top    = { (int16_t)(r.x + i), (int16_t)(r.y + i), inner_w, 1 };
+        janus_rect_t bottom = { (int16_t)(r.x + i), (int16_t)(r.y + r.h - 1 - i), inner_w, 1 };
+        janus_rect_t left   = { (int16_t)(r.x + i), (int16_t)(r.y + i), 1, inner_h };
+        janus_rect_t right  = { (int16_t)(r.x + r.w - 1 - i), (int16_t)(r.y + i), 1, inner_h };
+        fill_rect(top, c);
+        fill_rect(bottom, c);
+        fill_rect(left, c);
+        fill_rect(right, c);
+    }
 }
 
 /* ------------------------------------------------------------ box state --
@@ -542,13 +616,13 @@ static void draw_text_leaf(const janus_widget_desc_t *w, const void *bound_struc
     if (lw.text_is_format && lw.static_text != NULL) {
         char buf[JANUS_FORMAT_BUF];
         janus_format_into(buf, sizeof buf, lw.static_text, &lw.bind, bound_struct);
-        draw_string(lw.geometry, buf, lw.color, lw.bg_color, false, lw.font_size, lw.font_scale);
+        draw_string(lw.geometry, buf, lw.color, lw.bg_color, false, lw.font_size, lw.font_scale, false, true);
         return;
     }
 
     bool from_flash = lw.static_text != NULL;
     const char *text = from_flash ? lw.static_text : janus_read_bound_string(&lw.bind, bound_struct);
-    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale);
+    draw_string(lw.geometry, text, lw.color, lw.bg_color, from_flash, lw.font_size, lw.font_scale, false, true);
 }
 static void draw_label(const janus_widget_desc_t *w, const void *bound_struct) {
     draw_text_leaf(w, bound_struct);
@@ -559,7 +633,7 @@ static void draw_header(const janus_widget_desc_t *w, const void *bound_struct) 
 static void draw_button(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
-    draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale);
+    draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale, true, false);
     if (w == g_focused_widget) draw_focus_ring(lw.geometry);
 }
 /* "missing texture" magenta — a `file:` was authored on an image widget
@@ -731,6 +805,55 @@ static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) 
     fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
 }
 
+/* vu: analog needle over a 90 degree tick arc. The bound value maps
+ * range.min..max to a needle angle of -45..+45 degrees from straight up
+ * (0 deg), pivoting from a hub at the bottom-centre of the geometry.
+ * Angle convention: `janus_sin16`/`janus_cos16` treat +deg as clockwise
+ * from vertical, so the endpoint of a ray of length L at angle `deg` is
+ * `(hub_x + L*sin16(deg), hub_y - L*cos16(deg))` — the `-cos` accounts
+ * for screen-y-down. Face + 5 fixed tick marks + needle + hub, all
+ * decomposed to `fill_rect` (draw_line plots 1x1 spans), so the async
+ * path captures it with no new op kind (ui_widgets/vu_meter task 2). */
+static int16_t vu_ray_x(int16_t hub_x, int16_t len, int16_t deg) {
+    return (int16_t)(hub_x + (((int32_t)len * janus_sin16(deg)) >> 15));
+}
+static int16_t vu_ray_y(int16_t hub_y, int16_t len, int16_t deg) {
+    return (int16_t)(hub_y - (((int32_t)len * janus_cos16(deg)) >> 15));
+}
+
+static void draw_vu(const janus_widget_desc_t *w, const void *bound_struct) {
+    janus_widget_desc_t lw = janus_widget_load(w);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
+    double span = (double)lw.bind.range_max - (double)lw.bind.range_min;
+    double fraction = span != 0.0 ? (value - lw.bind.range_min) / span : 0.0;
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+
+    janus_rect_t r = lw.geometry;
+    fill_rect(r, lw.bg_color);
+
+    int16_t hub_x = (int16_t)(r.x + r.w / 2);
+    int16_t hub_y = (int16_t)(r.y + r.h - 1);
+    int16_t half_w = (int16_t)(r.w / 2);
+    int16_t len = (int16_t)((r.h < half_w ? r.h : half_w) - 2);
+    if (len < 1) len = 1;
+    int16_t tick_len = (int16_t)((len * 9) / 10);
+    int16_t needle_deg = (int16_t)(-45 + (int16_t)(fraction * 90));
+
+    for (int i = 0; i < 5; i++) {
+        int16_t deg = (int16_t)(-45 + i * 22);
+        janus_draw_line(vu_ray_x(hub_x, tick_len, deg), vu_ray_y(hub_y, tick_len, deg),
+                        vu_ray_x(hub_x, len, deg), vu_ray_y(hub_y, len, deg), lw.color);
+    }
+
+    janus_draw_line(hub_x, hub_y, vu_ray_x(hub_x, len, needle_deg),
+                    vu_ray_y(hub_y, len, needle_deg), lw.color);
+
+    int16_t hub_r = (int16_t)(len / 10);
+    if (hub_r < 2) hub_r = 2;
+    janus_fill_circle(hub_x, hub_y, hub_r, lw.color);
+}
+
 /* forward declaration: draw_box_header (below) renders `summary_children`
  * via render_widget, and render_widget's JANUS_WIDGET_BOX case calls
  * draw_box_header — genuine mutual recursion, one of the two needs a
@@ -746,11 +869,22 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
 /* Checks (and, if set, clears) whether `bind`'s own field is marked dirty
  * in `bound_dirty` — same offsetof-into-a-generated-struct mechanism
  * janus_read_bound_value already uses for the *value* struct, just a bool
- * instead. Always "yes, draw" for an unbound widget or a NULL
- * bound_dirty (the force-draw case) — nothing to check against, so the
- * safe default is to draw. */
+ * instead.
+ *
+ * NULL bound_dirty is the force-draw path (janus_render_screen /
+ * janus_render_widget) — always "yes, draw".
+ *
+ * With a real bound_dirty (a dirty-aware sweep), an *unbound* leaf
+ * (JANUS_FIELD_NONE) is "no, skip": its pixels are static, so once the
+ * first full janus_render_screen has painted it there is nothing for a
+ * repeated sweep to repaint. This is what keeps a persistent header /
+ * status bar redrawn on a timer via janus_render_*_if_dirty from
+ * flickering its unchanging label text every tick (found on ArduinoIHM
+ * hardware, 2026-09-07). A bound leaf still draws only when its field's
+ * bit is set. */
 static bool bind_consume_dirty(const janus_bind_t *bind, void *bound_dirty) {
-    if (bound_dirty == NULL || bind->field_type == JANUS_FIELD_NONE) return true;
+    if (bound_dirty == NULL) return true;
+    if (bind->field_type == JANUS_FIELD_NONE) return false;
     bool *flag = (bool *)((uint8_t *)bound_dirty + bind->dirty_offset);
     if (!*flag) return false;
     *flag = false;
@@ -766,15 +900,26 @@ static bool bind_consume_dirty(const janus_bind_t *bind, void *bound_dirty) {
  * individual summary_children below are dirty-checked. */
 static void draw_box_header(const janus_widget_desc_t *box, const void *bound_struct, void *bound_dirty) {
     janus_widget_desc_t lb = janus_widget_load(box);
-    fill_rect(lb.geometry_collapsed, lb.bg_color);
-    draw_string(lb.geometry_collapsed, lb.static_text, lb.color, lb.bg_color, true, lb.font_size, lb.font_scale);
-    /* summary widgets always render here, collapsed or expanded — unlike
-     * lb.children, which only render when the box is actually expanded
-     * (see the JANUS_WIDGET_BOX case below / janus_toggle_box). */
-    for (uint16_t i = 0; i < lb.summary_child_count; i++) {
-        render_widget(&lb.summary_children[i], bound_struct, bound_dirty);
+    /* A box with nothing to put in a header strip (not collapsible, no
+     * title text, no summary) is laid out with a zero-height
+     * geometry_collapsed (stage2_layout) so it doesn't carve 16px off its
+     * own content area. Nothing to paint then — but it can still be the
+     * focused widget, so the ring goes around its full body instead. */
+    bool has_strip = lb.geometry_collapsed.h > 0;
+    if (has_strip) {
+        fill_rect(lb.geometry_collapsed, lb.bg_color);
+        draw_string(lb.geometry_collapsed, lb.static_text, lb.color, lb.bg_color, true,
+                    lb.font_size, lb.font_scale, false, true);
+        /* summary widgets always render here, collapsed or expanded — unlike
+         * lb.children, which only render when the box is actually expanded
+         * (see the JANUS_WIDGET_BOX case below / janus_toggle_box). */
+        for (uint16_t i = 0; i < lb.summary_child_count; i++) {
+            render_widget(&lb.summary_children[i], bound_struct, bound_dirty);
+        }
     }
-    if (box == g_focused_widget) draw_focus_ring(lb.geometry_collapsed);
+    if (box == g_focused_widget) {
+        draw_focus_ring(has_strip ? lb.geometry_collapsed : lb.geometry);
+    }
 }
 
 /* ---------------------------------------------------------- traversal --
@@ -790,7 +935,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_IMAGE: case JANUS_WIDGET_RADIOBUTTON: case JANUS_WIDGET_PROGRESS:
         case JANUS_WIDGET_GAUGE: case JANUS_WIDGET_CHECKBOX: case JANUS_WIDGET_LED:
         case JANUS_WIDGET_DIVIDER: case JANUS_WIDGET_TOGGLE: case JANUS_WIDGET_BADGE:
-        case JANUS_WIDGET_SLIDER:
+        case JANUS_WIDGET_SLIDER: case JANUS_WIDGET_VU:
             if (!bind_consume_dirty(&lw.bind, bound_dirty)) return;
             break;
         default:
@@ -811,6 +956,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_TOGGLE: draw_toggle(w, bound_struct); return;
         case JANUS_WIDGET_BADGE: draw_badge(w, bound_struct); return;
         case JANUS_WIDGET_SLIDER: draw_slider(w, bound_struct); return;
+        case JANUS_WIDGET_VU: draw_vu(w, bound_struct); return;
 
         case JANUS_WIDGET_BOX:
             draw_box_header(w, bound_struct, bound_dirty);
@@ -872,6 +1018,103 @@ void janus_render_screen_if_dirty(const janus_screen_desc_t *screen) {
     }
 }
 
+/* Erases `screen` by repainting each of its top-level widgets' own rects
+ * with that widget's background colour. The fixed runtime has no panel
+ * dimensions and no notion of a canvas colour (janus_runtime.h's
+ * display-size-agnostic note), so "clear the screen" is expressed as
+ * "repaint what this screen covers" rather than a panel-wide fill — which
+ * is exactly the region that would otherwise show through as stale pixels
+ * from a previous screen. janus_switch_screen calls this on the outgoing
+ * screen; it's also public for a project that changes screens by hand
+ * (e.g. an encoder driving a tab bar directly). */
+void janus_clear_screen(const janus_screen_desc_t *screen) {
+    if (screen == NULL) return;
+
+#if defined(JANUS_DISPLAY_BACKGROUND) && defined(JANUS_DISPLAY_PANEL_W) && defined(JANUS_DISPLAY_PANEL_H)
+    /* app.yaml declared `display.background` — janus_render_config.gen.h
+     * then also carries the panel size, so a true full-panel erase in the
+     * authored canvas colour is possible (the only path where the fixed
+     * runtime uses panel dimensions). */
+    (void)screen;
+    janus_rect_t panel = { 0, 0, JANUS_DISPLAY_PANEL_W, JANUS_DISPLAY_PANEL_H };
+    fill_rect(panel, (uint16_t)JANUS_DISPLAY_BACKGROUND);
+    return;
+#else
+    janus_screen_desc_t ls = janus_screen_load(screen);
+    if (ls.widget_count == 0) return;
+
+    /* No declared canvas colour: best-effort. One fill over the union of
+     * every top-level widget's rect, anchored
+     * at the origin — so it also covers the GAP between widgets and any
+     * ragged right/bottom edge that a per-widget fill would leave showing
+     * the previous screen. The colour is the first top-level widget's own
+     * bg: the fixed runtime has no canvas/background colour of its own
+     * (see janus_runtime.h), so a project that needs a specific erase
+     * colour authors `bg:` on that widget — by convention a full-width
+     * status/header bar. Still best-effort: if the screen's widgets don't
+     * reach the panel edges, pixels beyond them aren't ours to clear. */
+    int16_t max_x = 0, max_y = 0;
+    uint16_t erase_colour = 0;
+    for (uint16_t i = 0; i < ls.widget_count; i++) {
+        janus_widget_desc_t lw = janus_widget_load(&ls.widgets[i]);
+        if (i == 0) erase_colour = lw.bg_color;
+        int16_t rx = (int16_t)(lw.geometry.x + lw.geometry.w);
+        int16_t ry = (int16_t)(lw.geometry.y + lw.geometry.h);
+        if (rx > max_x) max_x = rx;
+        if (ry > max_y) max_y = ry;
+    }
+    janus_rect_t all = { 0, 0, max_x, max_y };
+    fill_rect(all, erase_colour);
+#endif  /* JANUS_DISPLAY_BACKGROUND && panel size */
+}
+
+/* ------------------------------------------------------------ nav strip --
+ * app.yaml `nav: { kind: tabs }`. Geometry is baked (janus_nav_tab_t per
+ * cell, equal widths across the panel — stage2_layout); this just paints
+ * it. Fixed colours / accent height, deliberately not authorable
+ * (nav_tabs epic decision 2) — same "Janus-owned UI affordance" spirit as
+ * JANUS_COLOR_FOCUS_RING. Labels render at `medium` centered (a nav band
+ * is short and wide) and DON'T auto-shrink — every tab must read at the
+ * same size, so an over-long one clips (author fewer/shorter titles). */
+#define JANUS_COLOR_NAV_BG         ((uint16_t)0x18e3)  /* inactive cell — dark grey */
+#define JANUS_COLOR_NAV_BG_ACTIVE  ((uint16_t)0x39e7)  /* active cell — lighter grey */
+#define JANUS_COLOR_NAV_INK        ((uint16_t)0xad55)  /* inactive label — mid grey */
+#define JANUS_COLOR_NAV_INK_ACTIVE ((uint16_t)0xffff)  /* active label — white */
+#define JANUS_COLOR_NAV_ACCENT     ((uint16_t)0x07ff)  /* active underline — cyan (focus-ring family) */
+#define JANUS_NAV_ACCENT_H 6
+
+static void draw_nav_bar(const janus_app_t *app) {
+    if (app == NULL || app->nav_tabs == NULL) return;
+    for (uint16_t i = 0; i < app->nav_tab_count; i++) {
+        janus_nav_tab_t tab = janus_nav_tab_load(&app->nav_tabs[i]);
+        bool active = (tab.target == (int16_t)app->active_screen);
+        uint16_t bg = active ? JANUS_COLOR_NAV_BG_ACTIVE : JANUS_COLOR_NAV_BG;
+
+        fill_rect(tab.rect, bg);
+        draw_string(tab.rect, tab.title,
+                    active ? JANUS_COLOR_NAV_INK_ACTIVE : JANUS_COLOR_NAV_INK, bg,
+                    /*from_flash=*/true, JANUS_FONT_SIZE_MEDIUM, 1,
+                    /*center=*/true, /*allow_shrink=*/false);
+
+        int16_t h = active ? (int16_t)JANUS_NAV_ACCENT_H : (int16_t)1;
+        janus_rect_t under = { tab.rect.x, (int16_t)(tab.rect.y + tab.rect.h - h), tab.rect.w, h };
+        fill_rect(under, active ? JANUS_COLOR_NAV_ACCENT : JANUS_COLOR_NAV_INK);
+
+        /* Focus ring on the previewed cell (nav_tabs epic task 4) — same
+         * self-check-against-the-mutable-global pattern draw_button /
+         * draw_box_header use for g_focused_widget, so the ring survives
+         * whatever triggered this repaint rather than needing its own
+         * separate draw call. Independent of `active`: the previewed tab
+         * and the currently active screen's tab are different cells until
+         * janus_focus_activate commits. */
+        if ((int16_t)i == g_focused_nav_index) draw_focus_ring(tab.rect);
+    }
+}
+
+void janus_render_nav_bar(const janus_app_t *app) {
+    draw_nav_bar(app);
+}
+
 void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     if (screen_index >= app->screen_count) return;
     /* Clear focus *before* switching — g_focused_widget would otherwise
@@ -881,9 +1124,38 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
      * encoder/button navigation re-establish focus on the new screen
      * with janus_focus_move(new_screen, 0) right after this. */
     janus_set_focus(NULL);
+    /* Erase the outgoing screen so its widgets don't survive in areas the
+     * incoming screen's own widgets never paint over (2026-09-07 — was a
+     * per-project tft.fillScreen() workaround on ArduinoIHM). */
+    janus_clear_screen(janus_app_get_screen(app, app->active_screen));
     app->active_screen = screen_index;
     janus_render_screen(janus_app_get_screen(app, screen_index));
+    draw_nav_bar(app);   /* strip lives in its own band above the screen; repaint the active tab */
 }
+
+/* Switch to the tab `dir` cells away (nav order, wrapping) from whichever
+ * one currently points at `active_screen`. Public entry for a project
+ * that has a control to spare for tab-cycling (e.g. ArduinoIHM's second
+ * encoder) — the single-control scaffolds reach the tabs through focus
+ * instead (nav_tabs epic task 4). No-op without nav. Leaves focus
+ * re-establishment on the new screen to the caller, same as
+ * janus_switch_screen. */
+static void nav_step(janus_app_t *app, int16_t dir) {
+    if (app == NULL || app->nav_tabs == NULL || app->nav_tab_count == 0) return;
+    uint16_t cur = 0;
+    for (uint16_t i = 0; i < app->nav_tab_count; i++) {
+        if (janus_nav_tab_load(&app->nav_tabs[i]).target == (int16_t)app->active_screen) {
+            cur = i;
+            break;
+        }
+    }
+    int32_t n = app->nav_tab_count;
+    int32_t nxt = (((int32_t)cur + dir) % n + n) % n;
+    janus_switch_screen(app, (uint16_t)janus_nav_tab_load(&app->nav_tabs[nxt]).target);
+}
+
+void janus_nav_next(janus_app_t *app) { nav_step(app, 1); }
+void janus_nav_prev(janus_app_t *app) { nav_step(app, -1); }
 
 #if defined(JANUS_RENDER_NONBLOCKING)
 void janus_render_screen_async_start(const janus_screen_desc_t *screen) {
@@ -934,7 +1206,9 @@ bool janus_render_poll(void) {
 void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index) {
     if (screen_index >= app->screen_count) return;
     janus_set_focus(NULL);   /* same reasoning as janus_switch_screen */
+    janus_clear_screen(janus_app_get_screen(app, app->active_screen));  /* erase outgoing (synchronous, one-shot) */
     app->active_screen = screen_index;
+    draw_nav_bar(app);   /* synchronous, one-shot — like the clear above; the screen render below is the async part */
     janus_render_screen_async_start(janus_app_get_screen(app, screen_index));
 }
 #endif  /* JANUS_RENDER_NONBLOCKING */
@@ -951,6 +1225,17 @@ void janus_set_focus(const janus_widget_desc_t *widget) {
 
 const janus_widget_desc_t *janus_get_focus(void) {
     return g_focused_widget;
+}
+
+void janus_set_nav_focus(const janus_app_t *app, int16_t index) {
+    if (app == NULL || app->nav_tabs == NULL) return;
+    if (g_focused_nav_index == index) return;
+    g_focused_nav_index = index;
+    draw_nav_bar(app);   /* repaints every cell — clears the old ring and/or paints the new one */
+}
+
+int16_t janus_get_nav_focus(void) {
+    return g_focused_nav_index;
 }
 
 void janus_toggle_box(const janus_widget_desc_t *box) {

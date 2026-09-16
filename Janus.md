@@ -287,7 +287,7 @@ Original scoping, for the record:
     needs explicit size") turned out to contradict every worked example in
     this doc, which never bothered sizing a `label`/`header`/`button`/
     `checkbox`/`radiobutton` but always sized `progress`/`gauge`/`image`/
-    `led`. `progress`, `gauge`, `image`, `led`, `badge`, `slider`
+    `led`. `progress`, `gauge`, `image`, `led`, `badge`, `slider`, `vu`
     **require** explicit `size` — their dimensions are a real design
     choice Janus can't guess. `label`, `header`, `button`, `checkbox`,
     `radiobutton`, `divider`, `toggle` get a fixed v1 placeholder default
@@ -319,6 +319,37 @@ Original scoping, for the record:
     runtime check, neither of which a pruned node has). A whole screen
     can't be `hidden` — drop it from `app.yaml` instead.
 
+    **How to use — an enabled/disabled icon pair in one slot:** author
+    both variants at the same position with only one `hidden: false`
+    (the other `true`), then flip which is hidden and regenerate when the
+    authored state changes — there is no on-device toggle in v1:
+
+    ```yaml
+    - kind: row
+      children:
+        - kind: image
+          id: ch0_icon_on
+          file: "assets/variable_single.png"
+          size: { w: 64, h: 64 }
+          hidden: false
+        - kind: image
+          id: ch0_icon_off
+          file: "assets/variable_single_disabled.png"
+          size: { w: 64, h: 64 }
+          hidden: true
+    ```
+
+    Only the surviving (non-hidden) widget reaches layout/emit — the
+    hidden one costs nothing (no geometry, no baked pixel array, no
+    harpia field). This is also the pattern that lets a heavy `image`
+    widget's baked RGB565 array live anywhere in flash: it's emitted
+    into its own `.janus_img` section (not near `PROGMEM`) and reached
+    through a generated `resolve_images()` + `image_slot` index, both
+    fully automatic — nothing to author beyond `file:`/`size` on the
+    `image` widget itself (see the `image` row in the widget catalog
+    above and `architecture.md` Stage 3b "Near-flash budget" / "Far-flash
+    addressing" for the mechanism).
+
 ## v1 widget catalog
 
 Containers (structural, no harpia output):
@@ -338,15 +369,16 @@ Leaves:
 | `header` | same as `label` | same bind/format shape as `label`, section-title render |
 | `button` | unbound | `on_press: <action name>` and/or `navigate: <screen name>` (see nav + action-dispatch sections below) |
 | `image` | static `file: <path>` (an image file); `size` **required** | `file:` is a real PNG/BMP/JPEG/GIF/TIFF/WebP/… on disk, resolved relative to the screen `.yaml`. Decoded, alpha-composited over black (alpha isn't otherwise supported), rescaled to `size`, and baked as an RGB565 array at generation time — the device never decodes anything. The array is emitted `JANUS_IMG_SECTION` (its own `.janus_img` flash section, linked after `.text` — *not* `JANUS_PROGMEM`), so heavy image data can't push the near-read font / descriptor / string tables past AVR's 64 KiB window (`architecture.md` Stage 3b "Near-flash budget"). The descriptor carries a 1-based `image_slot`, not a pointer: baked arrays can link past AVR's 64 KiB near-flash window and a far address isn't a static-initializer constant, so each screen emits a `resolve_images()` that fills a small RAM `image_far[]` table the runtime indexes (see `architecture.md` Stage 3b "Far-flash addressing"). A single baked array can't exceed ~128×128 (avr-gcc's 32 KiB per-object limit; `image_asset` warns past that). A missing/unsupported/undecodable `file:` is logged (non-fatal) and the widget renders as a magenta placeholder rect. No `file:` → a solid `color` fill (v1 stub). (`string` asset-key binding is still just the dormant `asset:` field — not wired.) |
-| `progress` | numeric + `range: {min, max}` | linear bar |
-| `gauge` | numeric + `range: {min, max}` | arc/dial; identical bind shape to `progress`, different render only |
+| `progress` | numeric + `range: {min, max}` | a real bar (added 2026-09-14): recessed rounded track (`bg_color`), a rounded proportional fill (`color`) sized from `(value - min) / (max - min)`, and a 1px lightened gloss shade along the top of the filled region only |
+| `gauge` | numeric + `range: {min, max}` | identical bind shape *and* identical bar render to `progress` (as of 2026-09-14 — no longer a distinct arc/dial; a real radial gauge is a future, separate kind if ever needed) — the two kinds are today only distinct in name |
 | `checkbox` | `int` (0/nonzero convention) | bound per-widget. **harpia has no `bool` type** (confirmed against `LexicalAnalizer/LexicalAnalyzer.py` — only `int`/`int64`/`float`/`string`/`map`), so this is a deliberate mapping, not an oversight |
 | `radiobutton` | static `value` only | bind lives on the parent `radiogroup` |
-| `led` | `int` (state index) | display-only, not interactive; optional static `states: [off, on, warn, ...]` maps int→color, same spirit as `progress`'s `range` |
+| `led` | `int` (state index) | display-only, not interactive; state selects a colour (`state <= 0` → `bg_color`, `== 1` → `color`, `>= 2` → a fixed amber warn colour) — optional static `states: [off, on, warn, ...]` names are cosmetic only, same spirit as `progress`'s `range`. Renders as a shaded disc (added 2026-09-14): a darkened rim ring, the state-colour face, and a small lightened specular highlight toward the top-left — including the `off` state, so it reads as a switched-off lamp rather than an invisible blob. No authorable rim/highlight colour yet (derived from `color`/`bg_color`). |
 | `divider` | unbound | purely decorative — a thin rule/spacer; no runtime state, no draw content beyond a fixed fill |
-| `toggle` | `int` (0/nonzero convention) | identical bind shape to `checkbox` — a switch-styled render of the same on/off value |
+| `toggle` | `int` (0/nonzero convention) | identical bind shape to `checkbox`. Renders as a real switch (added 2026-09-14): a rounded pill track (`color` when on, `bg_color` when off) with a circular knob that sits left when off / right when on; the knob colour is a fixed lightened tint of the track, not separately authorable. `checkbox`/`badge` keep their older flat-fill render — only `toggle` changed. |
 | `badge` | `int` (0/nonzero convention) | a small on/off status dot — same bind shape as `checkbox`/`toggle`, distinct fill so it reads as its own kind |
 | `slider` | numeric + `range: {min, max}` | identical bind shape to `progress`/`gauge` — display-only in v1 (shows a live value; doesn't write back). An interactive, write-back slider is a separate, larger future increment, not this kind |
+| `vu` | numeric + `range: {min, max}`; `size` **required** | analog needle over a 90° tick arc (added 2026-09-15): the bound value maps `range.min..max` to a needle angle of -45°..+45° from straight up, pivoting from a hub at the bottom-centre of the geometry; 5 fixed tick marks along the arc in `color`, face fill in `bg_color`. Colour zones, peak-hold, and damping are all future increments, not v1 — pair it with a `label_format` label for a numeric readout. |
 
 **Color (added 2026-08-22).** Every kind above also takes two optional
 fields, `color` and `bg`, hex `"#RRGGBB"`, packed to RGB565 at generation
@@ -365,7 +397,20 @@ Project-level nav (not an in-screen widget kind):
 
 | kind | shape | notes |
 |---|---|---|
-| `tabs` | `targets: [{screen, title}]` in `app.yaml` | switches between **full top-level screens** by name, not sub-panels. Only one screen's widgets are ever live at once — device holds a small `active_screen` index and redraws from that screen's precomputed geometry table on switch, using the same tiled-redraw mechanism as everything else (fits the ~2 KiB transient-buffer budget: no room for two screens' framebuffers at once). |
+| `tabs` | `targets: [{screen, title}]` in `app.yaml` | switches between **full top-level screens** by name, not sub-panels. Only one screen's widgets are ever live at once — device holds a small `active_screen` index and redraws from that screen's precomputed geometry table on switch, using the same tiled-redraw mechanism as everything else (fits the ~2 KiB transient-buffer budget: no room for two screens' framebuffers at once). **Requires a `display:` block** (a tab strip is laid out across the panel width). Janus reserves a fixed `NAV_BAR_H` band at the top of every screen, bakes a `janus_nav_tabs[]` descriptor (per-tab rect + title + target index), and the fixed runtime's `janus_render_nav_bar(app)` paints it — equal cells, centered titles, the active tab (== `active_screen`) accented — on every `janus_switch_screen` and once at startup (the scaffolds call it), never per frame. A tap in a tab navigates (`janus_nav_hit_test`, wired into the touch scaffolds); `janus_nav_next(app)`/`janus_nav_prev(app)` cycle tabs immediately, for a project with a spare control. A *single*-control encoder/button scaffold instead reaches the tabs through focus: moving past the last (or before the first) focusable widget lands on the strip as a whole, a further move there previews a tab without switching, and SELECT/click commits it (`janus_focus_move`/`janus_focus_activate` taking the whole `app`, nav_tabs epic task 4 — see architecture.md Stage 6). |
+
+**How to use:** declare `nav: { kind: tabs, targets: [...] }` +
+`display:` in `app.yaml` (see the full example just below) — nothing
+else to author. The generated scaffolds (`main_touch[_async].c.tmpl`,
+`main_encoder[_async].c.tmpl`, `main_buttons[_async].c.tmpl`) already
+call `janus_render_nav_bar` at startup/on switch and either
+`janus_nav_hit_test` (touch, checked before the screen's own hit-test)
+or the focus-stop path (encoder/buttons) — a fresh project regenerated
+from scratch needs no hand-wiring. `examples/host_demo`'s `src/main.c`
+predates the touch scaffold's nav wiring and needed a one-time manual
+catch-up to match it (2026-09-15) — a reminder that any project's
+already-scaffolded, hand-frozen `main.c` needs the same catch-up by hand
+if it was written before `nav:` was added to its `app.yaml`.
 
 **Project layout is multi-file**, one screen per file, matching harpia's own multi-Include precedent (`test.harpia` importing `file{1,2,3}.harpia`):
 
@@ -390,6 +435,7 @@ display:
   bus: spi         # spi | i2c | parallel — optional
   controller: st7789v   # optional — see the closed list below
   render_mode: non_blocking   # blocking | non_blocking, default blocking
+  background: "#000000"       # optional #RRGGBB canvas colour — see below
 ```
 
 ## Display config (settled 2026-08-20; bus/controller added 2026-08-20)
@@ -429,11 +475,22 @@ overflow against (see `architecture.md` Stage 2 for the exact check).
   behind `JANUS_RENDER_NONBLOCKING`, so a `blocking` project links none
   of it — required to fit an ATmega2560's 8 KiB SRAM once any real baked
   `image` pulls `blit_image` in.
+- **`background: "#RRGGBB"`** (optional, added 2026-09-07) — the canvas
+  colour. When set it's packed to RGB565 and emitted into *both*
+  `janus_display_config.gen.h` (for vendor driver code) and
+  `janus_render_config.gen.h` as `JANUS_DISPLAY_BACKGROUND` alongside
+  `JANUS_DISPLAY_PANEL_W`/`_H` — the fixed runtime reads that copy so
+  `janus_clear_screen` (called on every `janus_switch_screen`) can do a
+  true full-panel erase in that colour, instead of its best-effort
+  union-of-widget-rects fallback. This is the only path by which panel
+  dimensions reach the otherwise display-size-agnostic runtime, so
+  declaring `background` is the explicit opt-in to that coupling.
 
-**What "implemented" means here, precisely:** all five fields are parsed,
+**What "implemented" means here, precisely:** all six fields are parsed,
 validated, and emitted as plain data in `janus_display_config.gen.h`
-(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`)
-— consumed by hand-written vendor driver code (except `render_mode`, which
+(`JANUS_DISPLAY_WIDTH`/`HEIGHT`/`COLOR`/`BUS`/`CONTROLLER`/`RENDER_MODE`,
+plus `BACKGROUND` when set) — consumed by hand-written vendor driver code
+(except `render_mode`, which
 Stage 8's scaffold consumes to pick a `main.c`, *and* — since
 channel_icons task 3 — re-emits as a separate one-line
 `janus_render_config.gen.h` inside the vendored `runtime/include/` that
@@ -562,8 +619,9 @@ Janus stays consistent with this mechanism (`.tmpl` + `str.format()`, no new tem
 Everything above is the *output/rendering* half. Input (how a physical touch, encoder turn, or push button actually triggers a widget's `on_press`/`navigate`) is the other half — touch shipped first, encoder and next/prev/select push buttons landed together in the same pass, all three now real:
 
 - **Input modality is pluggable, exactly as sketched below, and turned out not to need a rewrite of anything already built.** Touch is "hit-test a point against the geometry rects already in `screen_table.gen.c`, find the widget, dispatch its action" (`janus_input_touch.c`, unchanged). Encoder/buttons instead need a *focus order* — which widgets are focusable, in what sequence a rotation or a next/prev button moves between them — baked at generation time by Stage 3b's `_assign_focus_order` (a pre-order tree walk assigning sequential indices to the exact same set touch already dispatches on: `box` headers and any leaf with `on_press`/`navigate`; nothing new to author in YAML). All three modalities resolve to the identical `janus_input_result_t` and get dispatched the same way downstream — only the "which widget got selected" front-end differs per modality, confirming the original sketch's core claim.
-- **Encoder and buttons share almost their entire core**, not just the dispatch step: `janus_input_focus.c` (new, fixed library) owns `janus_focus_move`/`janus_focus_activate` — moving/wrapping among a screen's focusable widgets and resolving whatever's currently focused. `janus_input_encoder.h` and `janus_input_buttons.h` are thin, header-only driver contracts (`janus_encoder_poll`/`janus_buttons_poll`, no `.c` — same shape as `draw_area_sync`/`janus_touch_poll`, vendor-implemented); encoder rotation and button NEXT/PREV both just call `janus_focus_move`, encoder click and button SELECT both call `janus_focus_activate`. Push buttons were scoped as **next/prev/select**, not one-button-per-action — a direct-mapped GPIO→action scheme (bypassing focus entirely) was considered and rejected as a separate, larger, human-authored feature, not part of this pass.
-- **Focus needs a visual highlight to be usable at all** — touch doesn't (you're pointing straight at the widget), but nothing pointed at which widget was selected before this landed. `janus_runtime.c` gained `janus_set_focus`/`janus_get_focus`: a thin border drawn over whatever the widget's own `draw_<kind>()` already painted, tile-scoped (same spirit as `janus_toggle_box`'s redraw, not a full repaint), cleared automatically on `janus_switch_screen` so a stale pointer from the outgoing screen is never redrawn onto the new one.
+- **Encoder and buttons share almost their entire core**, not just the dispatch step: `janus_input_focus.c` (fixed library) owns `janus_focus_move`/`janus_focus_activate` — moving/wrapping among the active screen's focusable widgets and resolving whatever's currently focused. `janus_input_encoder.h` and `janus_input_buttons.h` are thin, header-only driver contracts (`janus_encoder_poll`/`janus_buttons_poll`, no `.c` — same shape as `draw_area_sync`/`janus_touch_poll`, vendor-implemented); encoder rotation and button NEXT/PREV both just call `janus_focus_move`, encoder click and button SELECT both call `janus_focus_activate`. Push buttons were scoped as **next/prev/select**, not one-button-per-action — a direct-mapped GPIO→action scheme (bypassing focus entirely) was considered and rejected as a separate, larger, human-authored feature, not part of this pass.
+- **The nav strip folds into that same focus traversal** (nav_tabs epic task 4): both entry points above take the whole `janus_app_t` rather than just a screen so they can also reach `app->nav_tabs`. Walking off either end of a screen's widgets lands focus "on the nav bar" instead of any one widget; further moves there preview a tab (`janus_get_nav_focus`/`janus_set_nav_focus`, `janus_runtime.c`) without switching screens, and only `janus_focus_activate` commits (`janus_switch_screen` + re-establish focus on the incoming screen) — preview-then-commit, matching how widget focus already works (move, then a separate activate). Walking further off the *tab* run's own ends hands focus back to a real widget, the mirror of how the strip was entered, so there's no dead end either direction.
+- **Focus needs a visual highlight to be usable at all** — touch doesn't (you're pointing straight at the widget), but nothing pointed at which widget was selected before this landed. `janus_runtime.c` gained `janus_set_focus`/`janus_get_focus`: a 6px ring (`JANUS_FOCUS_RING_W`) inset along the widget's edges with a darker "shade" outer line so it reads as a raised frame (2026-09-07 — was a 1px flat line), drawn over whatever the widget's own `draw_<kind>()` already painted, tile-scoped (same spirit as `janus_toggle_box`'s redraw, not a full repaint), cleared automatically on `janus_switch_screen` so a stale pointer from the outgoing screen is never redrawn onto the new one. `janus_switch_screen` also erases the *outgoing* screen first via `janus_clear_screen`: if `app.yaml` declared **`display.background: "#RRGGBB"`** (2026-09-07) the runtime does a true full-panel fill in that colour — `display.background` is emitted into `janus_render_config.gen.h` as `JANUS_DISPLAY_BACKGROUND` alongside `JANUS_DISPLAY_PANEL_W`/`_H`, the one path by which panel dimensions reach the otherwise display-size-agnostic fixed runtime, so declaring it is the explicit opt-in. Without `display.background` it's best-effort: one fill over the union of the screen's top-level widget rects (origin-anchored, so inter-widget gaps and ragged edges are covered) in the first widget's `bg` (author `bg:` on a full-width status/header bar to control it). `janus_clear_screen` is public for projects that drive tab changes by hand.
 - **Which modality a project uses is declared, not baked into every project unconditionally.** `main.c`'s event loop used to poll touch unconditionally, which would have forced every project to implement drivers for hardware it might not have once a second modality existed. `app.yaml`'s `input: { modality: touch | encoder | buttons }` (default `touch`) picks which of three static scaffolds — `main_touch.c.tmpl` / `main_encoder.c.tmpl` / `main_buttons.c.tmpl` — Stage 8 writes.
 - **Wiring a button to a user-defined action reuses the schema-ownership split already established for harpia Includes**, applied to actions: Janus generates a stable, cheap-to-regenerate **action ID enum** (one entry per distinct `on_press`/`navigate` value across all screens, e.g. `JANUS_ACTION_REBOOT`), and each widget descriptor carries `.action = JANUS_ACTION_REBOOT` (an int, not a string). The human writes **one** hand-maintained, never-regenerated function — `void janus_handle_action(janus_action_t action)` — with one `case` per action, exactly like the human's root `.harpia` file: Janus owns the enum (regenerated in full every time, trivial since it's just names), the human owns the dispatch body. Adding a new action-producing widget means the enum picks up one new value and the human adds one `case` — not a regeneration of "the entire action set," and never touches the human's existing cases.
 
@@ -582,6 +640,12 @@ Everything above is the *output/rendering* half. Input (how a physical touch, en
   auto-sizing at Janus's *generation* time (one geometry table baked per
   locale, using that locale's glyph atlas metrics), not at device draw time.
   Not needed until font/glyph packing (already "Stage 2+", unbuilt) exists.
+  *Partial mitigation since 2026-09-07:* `draw_string` shrinks the font at
+  *draw* time (`font_scale`→1, then `large`→`medium`) to fit an overflowing
+  widget before it clips — so oversized text degrades to smaller-but-whole
+  rather than truncated. That's a runtime fallback, not the generation-time
+  per-locale sizing this item is about; geometry is still baked from the
+  authored `font_size`.
 - **Display driver body — RESOLVED (2026-08-20): human-owned for now.**
   `bus`/`controller` selection (spi/i2c/parallel; st7789, st7789v,
   ili9341, ili9341v, hx8357, gc9a01, ssd1306, sh1106, il3820, il0373) is

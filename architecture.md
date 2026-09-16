@@ -217,10 +217,27 @@ class DisplayConfig:
 @dataclass
 class App:
     screens: list[Screen]
-    nav: list[NavTarget] | None    # kind is always "tabs" in v1
+    nav: list[NavTarget] | None    # kind is always "tabs" in v1; requires `display:` (Stage 1 raises otherwise)
     display: DisplayConfig | None  # None if app.yaml omits `display:`
     input_modality: Literal["touch", "encoder", "buttons"] = "touch"
+    nav_bar: list[NavTab] | None = None  # laid-out tab strip, filled after layout (build_nav_bar); not authored
 ```
+
+**`nav` → nav strip (nav_tabs epic).** When `app.nav` is set, Stage 1
+requires a `display:` block (a full-width tab strip has no width to lay
+across otherwise) and rejects a `nav` target that isn't one of the app's
+screens or a tab count that can't get `NAV_TAB_MIN_W` px per cell. Stage 2
+then (a) reserves a `NAV_BAR_H`-tall band at `y = 0` on every screen —
+`layout_screen(screen, display, has_nav=True)` offsets the screen root to
+`y = NAV_BAR_H` and takes the band out of the height a top-level `fill:`
+child sees; the screen's own authored `header`/`status_bar` row is
+unchanged, it just starts below the strip — and (b) `build_nav_bar(app)`
+lays the tabs out as equal-width cells across `display.width` (last cell
+absorbs the width remainder), each `NAV_BAR_H` tall, in `nav` order, each
+carrying its target screen's index. `NAV_BAR_H` / `NAV_TAB_MIN_W` are
+fixed layout constants (no `nav:` styling fields — nav_tabs epic decision
+2). Task 1 is geometry + the baked descriptor only; `draw_nav_bar` and
+the input wiring are later tasks.
 
 ---
 
@@ -355,7 +372,12 @@ generic `Widget.text` field already shared by `label`/`header`/`button`.
 Its content area is offset below a fixed-height header strip
 (`BOX_HEADER_H`, a layout constant, not part of the IR contract); `box`'s
 `geometry_collapsed` covers the header strip only, `geometry` covers
-header + body.
+header + body. **A box with nothing to put in that strip — not
+`collapsible`, no `text` title, no `summary` (added 2026-09-07) — is laid
+out with a zero-height `geometry_collapsed`** so a pure grouping container
+doesn't carve 16px off its own content area; the runtime
+(`draw_box_header`) paints no strip in that case and, if the box is
+focused, rings its full body instead.
 
 **`box.summary` (added 2026-09-05):** an optional list of leaf widgets
 always rendered inside the header strip, regardless of collapse state —
@@ -447,12 +469,18 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   Implemented: `emit_actions_header(app)`.
 - `janus_app.gen.c` — the `janus_app_t` table: an array of pointers to
   every screen's `janus_screen_desc_t`, plus `nav_titles` (parallel array,
-  `NULL` if `app.nav` is unset). Implemented: `emit_app_table(app)`;
+  `NULL` if `app.nav` is unset) and — when `app.nav` is set —
+  `janus_nav_tabs[]` (`JANUS_PROGMEM` array of `janus_nav_tab_t`: baked
+  `rect` + flash `title` + `target` screen index, in `nav` order) with
+  `.nav_tab_count`. `nav_tabs[]` titles are flash-resident (the render
+  path will pgm-read them); the legacy screen-parallel `nav_titles` stays
+  plain. Implemented: `emit_app_table(app)` (calls `build_nav_bar`);
   raises if `app.nav` doesn't cover every screen.
 - `janus_display_config.gen.h` — only written when `app.display` is set:
   `JANUS_DISPLAY_WIDTH`/`HEIGHT` + `JANUS_DISPLAY_COLOR*`/`BUS*`/
   `CONTROLLER*` `#define`s (see Stage 2's display bounds check and
-  Janus.md's "Display config" section). Implemented:
+  Janus.md's "Display config" section), plus `JANUS_DISPLAY_BACKGROUND`
+  (packed RGB565) when `display.background` is set. Implemented:
   `emit_display_config(display)`. Every known `color`/`bus`/`controller`
   value is always defined (so driver code can compare against any of
   them); the *selection* macro (`JANUS_DISPLAY_BUS`/`_CONTROLLER`) is only
@@ -461,6 +489,16 @@ now" decision). `Binding.type` maps 1:1 to harpia's `int`/`int64`/`float`/
   data for hand-written vendor driver code to consume — the fixed runtime
   library never reads it, and no driver body is generated from the
   selection (human-owned, see Janus.md Open Questions).
+- `display.background` (optional, `#RRGGBB`) — the canvas colour. When
+  set, Stage 3b *also* emits `JANUS_DISPLAY_BACKGROUND` +
+  `JANUS_DISPLAY_PANEL_W`/`_H` into `janus_render_config.gen.h` (the
+  build-config header the fixed runtime `#include`s via `__has_include`),
+  so `janus_clear_screen` can do a true full-panel erase in that colour on
+  a screen switch. This is the **only** path by which panel dimensions
+  reach the otherwise display-size-agnostic runtime — declaring
+  `background` is the explicit opt-in. Without it, `janus_clear_screen`
+  stays best-effort (a union-of-top-level-widget-rects fill in the first
+  widget's `bg`).
 
 **`.bound_struct` resolution (v1: one message per screen).** Each
 widget's `.bind.field_offset = offsetof({message}_t, {field})` assumes
@@ -545,6 +583,7 @@ typedef enum {
     JANUS_WIDGET_CHECKBOX, JANUS_WIDGET_RADIOBUTTON, JANUS_WIDGET_RADIOGROUP,
     JANUS_WIDGET_LED, JANUS_WIDGET_BOX, JANUS_WIDGET_COLUMN, JANUS_WIDGET_ROW,
     JANUS_WIDGET_DIVIDER, JANUS_WIDGET_TOGGLE, JANUS_WIDGET_BADGE, JANUS_WIDGET_SLIDER,
+    JANUS_WIDGET_VU,
 } janus_widget_kind_t;
 
 typedef enum { JANUS_FIELD_NONE, JANUS_FIELD_INT, JANUS_FIELD_INT64, JANUS_FIELD_FLOAT, JANUS_FIELD_STRING } janus_field_type_t;
@@ -618,9 +657,13 @@ typedef struct {
                                   * .dirty_offset and janus_render_*_if_dirty above */
 } janus_screen_desc_t;
 
+typedef struct { janus_rect_t rect; const char *title; int16_t target; } janus_nav_tab_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;
-    const char *const *nav_titles;   /* parallel to screens; NULL if app.nav is unset (no tab bar) */
+    const char *const *nav_titles;   /* legacy screen-parallel title lookup; NULL if app.nav is unset */
+    const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM, nav order, baked geometry; NULL if app.nav is unset */
+    uint16_t nav_tab_count;          /* 0 if app.nav is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -635,7 +678,8 @@ bool display_busy(void);
 
 /* runtime entry points */
 void janus_render_screen(const janus_screen_desc_t *screen);
-void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* used by navigate; clears focus first */
+void janus_switch_screen(janus_app_t *app, uint16_t screen_index);   /* navigate: clears focus, erases the outgoing screen (janus_clear_screen), renders the new one */
+void janus_clear_screen(const janus_screen_desc_t *screen);          /* full-panel fill in JANUS_DISPLAY_BACKGROUND if app.yaml set display.background (janus_render_config.gen.h carries it + panel size); else best-effort: one fill over the union of the screen's top-level rects (origin-anchored — covers gaps + ragged edges) in the first widget's bg. public for hand-driven screen changes */
 void janus_toggle_box(const janus_widget_desc_t *box);               /* re-renders just that subtree */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads the state above; Stage 6 hit-testing needs it */
 
@@ -741,10 +785,11 @@ emits the `JANUS_PROGMEM` attribute on every generated array/struct, and
 routes every `id`/`static_text`/screen-`name` string through
 `_emit_flash_string()` — a named `static const char ... JANUS_PROGMEM`
 declaration per string, since an inline string literal has no way to
-carry its own `PROGMEM` attribute in C. `nav_titles` is the one exception,
-deliberately left as plain (RAM-shadowed) — nothing in `janus_runtime.c`
-reads a nav title yet (no tab-bar rendering implemented); revisit once
-that lands.
+carry its own `PROGMEM` attribute in C. The legacy screen-parallel
+`nav_titles` array is left plain (RAM-shadowed) — nothing on the render
+path reads it. The nav_tabs epic's `janus_nav_tabs[]` descriptor **does**
+flash-resident its `title` strings (via a per-string `static const char
+... JANUS_PROGMEM`), since `draw_nav_bar` (task 2) will pgm-read them.
 
 **Why `janus_action_id_t`, not `janus_action_t`, on the descriptor.**
 `janus_action_t` is defined by the *generated*, per-project
@@ -772,14 +817,35 @@ pointer (`g_focused_widget`), not a table. `janus_set_focus(w)` compares
 `w` against it, redraws the previous widget unfocused and `w` focused
 (each via the normal `render_widget` for that one widget — no dedicated
 "focused" draw path; `draw_button`/`draw_box_header` just check `w ==
-g_focused_widget` internally and add a thin border via `draw_focus_ring`
-when true), and updates the pointer. `janus_switch_screen` calls
+g_focused_widget` internally and add a marker via `draw_focus_ring` when
+true), and updates the pointer. The marker is a `JANUS_FOCUS_RING_W` (6)
+px ring inset along the widget's own edges, drawn as concentric 1px
+rectangles with a darker outermost "shade" line so it reads as a raised
+frame (2026-09-07 — was a 1px flat line, briefly 4px). It's inset (not
+outside the rect) because the unfocus redraw only repaints the previously
+focused widget's own rect; it does cover the widget's outermost few px of
+content while focused, a deliberate trade for a legible marker. `janus_switch_screen` calls
 `janus_set_focus(NULL)` before rendering the new screen — without this, a
 focus pointer from the outgoing screen's static widget array would get
 redrawn on top of the incoming screen's freshly rendered content. Only
 `button` (unbound in v1, per Janus.md's catalog) and `box` are ever
 focusable, so the redraw never needs `bind` data — `read_bound_value`/
 `read_bound_string` are never called from this path.
+
+**Nav strip rendering (nav_tabs epic task 2).** `janus_render_nav_bar(app)`
+(internal `draw_nav_bar`) paints the app-level tab strip into its band:
+one `fill_rect` per `app->nav_tabs` cell (baked geometry, loaded pgm-safe
+via `janus_nav_tab_load`), the title centered at `medium` with no
+auto-shrink (every tab must read at one size), and — on the cell whose
+`target == app->active_screen` — an active fill plus a
+`JANUS_NAV_ACCENT_H` (6px) bottom accent bar; inactive cells get a 1px
+baseline. Colours/heights are fixed runtime constants (`JANUS_COLOR_NAV_*`,
+decision 2), same "Janus-owned affordance" status as `JANUS_COLOR_FOCUS_RING`.
+It is **not** called from `janus_render_screen` (screen-scoped, no `app`)
+— `janus_switch_screen[_async_start]` call it right after rendering the
+incoming screen, and a scaffold calls it once after the first
+`janus_render_screen`; a periodic `janus_render_*_if_dirty` sweep never
+touches it.
 
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
@@ -790,11 +856,12 @@ drives `draw_area_sync` directly; the non-blocking path
 `draw_area_async`/`display_busy` instead — both are real now (2026-08-22).
 Leaf rendering fills `geometry` with the widget's own authored `.color`/
 `.bg_color` (RGB565, see "Color" above), except `progress`/`gauge`/
-`slider` (fraction of range, `.color` for the filled portion) and
-`checkbox`/`toggle`/`badge` (checked/unchecked) which read the *live*
-bound value and vary the fill accordingly — the concrete difference from
-the original prototype's "empty buffer regardless of screen contents"
-stub.
+`slider` (fraction of range, `.color` for the filled portion),
+`checkbox`/`toggle`/`badge` (checked/unchecked), and `vu` (needle angle
+from the live value within `range` — ui_widgets/vu_meter task 2) which
+read the *live* bound value and vary the fill/angle accordingly — the
+concrete difference from the original prototype's "empty buffer
+regardless of screen contents" stub.
 
 **Glyph rendering (2026-08-19, slice 1; slice 2 completed 2026-08-20;
 widened to full occidental Latin coverage 2026-08-22) — both static text
@@ -807,13 +874,22 @@ punctuation, true upper/lowercase letters (no case-folding), and the
 Latin-1 accented set for Western European languages (123 glyphs total —
 see `janus_font.h`; **strings must be Latin-1-encoded, not UTF-8**, since
 this module maps one `char` to one glyph). `draw_string()` blits
-left-aligned, vertically centered, and clips (never wraps or shrinks the
-font) once a character would run past the widget's `geometry` — Janus
-never auto-sizes text at generation time (`Janus.md`'s deferred
-auto-sizing note), so overflow is an expected v1 case: `examples/
-host_demo`'s own `diagnostics_box` (24px wide) clips "Diagnostics" down to
-"Diag" for exactly this reason, verified against the real generated
-output, not just unit tests.
+vertically centered, left-aligned by default (buttons pass a `center`
+flag — a nav tab like "PWM" then sits centered, not against the left
+edge). **Render-time auto-shrink (2026-09-07)**, `label`/`header` only
+(*not* `button` — a row of buttons like a tab bar must stay one
+consistent size, so an over-long button label clips instead of silently
+rendering smaller than its neighbours): if the run overflows the widget's
+`geometry.w` it steps the font down — `font_scale` toward 1 first, then
+`large` → `medium` — and only clips (drop trailing characters, never
+wrap) once it's already at `medium`/scale 1. This is a *draw-time fit
+only*; Stage 2 geometry is still computed from the
+authored `font_size` — Janus never auto-sizes text *at generation time*
+(`Janus.md`'s deferred auto-sizing note still holds for layout), a shrunk
+label just stops spilling out of the box it was given. `examples/
+host_demo`'s own `diagnostics_box` (24px wide) still can't fit
+"Diagnostics" even at the smallest size, so it clips to a few characters
+there — verified against the real generated output, not just unit tests.
 
 Stage 3b bakes `.static_text` from `Widget.text` for every widget
 (`emit_embedded_c.py`'s `_widget_init`) — previously `Widget.text` was
@@ -969,6 +1045,17 @@ dispatched identically by the caller (`main.c`'s event loop) — confirming
 the original sketch's core claim that only the "which widget" front-end
 differs per modality.
 
+**Nav strip — hit-testing** (`janus_nav_hit_test(app, x, y)`,
+`janus_input_touch.c`, nav_tabs epic task 3): the app-level tab strip
+isn't part of any screen, so it has its own point-in-rect test over the
+baked `janus_nav_tabs[]` cells — a tap in a cell → `JANUS_INPUT_NAVIGATE`
+for that tab's `target`. A scaffold checks this *before*
+`janus_touch_hit_test` (the band is app-owned, above the screen).
+`janus_nav_next(app)`/`janus_nav_prev(app)` (`janus_runtime.c`) are the
+non-touch counterpart — cycle the active tab immediately, for a project
+with a control to spare. The *single*-control encoder/button scaffolds
+instead reach the tabs through focus (nav_tabs epic task 4, below).
+
 **Touch — hit-testing** (`janus_touch_hit_test`, `janus_input_touch.c`):
 point-in-rect against the already-baked absolute geometry, deepest match
 wins. `box`'s `geometry_collapsed` doubles as its header hit-region —
@@ -991,12 +1078,12 @@ driver contract): `bool janus_touch_poll(int16_t *x, int16_t *y)` —
 vendor/host-provided, non-blocking, mirrors `display_busy()`'s polling
 style. Returns true and fills `x`/`y` once per new touch.
 
-**Encoder/buttons — shared focus core** (`janus_input_focus.h`/`.c`, new):
-`janus_focus_move(screen, delta)` and `janus_focus_activate(screen)`,
-used identically by both modalities — encoder rotation and button
-NEXT/PREV both call `janus_focus_move` (`+1`/`-1`), encoder click and
-button SELECT both call `janus_focus_activate`. Internally, a
-depth-first, left-to-right walk (`walk_focusable`) mirrors
+**Encoder/buttons — shared focus core** (`janus_input_focus.h`/`.c`):
+`janus_focus_move(app, delta)` and `janus_focus_activate(app)`, used
+identically by both modalities — encoder rotation and button NEXT/PREV
+both call `janus_focus_move` (`+1`/`-1`), encoder click and button SELECT
+both call `janus_focus_activate`. Internally, a depth-first, left-to-right
+walk (`walk_focusable`, over `app`'s active screen) mirrors
 `hit_test_widget`'s own traversal and its collapsed-box skip rule exactly
 — `focus_order` was baked assuming every box is reachable, so the walk
 has to apply the same runtime skip touch does, or a collapsed box's
@@ -1016,6 +1103,42 @@ leaf case uses, but returns `JANUS_INPUT_NONE` if that widget isn't
 actually reachable on `screen` right now (stale — e.g. its box was
 collapsed since it was focused, or focus belongs to a screen that's since
 been switched away from).
+
+**Nav strip — folded into focus (nav_tabs epic task 4, settled/implemented
+2026-09-07/14):** an app with `nav: { kind: tabs }` gives its single-
+control encoder/button scaffolds a way to reach the tabs without a second
+control — both entry points above take the whole `janus_app_t`, not just
+the active screen, specifically so they can also reach `app->nav_tabs`.
+Moving past the last (or before the first) focusable widget lands focus
+"on the nav bar" as a whole rather than on any one widget; from there,
+`janus_focus_move` cycles a *previewed* tab (`janus_get_nav_focus()` /
+`janus_set_nav_focus()`, `janus_runtime.c` — a sibling to
+`janus_get_focus`/`janus_set_focus` for the one piece of focus state
+that isn't a `janus_widget_desc_t`) instead of a widget, independent of
+the screen's own widget count. This is **preview, commit on
+activate**: rotating or NEXT/PREV while nav-focused only moves the ring
+across tab cells, never switches screens — `janus_focus_activate`
+finding the nav strip focused is what actually calls
+`janus_switch_screen(app, previewed.target)` then `janus_focus_move(app,
+0)` to re-establish focus on the incoming screen, and it reports
+`JANUS_INPUT_NONE` back (already fully handled, nothing left for the
+caller's dispatch switch). Falling off either end of the tab run hands
+focus back to a real widget — off the bottom (rotating further backward)
+lands on the screen's last widget, off the top (forward) on its first —
+the mirror image of how the strip was entered, so a widget ⇄ nav
+boundary is crossable in either direction without a dead end. The
+previewed-tab cursor starts, each time the strip is entered fresh, at
+whichever tab's `target` is the current `active_screen` — so arriving at
+the bar always previews "where we already are," never tab 0
+unconditionally. No new state lives in `janus_input_focus.c` itself
+(true to its "decides *which*, never *how*" split) — `previewed_tab` is
+`janus_runtime.c`'s `g_focused_nav_index`, drawn by folding one more
+self-check into `draw_nav_bar` (same pattern `draw_button`/
+`draw_box_header` already use for `g_focused_widget`), so the ring
+survives any repaint that happens to touch the strip rather than needing
+a bespoke draw call. Touch's `janus_nav_hit_test` is unaffected — a tap
+still commits immediately, no preview state, since touch has no
+"currently focused" concept to fold into.
 
 **Encoder/buttons driver contracts** (`janus_input_encoder.h` /
 `janus_input_buttons.h`): header-only, no `.c` — same shape as

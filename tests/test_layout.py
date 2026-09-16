@@ -1,9 +1,14 @@
 import unittest
 from pathlib import Path
 
-from janus.stage1_parse.dsl_yaml import parse_screen
-from janus.ir import DisplayConfig, Rect
-from janus.stage2_layout.layout import check_fits_display, layout_screen
+from janus.stage1_parse.dsl_yaml import parse_app, parse_screen
+from janus.ir import App, DisplayConfig, NavTarget, Rect, Screen, Widget
+from janus.stage2_layout.layout import (
+    NAV_BAR_H,
+    build_nav_bar,
+    check_fits_display,
+    layout_screen,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -114,19 +119,54 @@ class TestLayoutBoxSummary(unittest.TestCase):
         # right-aligned summary still starts on-screen, not negative
         self.assertGreaterEqual(box.summary[0].geometry.x, box.geometry.x)
 
-    def test_box_with_no_summary_lays_out_unchanged(self) -> None:
+    def test_collapsible_box_reserves_the_16px_header_strip(self) -> None:
         from janus.ir import Screen, Widget
 
         screen = Screen(
-            name="NoSummary",
+            name="Collapsible",
             root=Widget(kind="column", id="root", children=[
-                Widget(kind="box", id="drawer", layout="column", children=[
+                Widget(kind="box", id="drawer", layout="column", collapsible=True, children=[
                     Widget(kind="label", id="detail"),
                 ]),
             ]),
         )
         layout_screen(screen)
         self.assertEqual(screen.root.children[0].geometry_collapsed.h, 16)
+
+    def test_titled_box_reserves_the_16px_header_strip(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Titled",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="drawer", layout="column", text="Network", children=[
+                    Widget(kind="label", id="detail"),
+                ]),
+            ]),
+        )
+        layout_screen(screen)
+        self.assertEqual(screen.root.children[0].geometry_collapsed.h, 16)
+
+    def test_bare_grouping_box_reserves_no_header_strip(self) -> None:
+        # not collapsible, no title text, no summary -> a pure grouping
+        # container; reserving/painting a 16px strip above its children
+        # just ate content area (2026-09-07).
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="Bare",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="box", id="drawer", layout="column", children=[
+                    Widget(kind="label", id="detail", size=(40, 12)),
+                ]),
+            ]),
+        )
+        layout_screen(screen)
+        box = screen.root.children[0]
+        self.assertEqual(box.geometry_collapsed.h, 0)
+        # child sits at the box's own top edge, not pushed down by a strip
+        self.assertEqual(box.children[0].geometry.y, box.geometry.y)
+        self.assertEqual(box.geometry.h, 12)
 
 
 class TestLayoutSizeEnforcement(unittest.TestCase):
@@ -145,7 +185,9 @@ class TestLayoutSizeEnforcement(unittest.TestCase):
     def test_badge_and_slider_require_explicit_size(self) -> None:
         from janus.ir import Screen, Widget
 
-        for kind, kwargs in (("badge", {}), ("slider", {"range": (0, 100)})):
+        for kind, kwargs in (
+            ("badge", {}), ("slider", {"range": (0, 100)}), ("vu", {"range": (0, 100)}),
+        ):
             screen = Screen(
                 name="Bad",
                 root=Widget(kind="column", id="root", children=[
@@ -154,6 +196,19 @@ class TestLayoutSizeEnforcement(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 layout_screen(screen)
+
+    def test_vu_geometry_matches_authored_size(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="VuSized",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="vu", id="v", range=(0, 100), size=(80, 48)),
+            ]),
+        )
+        layout_screen(screen)
+        vu = screen.root.children[0]
+        self.assertEqual((vu.geometry.w, vu.geometry.h), (80, 48))
 
 
 class TestLayoutNewLowEffortKinds(unittest.TestCase):
@@ -282,6 +337,73 @@ class TestCheckFitsDisplay(unittest.TestCase):
         display = DisplayConfig(width=240, height=20, color="mono")
         with self.assertRaises(ValueError):
             check_fits_display(self.screen, display)
+
+
+class TestLayoutNavBar(unittest.TestCase):
+    def _screen(self) -> Screen:
+        # a non-fill column root holding one fill child, so the child's
+        # height tracks whatever available height the root is handed
+        return Screen(
+            name="S",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="column", id="body", fill=True, children=[
+                    Widget(kind="label", id="l", text="hi", size=(100, 20)),
+                ]),
+            ]),
+        )
+
+    def test_no_nav_lays_out_unchanged(self) -> None:
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        s = layout_screen(self._screen(), d, has_nav=False)
+        self.assertEqual(s.root.geometry.y, 0)
+        self.assertEqual(s.root.children[0].geometry.h, 300)   # fill child gets the whole panel
+
+    def test_nav_offsets_root_and_shrinks_fill_height(self) -> None:
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        s = layout_screen(self._screen(), d, has_nav=True)
+        self.assertEqual(s.root.geometry.y, NAV_BAR_H)                       # pushed below the band
+        self.assertEqual(s.root.children[0].geometry.h, 300 - NAV_BAR_H)    # fill child lost the band
+        self.assertEqual(s.root.geometry.y + s.root.geometry.h, 300)        # still bottoms out at the panel
+
+    def test_check_fits_display_counts_the_band(self) -> None:
+        # a screen that's exactly panel-height at y=0 no longer fits once
+        # the nav band shifts it down by NAV_BAR_H
+        s = Screen(name="S", root=Widget(kind="column", id="root", children=[
+            Widget(kind="label", id="l", text="x", size=(50, 300)),
+        ]))
+        d = DisplayConfig(width=200, height=300, color="rgb565")
+        layout_screen(s, d, has_nav=True)
+        with self.assertRaises(ValueError):
+            check_fits_display(s, d)
+
+    def _nav_app(self) -> App:
+        screens = [Screen(name=n, root=Widget(kind="column", id="r", children=[]))
+                   for n in ("Alpha", "Bravo", "Charlie")]
+        return App(
+            screens=screens,
+            nav=[NavTarget(screen="Bravo", title="B"),
+                 NavTarget(screen="Alpha", title="A"),
+                 NavTarget(screen="Charlie", title="C")],
+            display=DisplayConfig(width=320, height=480, color="rgb565"),
+        )
+
+    def test_build_nav_bar_equal_cells_last_absorbs_remainder(self) -> None:
+        tabs = build_nav_bar(self._nav_app())
+        self.assertEqual([t.rect for t in tabs], [
+            Rect(x=0, y=0, w=106, h=NAV_BAR_H),
+            Rect(x=106, y=0, w=106, h=NAV_BAR_H),
+            Rect(x=212, y=0, w=108, h=NAV_BAR_H),   # 320 % 3 == 2 -> last cell
+        ])
+
+    def test_build_nav_bar_target_index_follows_nav_order_not_screen_order(self) -> None:
+        tabs = build_nav_bar(self._nav_app())
+        self.assertEqual([t.title for t in tabs], ["B", "A", "C"])
+        self.assertEqual([t.target_screen_index for t in tabs], [1, 0, 2])
+
+    def test_build_nav_bar_none_without_nav(self) -> None:
+        app = self._nav_app()
+        app.nav = None
+        self.assertIsNone(build_nav_bar(app))
 
 
 if __name__ == "__main__":
