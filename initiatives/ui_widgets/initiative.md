@@ -34,15 +34,25 @@ small set of allocation-free drawing primitives the runtime is missing.
   line, `sin16`/`cos16` LUT), all decomposed onto the existing
   tile/`fill_rect` span model so blocking **and** async rendering keep
   working with no new async op kind. Shared substrate for the three
-  epics below.
+  epics below. *(done, merged)*
 - **label_format** — printf-style specifiers in `label`/`header`:
   `text:` containing an unescaped conversion + a `bind:` interpolates the
   live bound value. Hand-rolled allocation-free formatter — no libc
-  `printf` pulled in.
+  `printf` pulled in. *(done, merged)*
 - **kind_visuals** — the `toggle` (switch), `progress`+`gauge` (bar), and
   `led` (shaded disc) render upgrades. Depends on **draw_primitives**.
+  *(done, merged)*
 - **vu_meter** — new `vu` widget kind: an analog needle over a scale arc.
-  Depends on **draw_primitives**.
+  Depends on **draw_primitives**. *(done, merged 2026-09-15)*
+
+All four epics are done and merged to `dev`. The initiative's own
+**cross-epic gate item 3** (`examples/host_demo` regenerated so one
+screen visibly exercises a formatted label, a switch toggle, a bar
+progress, a shaded led, *and* a vu needle, all in one place) was never
+actually done for any of the four epics — each landed with its own
+epic-level acceptance gate satisfied (unit tests + `avr_gate.sh`), but
+nobody wired a live example of the new visuals into `examples/host_demo`
+itself. Flagged as a real gap, not fixed here.
 
 ## Settled decisions (planning, 2026-09-06)
 
