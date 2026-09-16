@@ -332,6 +332,19 @@ void janus_clear_screen(const janus_screen_desc_t *screen);
  * (nav_tabs epic decision 2). (task 2.) */
 void janus_render_nav_bar(const janus_app_t *app);
 
+/* Paints the app-level status band (app.yaml `status: { text: "..." }`) —
+ * full-width fill + centered text, fixed colours (status_bar epic
+ * decision 3, reusing the nav strip's own inactive-bg/active-label
+ * pair). No-op if the app has no status (`status_bar == NULL`).
+ * Repaint-on-change, not per-frame — same call sites as
+ * janus_render_nav_bar (janus_switch_screen[_async_start], and a
+ * scaffold once after the first janus_render_screen) — deliberately
+ * *not* also called from janus_set_nav_focus: the status band's static
+ * text never depends on which nav tab is previewed, so a repaint there
+ * would just be wasted work, not a correctness fix like it is for
+ * draw_nav_bar. (status_bar epic task 2.) */
+void janus_render_status_bar(const janus_app_t *app);
+
 /* Switch to the tab one cell after / before (nav order, wrapping) the one
  * currently showing `app->active_screen` — a full janus_switch_screen
  * under the hood (erases the old screen, renders the new one, repaints

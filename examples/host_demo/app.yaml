@@ -2,6 +2,8 @@ screens:
   - pwm.screen.yaml
   - bus_status.screen.yaml
   - relay.screen.yaml
+status:
+  text: "Janus Demo"
 nav:
   kind: tabs
   targets:

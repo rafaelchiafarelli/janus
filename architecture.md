@@ -886,6 +886,20 @@ incoming screen, and a scaffold calls it once after the first
 `janus_render_screen`; a periodic `janus_render_*_if_dirty` sweep never
 touches it.
 
+**Status band rendering (status_bar epic task 2, 2026-09-15).**
+`janus_render_status_bar(app)` (internal `draw_status_bar`) paints the
+app-level status band the same way: one `fill_rect` over `app->status_bar`'s
+baked rect (loaded pgm-safe via `janus_status_bar_load`), text centered at
+`medium` with no auto-shrink. `JANUS_COLOR_STATUS_BG`/`_INK` fixed runtime
+constants (decision 3) reuse the nav strip's own inactive-bg/active-label
+pair, so the two bands read as one chrome family. Same non-`janus_render_screen`
+placement and call sites as the nav strip — `janus_switch_screen[_async_start]`
+and a scaffold's startup call — with one deliberate difference:
+`janus_set_nav_focus`'s repaint (which exists to move the nav strip's
+focus-preview ring between cells) does **not** also redraw the status
+band, since the band's static text never depends on nav-focus state and
+repainting it there would just be wasted work.
+
 `janus_runtime.c` implements traversal + tiling + one internal
 `draw_<kind>()` per widget kind, dispatched by `kind` — this is where
 DESIGN.md's actual rendering logic lives, finally for real (not the
