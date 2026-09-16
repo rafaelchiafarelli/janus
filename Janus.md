@@ -412,6 +412,16 @@ catch-up to match it (2026-09-15) — a reminder that any project's
 already-scaffolded, hand-frozen `main.c` needs the same catch-up by hand
 if it was written before `nav:` was added to its `app.yaml`.
 
+Project-level status band (also not an in-screen widget kind):
+
+| kind | shape | notes |
+|---|---|---|
+| `status` | `text: "..."` in `app.yaml` | app-level-only chrome — never a per-screen widget (status_bar epic, settled 2026-09-15: per-screen hand-authored status rows had already drifted out of sync across a real project's screens). **Requires a `display:` block**, same reasoning as `nav`. Janus reserves a fixed `STATUS_BAR_H` band as the true top of every screen — above the nav strip, if `nav` is also declared — and bakes a `janus_app_status_bar` descriptor (rect + flash text). Static text only in v1, no bound field. **As of task 1 (2026-09-15), this is geometry + the baked descriptor only — nothing renders it yet.** `draw_status_bar` and its wiring land in task 2 (`initiatives/app_chrome/epics/status_bar/`). |
+
+**How to use (once task 2 lands):** declare `status: { text: "..." }` +
+`display:` in `app.yaml`, same shape as `nav` above. `status` and `nav`
+can be declared together or independently.
+
 **Project layout is multi-file**, one screen per file, matching harpia's own multi-Include precedent (`test.harpia` importing `file{1,2,3}.harpia`):
 
 ```

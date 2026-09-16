@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, Widget
+from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, StatusConfig, Widget
 from ..stage2_layout.layout import NAV_TAB_MIN_W
 
 log = logging.getLogger("janus.parse")
@@ -339,6 +339,12 @@ def _parse_input_modality(data: dict[str, Any] | None) -> str:
     return modality
 
 
+def _parse_status(data: dict[str, Any] | None) -> StatusConfig | None:
+    if data is None:
+        return None
+    return StatusConfig(text=data["text"])
+
+
 def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
     """`screens` are already-parsed `Screen` objects, in `app.yaml`'s
     `screens:` order — `parse_app` is what actually reads each file."""
@@ -371,6 +377,15 @@ def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
                 f"scrolling)"
             )
 
+    status = _parse_status(data.get("status"))
+    if status is not None and display is None:
+        # The band is laid out across the panel width — no panel, no band
+        # (status_bar epic, decision 2 — same reasoning as app.nav).
+        raise ValueError(
+            "app.status needs a `display:` block with `size` — the status "
+            "band is laid out across the panel width"
+        )
+
     for screen in screens:
         _check_navigate_targets(screen.root, screen_names)
 
@@ -379,6 +394,7 @@ def app_from_dict(data: dict[str, Any], screens: list[Screen]) -> App:
         nav=nav,
         display=display,
         input_modality=_parse_input_modality(data.get("input")),
+        status=status,
     )
 
 
