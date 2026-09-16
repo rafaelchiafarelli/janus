@@ -287,7 +287,7 @@ Original scoping, for the record:
     needs explicit size") turned out to contradict every worked example in
     this doc, which never bothered sizing a `label`/`header`/`button`/
     `checkbox`/`radiobutton` but always sized `progress`/`gauge`/`image`/
-    `led`. `progress`, `gauge`, `image`, `led`, `badge`, `slider`
+    `led`. `progress`, `gauge`, `image`, `led`, `badge`, `slider`, `vu`
     **require** explicit `size` — their dimensions are a real design
     choice Janus can't guess. `label`, `header`, `button`, `checkbox`,
     `radiobutton`, `divider`, `toggle` get a fixed v1 placeholder default
@@ -378,6 +378,7 @@ Leaves:
 | `toggle` | `int` (0/nonzero convention) | identical bind shape to `checkbox`. Renders as a real switch (added 2026-09-14): a rounded pill track (`color` when on, `bg_color` when off) with a circular knob that sits left when off / right when on; the knob colour is a fixed lightened tint of the track, not separately authorable. `checkbox`/`badge` keep their older flat-fill render — only `toggle` changed. |
 | `badge` | `int` (0/nonzero convention) | a small on/off status dot — same bind shape as `checkbox`/`toggle`, distinct fill so it reads as its own kind |
 | `slider` | numeric + `range: {min, max}` | identical bind shape to `progress`/`gauge` — display-only in v1 (shows a live value; doesn't write back). An interactive, write-back slider is a separate, larger future increment, not this kind |
+| `vu` | numeric + `range: {min, max}`; `size` **required** | analog needle over a 90° tick arc (added 2026-09-15): the bound value maps `range.min..max` to a needle angle of -45°..+45° from straight up, pivoting from a hub at the bottom-centre of the geometry; 5 fixed tick marks along the arc in `color`, face fill in `bg_color`. Colour zones, peak-hold, and damping are all future increments, not v1 — pair it with a `label_format` label for a numeric readout. |
 
 **Color (added 2026-08-22).** Every kind above also takes two optional
 fields, `color` and `bg`, hex `"#RRGGBB"`, packed to RGB565 at generation

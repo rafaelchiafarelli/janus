@@ -28,10 +28,14 @@ entry" rule.
 
 ## Tasks
 
-| # | file | contract (one line) |
-|---|---|---|
-| 1 | `tasks/1-vu-kind-plumbing.md` | `vu` recognised end-to-end: Stage 1 (`range` required, `size` required), Stage 3b `JANUS_WIDGET_VU`, runtime enum + dispatch + a face-fill stub `draw_vu`, `Janus.md` catalog row |
-| 2 | `tasks/2-vu-needle-render.md` | `draw_vu` full: face + 90° tick arc + pivoting needle at `lerp(value→[-45°,45°])` + hub disc |
+| # | file | status | contract (one line) |
+|---|---|---|---|
+| 1 | `tasks/1-vu-kind-plumbing-done.md` | ✅ **done** | `vu` recognised end-to-end: Stage 1 (`range` required, `size` required), Stage 3b `JANUS_WIDGET_VU`, runtime enum + dispatch + a face-fill stub `draw_vu`, `Janus.md` catalog row |
+| 2 | `tasks/2-vu-needle-render-done.md` | ✅ **done** | `draw_vu` full: face + 90° tick arc + pivoting needle at `lerp(value→[-45°,45°])` + hub disc |
+
+Both tasks done and merged (2026-09-15). Acceptance gate passes:
+Python `unittest` (253 tests) + C `ctest` (11/11) + `scripts/avr_gate.sh`
+all green.
 
 ## Dependency
 

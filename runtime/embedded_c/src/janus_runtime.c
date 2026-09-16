@@ -805,6 +805,55 @@ static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) 
     fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
 }
 
+/* vu: analog needle over a 90 degree tick arc. The bound value maps
+ * range.min..max to a needle angle of -45..+45 degrees from straight up
+ * (0 deg), pivoting from a hub at the bottom-centre of the geometry.
+ * Angle convention: `janus_sin16`/`janus_cos16` treat +deg as clockwise
+ * from vertical, so the endpoint of a ray of length L at angle `deg` is
+ * `(hub_x + L*sin16(deg), hub_y - L*cos16(deg))` — the `-cos` accounts
+ * for screen-y-down. Face + 5 fixed tick marks + needle + hub, all
+ * decomposed to `fill_rect` (draw_line plots 1x1 spans), so the async
+ * path captures it with no new op kind (ui_widgets/vu_meter task 2). */
+static int16_t vu_ray_x(int16_t hub_x, int16_t len, int16_t deg) {
+    return (int16_t)(hub_x + (((int32_t)len * janus_sin16(deg)) >> 15));
+}
+static int16_t vu_ray_y(int16_t hub_y, int16_t len, int16_t deg) {
+    return (int16_t)(hub_y - (((int32_t)len * janus_cos16(deg)) >> 15));
+}
+
+static void draw_vu(const janus_widget_desc_t *w, const void *bound_struct) {
+    janus_widget_desc_t lw = janus_widget_load(w);
+    double value = janus_read_bound_value(&lw.bind, bound_struct);
+    double span = (double)lw.bind.range_max - (double)lw.bind.range_min;
+    double fraction = span != 0.0 ? (value - lw.bind.range_min) / span : 0.0;
+    if (fraction < 0.0) fraction = 0.0;
+    if (fraction > 1.0) fraction = 1.0;
+
+    janus_rect_t r = lw.geometry;
+    fill_rect(r, lw.bg_color);
+
+    int16_t hub_x = (int16_t)(r.x + r.w / 2);
+    int16_t hub_y = (int16_t)(r.y + r.h - 1);
+    int16_t half_w = (int16_t)(r.w / 2);
+    int16_t len = (int16_t)((r.h < half_w ? r.h : half_w) - 2);
+    if (len < 1) len = 1;
+    int16_t tick_len = (int16_t)((len * 9) / 10);
+    int16_t needle_deg = (int16_t)(-45 + (int16_t)(fraction * 90));
+
+    for (int i = 0; i < 5; i++) {
+        int16_t deg = (int16_t)(-45 + i * 22);
+        janus_draw_line(vu_ray_x(hub_x, tick_len, deg), vu_ray_y(hub_y, tick_len, deg),
+                        vu_ray_x(hub_x, len, deg), vu_ray_y(hub_y, len, deg), lw.color);
+    }
+
+    janus_draw_line(hub_x, hub_y, vu_ray_x(hub_x, len, needle_deg),
+                    vu_ray_y(hub_y, len, needle_deg), lw.color);
+
+    int16_t hub_r = (int16_t)(len / 10);
+    if (hub_r < 2) hub_r = 2;
+    janus_fill_circle(hub_x, hub_y, hub_r, lw.color);
+}
+
 /* forward declaration: draw_box_header (below) renders `summary_children`
  * via render_widget, and render_widget's JANUS_WIDGET_BOX case calls
  * draw_box_header — genuine mutual recursion, one of the two needs a
@@ -886,7 +935,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_IMAGE: case JANUS_WIDGET_RADIOBUTTON: case JANUS_WIDGET_PROGRESS:
         case JANUS_WIDGET_GAUGE: case JANUS_WIDGET_CHECKBOX: case JANUS_WIDGET_LED:
         case JANUS_WIDGET_DIVIDER: case JANUS_WIDGET_TOGGLE: case JANUS_WIDGET_BADGE:
-        case JANUS_WIDGET_SLIDER:
+        case JANUS_WIDGET_SLIDER: case JANUS_WIDGET_VU:
             if (!bind_consume_dirty(&lw.bind, bound_dirty)) return;
             break;
         default:
@@ -907,6 +956,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_TOGGLE: draw_toggle(w, bound_struct); return;
         case JANUS_WIDGET_BADGE: draw_badge(w, bound_struct); return;
         case JANUS_WIDGET_SLIDER: draw_slider(w, bound_struct); return;
+        case JANUS_WIDGET_VU: draw_vu(w, bound_struct); return;
 
         case JANUS_WIDGET_BOX:
             draw_box_header(w, bound_struct, bound_dirty);
