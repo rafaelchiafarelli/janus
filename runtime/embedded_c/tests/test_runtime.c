@@ -82,6 +82,33 @@ static int rt_colour_in_xband(uint16_t colour, int x_lo, int x_hi) {
     return 0;
 }
 
+/* is some `colour` pixel within `tol` (Chebyshev) of `(x, y)`? Used by the
+ * vu needle tests: ticks and the needle share `.color` and the same outer
+ * radius (`len`), so a farthest-pixel scan can't tell them apart — instead
+ * probe an *inner* radius (well under the ticks' 0.9*len..len band) that
+ * only the needle's own hub-to-tip line ever reaches. */
+static int rt_colour_near(uint16_t colour, int x, int y, int tol) {
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        mock_draw_call_t c = mock_driver_log[i];
+        if (c.sample_pixel != colour) continue;
+        int dx = (int)c.x - x;
+        int dy = (int)c.y - y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        if (dx <= tol && dy <= tol) return 1;
+    }
+    return 0;
+}
+
+/* same ray formula draw_vu uses internally (janus_runtime.c's vu_ray_x/y,
+ * static there) — reimplemented here against the public janus_sin16/
+ * janus_cos16 so the test can predict where the needle lands at a given
+ * angle without reaching into runtime internals. */
+static void rt_vu_ray_point(int hub_x, int hub_y, int16_t len, int16_t deg, int *out_x, int *out_y) {
+    *out_x = hub_x + (int)(((int32_t)len * janus_sin16(deg)) >> 15);
+    *out_y = hub_y - (int)(((int32_t)len * janus_cos16(deg)) >> 15);
+}
+
 /* blocking render == async-drained render, span for span — the
  * "drains only JANUS_ASYNC_OP_FILL" check: a non-fill op would replay
  * differently (or not at all) through the queue. */
@@ -642,25 +669,100 @@ static void test_led_render_is_async_safe(void) {
     CHECK(rt_render_matches_async(&g_led_screen));
 }
 
-/* vu (vu_meter task 1): face-fill stub only — no needle yet (task 2).
- * Confirms JANUS_WIDGET_VU is actually wired into both render_widget
- * switches (the dirty-check list and the dispatch table), not silently
- * dropped by the compiler's exhaustive-enum switch. */
-static void test_vu_stub_fills_geometry_with_bg_color(void) {
-    static const janus_widget_desc_t vu = {
-        .kind = JANUS_WIDGET_VU, .id = "v", .geometry = { 0, 0, 20, 20 },
-        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
-        .color = 0x001F, .bg_color = 0xF800,
-    };
-    static const janus_screen_desc_t screen = {
-        .name = "VuStub", .widgets = &vu, .widget_count = 1, .bound_struct = &g_demo,
-    };
+/* vu: analog needle over a 90 degree tick arc (vu_meter task 2). Geometry
+ * {0,0,80,48}: hub at (40,47) (bottom-centre), len = min(40,48) - 2 = 38.
+ * value==min -> needle at -45 deg (up-left), value==max -> +45 deg
+ * (up-right), midpoint -> 0 deg (straight up). Ticks share `.color` with
+ * the needle and sit at the same outer radius, so "the farthest `.color`
+ * pixel from the hub" may land on a tick instead of the needle tip at an
+ * extreme value — harmless here, since the nearest tick at an extreme
+ * points the same general direction the needle does. */
+#define VU_COLOR 0x001F
+#define VU_BG    0xF800
+#define VU_HUB_X 40
+#define VU_HUB_Y 47
+#define VU_LEN   38   /* min(r.w/2, r.h) - 2 = min(40, 48) - 2 */
+#define VU_INNER_R 15 /* well under the ticks' 0.9*VU_LEN..VU_LEN band (~34..38) */
 
-    g_demo.level = 42;   /* stub ignores the bound value entirely */
+static const janus_widget_desc_t g_vu = {
+    .kind = JANUS_WIDGET_VU, .id = "v", .geometry = { 0, 0, 80, 48 },
+    .bind = {
+        .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT,
+        .range_min = 0, .range_max = 100,
+    },
+    .color = VU_COLOR, .bg_color = VU_BG,
+};
+static const janus_screen_desc_t g_vu_screen = {
+    .name = "Vu", .widgets = &g_vu, .widget_count = 1, .bound_struct = &g_demo,
+};
+
+static void test_vu_face_fill_under_the_needle(void) {
+    g_demo.level = 50;
     mock_driver_reset();
-    janus_render_screen(&screen);
-    CHECK(rt_painted_colour(10, 10, 0xF800));  /* bg_color fill across the geometry */
-    CHECK(!rt_painted(25, 10));                /* nothing drawn outside it */
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_painted_colour(0, 0, VU_BG));    /* far corner: face fill, untouched by needle/ticks/hub */
+    CHECK(!rt_painted(85, 20));               /* nothing drawn outside the geometry */
+}
+
+static void test_vu_needle_points_up_left_at_range_min(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, -45, &ex, &ey);
+    CHECK(ex < VU_HUB_X);
+    CHECK(ey < VU_HUB_Y);
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_needle_points_up_right_at_range_max(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, 45, &ex, &ey);
+    CHECK(ex > VU_HUB_X);
+    CHECK(ey < VU_HUB_Y);
+
+    g_demo.level = 100;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_needle_points_straight_up_at_midpoint(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, 0, &ex, &ey);
+    CHECK(ex - VU_HUB_X <= 2 && VU_HUB_X - ex <= 2);
+    CHECK(ey < VU_HUB_Y);
+
+    g_demo.level = 50;
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_clamps_above_range_max(void) {
+    int ex, ey;
+    rt_vu_ray_point(VU_HUB_X, VU_HUB_Y, VU_INNER_R, 45, &ex, &ey);
+
+    g_demo.level = 150;   /* above range_max=100 — must render exactly like level == 100 */
+    mock_driver_reset();
+    janus_render_screen(&g_vu_screen);
+    CHECK(rt_colour_near(VU_COLOR, ex, ey, 1));
+}
+
+static void test_vu_hub_painted_for_every_value(void) {
+    int values[] = { 0, 25, 50, 75, 100 };
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        g_demo.level = values[i];
+        mock_driver_reset();
+        janus_render_screen(&g_vu_screen);
+        CHECK(rt_painted_colour(VU_HUB_X, VU_HUB_Y, VU_COLOR));
+    }
+}
+
+static void test_vu_render_is_async_safe(void) {
+    g_demo.level = 50;
+    CHECK(rt_render_matches_async(&g_vu_screen));
 }
 
 static void test_badge_fill_tracks_live_value(void) {
@@ -1175,7 +1277,13 @@ int main(void) {
     test_toggle_render_is_async_safe();
     test_led_shaded_disc_per_state();
     test_led_render_is_async_safe();
-    test_vu_stub_fills_geometry_with_bg_color();
+    test_vu_face_fill_under_the_needle();
+    test_vu_needle_points_up_left_at_range_min();
+    test_vu_needle_points_up_right_at_range_max();
+    test_vu_needle_points_straight_up_at_midpoint();
+    test_vu_clamps_above_range_max();
+    test_vu_hub_painted_for_every_value();
+    test_vu_render_is_async_safe();
     test_badge_fill_tracks_live_value();
     test_slider_fill_tracks_live_value();
     test_label_without_text_draws_only_the_background_fill();
