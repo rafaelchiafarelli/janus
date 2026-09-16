@@ -81,7 +81,8 @@ def render_display_config_header(display: DisplayConfig) -> str:
 
 
 def render_render_config_header(
-    render_mode: RenderMode, display: DisplayConfig | None = None, has_nav: bool = False
+    render_mode: RenderMode, display: DisplayConfig | None = None, has_nav: bool = False,
+    has_status: bool = False,
 ) -> str:
-    body = emit_render_config(render_mode, display, has_nav)
+    body = emit_render_config(render_mode, display, has_nav, has_status)
     return load_template("render_config.h.tmpl").format(guard=_guard("render", "config"), body=body)

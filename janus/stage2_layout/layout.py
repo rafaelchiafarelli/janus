@@ -5,14 +5,21 @@ Pure, deterministic: walks a Screen's widget tree bottom-up, filling in
 """
 from __future__ import annotations
 
-from ..ir import App, DisplayConfig, NavTab, Rect, Screen, Widget
+from ..ir import App, DisplayConfig, NavTab, Rect, Screen, StatusBar, Widget
 
 GAP = 4
 BOX_HEADER_H = 16
+# app-level status band (app.yaml `status: { text: "..." }`). Fixed
+# constant for v1 — not authorable (status_bar epic, decision 3): one
+# `medium`-font line (JANUS_FONT_MEDIUM_GLYPH_H = 14) plus ~3px padding
+# top/bottom. The band is the true top of the panel — it sits at y=0,
+# above the nav strip when app.nav is also set (see NAV_BAR_H below).
+STATUS_BAR_H = 20
 # app-level nav strip (app.nav: { kind: tabs }). Fixed constants for v1 —
 # not authorable (nav_tabs epic, decision 2). The strip is its own band
-# at y=0 across the full panel width; every screen's own content (its
-# authored header/status_bar row included) starts at y = NAV_BAR_H.
+# across the full panel width, at y=0 (or y=STATUS_BAR_H when app.status
+# is also set — status_bar epic, decision 4); every screen's own content
+# (its authored header row included) starts below both bands.
 NAV_BAR_H = 28
 # smallest per-tab cell width worth laying out — more tabs than the panel
 # can give this many px each is a parse-time error (no scrolling in v1).
@@ -41,22 +48,25 @@ _DEFAULT_SIZE = {
 
 
 def layout_screen(
-    screen: Screen, display: DisplayConfig | None = None, has_nav: bool = False
+    screen: Screen, display: DisplayConfig | None = None, has_nav: bool = False,
+    has_status: bool = False,
 ) -> Screen:
     """`display`, when given, is what a top-level `fill: true` widget
     grows against — without it (today's default), `fill` on any widget
     whose ancestor chain never reaches a known size raises ValueError;
     every other widget lays out exactly as before regardless.
 
-    `has_nav` (app.nav set) offsets the screen root down by `NAV_BAR_H`
-    and takes that band out of the height a top-level `fill:` child sees
-    — the nav strip owns y in `[0, NAV_BAR_H)`. Default False, so every
-    existing call and every no-nav screen lays out byte-identical."""
+    `has_nav` (app.nav set) and `has_status` (app.status set) each offset
+    the screen root down by their own band height and take it out of the
+    height a top-level `fill:` child sees — status (if present) owns
+    y in `[0, STATUS_BAR_H)`, nav (if present) the band right below it.
+    Both default False, so every existing call and every screen with
+    neither lays out byte-identical."""
     avail_w = display.width if display is not None else None
     avail_h = display.height if display is not None else None
-    top = NAV_BAR_H if has_nav else 0
-    if has_nav and avail_h is not None:
-        avail_h -= NAV_BAR_H
+    top = (STATUS_BAR_H if has_status else 0) + (NAV_BAR_H if has_nav else 0)
+    if avail_h is not None:
+        avail_h -= top
     _layout_widget(screen.root, x=0, y=top, avail_w=avail_w, avail_h=avail_h)
     return screen
 
@@ -68,7 +78,8 @@ def check_fits_display(screen: Screen, display: DisplayConfig) -> None:
     otherwise. Raises rather than silently clipping — matches the
     parse-time "validate, don't default" rule this pipeline uses
     elsewhere (architecture.md Stage 1). Uses the root's `x`/`y` too, so a
-    nav-offset root (y = NAV_BAR_H) is measured to its real bottom."""
+    nav/status-offset root (y = NAV_BAR_H and/or STATUS_BAR_H) is
+    measured to its real bottom."""
     root = screen.root.geometry
     if root.x + root.w > display.width or root.y + root.h > display.height:
         raise ValueError(
@@ -79,30 +90,47 @@ def check_fits_display(screen: Screen, display: DisplayConfig) -> None:
 
 def build_nav_bar(app: App) -> list[NavTab] | None:
     """The laid-out tab strip for `app.nav` — equal-width cells across
-    `app.display.width`, `NAV_BAR_H` tall at y=0, the last cell absorbing
-    the width remainder (same rule as `_distribute_fill`). `None` when
-    `app.nav` is unset, or `app.display` is missing (a real project can't
-    reach here — Stage 1 rejects `nav` without `display` — but a
-    hand-built `App` in a unit test can, and a strip with no panel width
-    to lay across just isn't a thing)."""
+    `app.display.width`, `NAV_BAR_H` tall at y=0 (or y=STATUS_BAR_H when
+    `app.status` is also set — status_bar epic, decision 4), the last
+    cell absorbing the width remainder (same rule as `_distribute_fill`).
+    `None` when `app.nav` is unset, or `app.display` is missing (a real
+    project can't reach here — Stage 1 rejects `nav` without `display` —
+    but a hand-built `App` in a unit test can, and a strip with no panel
+    width to lay across just isn't a thing)."""
     if app.nav is None or app.display is None:
         return None
     name_to_idx = {s.name: i for i, s in enumerate(app.screens)}
     n = len(app.nav)
     cell_w, remainder = divmod(app.display.width, n)
+    y = STATUS_BAR_H if app.status is not None else 0
     tabs: list[NavTab] = []
     x = 0
     for i, target in enumerate(app.nav):
         w = cell_w + (remainder if i == n - 1 else 0)
         tabs.append(
             NavTab(
-                rect=Rect(x=x, y=0, w=w, h=NAV_BAR_H),
+                rect=Rect(x=x, y=y, w=w, h=NAV_BAR_H),
                 title=target.title,
                 target_screen_index=name_to_idx[target.screen],
             )
         )
         x += w
     return tabs
+
+
+def build_status_bar(app: App) -> StatusBar | None:
+    """The laid-out status band for `app.status` — a full-width band,
+    `STATUS_BAR_H` tall, at the true top of the panel (y=0) regardless of
+    whether `app.nav` is also set (the nav strip is what shifts down, per
+    `build_nav_bar` above). `None` when `app.status` is unset, or
+    `app.display` is missing (Stage 1 rejects `status` without `display`;
+    same hand-built-`App`-in-a-test carve-out as `build_nav_bar`)."""
+    if app.status is None or app.display is None:
+        return None
+    return StatusBar(
+        rect=Rect(x=0, y=0, w=app.display.width, h=STATUS_BAR_H),
+        text=app.status.text,
+    )
 
 
 def _resolve_leaf_size(widget: Widget) -> tuple[int, int]:

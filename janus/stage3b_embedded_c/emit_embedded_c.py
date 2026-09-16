@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 
 from ..ir import App, DisplayConfig, RenderMode, Screen, Widget
-from ..stage2_layout.layout import build_nav_bar
+from ..stage2_layout.layout import build_nav_bar, build_status_bar
 from .image_asset import ImageAssetError, load_rgb565
 
 log = logging.getLogger("janus.emit")
@@ -579,7 +579,8 @@ def emit_display_config(display: DisplayConfig) -> str:
 
 
 def emit_render_config(
-    render_mode: RenderMode, display: "DisplayConfig | None" = None, has_nav: bool = False
+    render_mode: RenderMode, display: "DisplayConfig | None" = None, has_nav: bool = False,
+    has_status: bool = False,
 ) -> str:
     """The body of `janus_render_config.gen.h` — a *build-config* header
     the fixed runtime library itself pulls in (via `__has_include`, see
@@ -608,10 +609,11 @@ def emit_render_config(
             " * polled/async render path is left out of the build. */",
         ]
     # Panel size reaches the fixed runtime only when it actually needs it:
-    # display.background (janus_clear_screen full-panel erase) or app.nav
-    # (nav-bar geometry, nav_tabs epic). Otherwise the runtime stays
+    # display.background (janus_clear_screen full-panel erase), app.nav
+    # (nav-bar geometry, nav_tabs epic), or app.status (status-bar
+    # geometry, status_bar epic). Otherwise the runtime stays
     # display-size-agnostic.
-    if display is not None and (display.background is not None or has_nav):
+    if display is not None and (display.background is not None or has_nav or has_status):
         lines += [
             "/* panel size — for janus_clear_screen's full-panel erase and/or the nav bar */",
             f"#define JANUS_DISPLAY_PANEL_W {display.width}",
@@ -686,12 +688,32 @@ def emit_app_table(app: App) -> str:
         tabs_ref = "NULL"
         tab_count = 0
 
+    # `janus_app_status_bar` — the renderable status band descriptor
+    # (rect + flash text ptr). draw_status_bar (status_bar epic task 2)
+    # reads this. `build_status_bar` needs `app.display` — a real project
+    # always has it here (Stage 1 rejects `status` without `display`); a
+    # hand-built test App without one just gets status_bar = NULL.
+    status_bar = app.status_bar if app.status_bar is not None else build_status_bar(app)
+    if status_bar is not None:
+        status_text_ref = "janus_app_status_text"
+        lines.append(
+            f"static const char {status_text_ref}[] JANUS_PROGMEM = {_c_string(status_bar.text)};"
+        )
+        lines.append(
+            f"static const janus_status_bar_t janus_app_status_bar_desc JANUS_PROGMEM = "
+            f"{{ {_rect(status_bar.rect)}, {status_text_ref} }};"
+        )
+        status_bar_ref = "&janus_app_status_bar_desc"
+    else:
+        status_bar_ref = "NULL"
+
     lines.append(
         "janus_app_t janus_app = {\n"
         "    .screens = janus_app_screens,\n"
         f"    .nav_titles = {titles_ref},\n"
         f"    .nav_tabs = {tabs_ref},\n"
         f"    .nav_tab_count = {tab_count},\n"
+        f"    .status_bar = {status_bar_ref},\n"
         f"    .screen_count = {len(screen_vars)},\n"
         "    .active_screen = 0,\n"
         "};"

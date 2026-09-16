@@ -140,6 +140,25 @@ class NavTab:
 
 
 @dataclass
+class StatusConfig:
+    """Authored `app.yaml` `status:` block — app-level chrome, never a
+    per-screen widget (settled 2026-09-15, see the status_bar epic).
+    Static text only for v1; no bound field."""
+    text: str
+
+
+@dataclass
+class StatusBar:
+    """The laid-out status band — not authored. Built by
+    stage2_layout.build_status_bar from `App.status` + `App.display`: a
+    full-width band, `STATUS_BAR_H` tall, at the true top of the panel
+    (y=0). Baked into the generated app table (`janus_app_status_bar`)
+    for the runtime's draw_status_bar (status_bar epic)."""
+    rect: "Rect"
+    text: str
+
+
+@dataclass
 class DisplayConfig:
     width: int
     height: int
@@ -182,3 +201,8 @@ class App:
     # stage2_layout.build_nav_bar), never authored. None when `nav` is
     # unset. emit_app_table bakes it into `janus_nav_tabs[]`.
     nav_bar: Optional[list[NavTab]] = None
+    status: Optional[StatusConfig] = None
+    # Laid-out status band — populated after layout (cli.generate /
+    # stage2_layout.build_status_bar), never authored. None when `status`
+    # is unset. emit_app_table bakes it into `janus_app_status_bar`.
+    status_bar: Optional[StatusBar] = None
