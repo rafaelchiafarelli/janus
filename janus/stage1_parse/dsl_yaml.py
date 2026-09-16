@@ -30,7 +30,7 @@ _VALID_DISPLAY_CONTROLLERS = {
 }
 _VALID_INPUT_MODALITIES = {"touch", "encoder", "buttons"}
 _VALID_RENDER_MODES = {"blocking", "non_blocking"}
-_REQUIRES_RANGE = {"progress", "gauge", "slider"}
+_REQUIRES_RANGE = {"progress", "gauge", "slider", "vu"}
 _CONTAINER_KINDS = {"column", "row", "box", "radiogroup", "navlist"}
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 # One printf-style conversion the runtime formatter (janus_format.c)

@@ -185,7 +185,9 @@ class TestLayoutSizeEnforcement(unittest.TestCase):
     def test_badge_and_slider_require_explicit_size(self) -> None:
         from janus.ir import Screen, Widget
 
-        for kind, kwargs in (("badge", {}), ("slider", {"range": (0, 100)})):
+        for kind, kwargs in (
+            ("badge", {}), ("slider", {"range": (0, 100)}), ("vu", {"range": (0, 100)}),
+        ):
             screen = Screen(
                 name="Bad",
                 root=Widget(kind="column", id="root", children=[
@@ -194,6 +196,19 @@ class TestLayoutSizeEnforcement(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 layout_screen(screen)
+
+    def test_vu_geometry_matches_authored_size(self) -> None:
+        from janus.ir import Screen, Widget
+
+        screen = Screen(
+            name="VuSized",
+            root=Widget(kind="column", id="root", children=[
+                Widget(kind="vu", id="v", range=(0, 100), size=(80, 48)),
+            ]),
+        )
+        layout_screen(screen)
+        vu = screen.root.children[0]
+        self.assertEqual((vu.geometry.w, vu.geometry.h), (80, 48))
 
 
 class TestLayoutNewLowEffortKinds(unittest.TestCase):

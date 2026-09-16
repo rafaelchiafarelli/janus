@@ -805,6 +805,17 @@ static void draw_slider(const janus_widget_desc_t *w, const void *bound_struct) 
     fill_rect_fraction(lw.geometry, fraction, lw.color, lw.bg_color);
 }
 
+/* vu: face fill stub — the needle/tick/hub render lands in vu_meter task 2
+ * (janus/stage1_parse/dsl_yaml.py + stage2_layout/layout.py + Stage 3b
+ * already treat `vu` as a full leaf kind: `range` + `size` required, same
+ * as `gauge`). `bound_struct` is unused until task 2 reads the bound
+ * value. */
+static void draw_vu(const janus_widget_desc_t *w, const void *bound_struct) {
+    (void)bound_struct;
+    janus_widget_desc_t lw = janus_widget_load(w);
+    fill_rect(lw.geometry, lw.bg_color);
+}
+
 /* forward declaration: draw_box_header (below) renders `summary_children`
  * via render_widget, and render_widget's JANUS_WIDGET_BOX case calls
  * draw_box_header — genuine mutual recursion, one of the two needs a
@@ -886,7 +897,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_IMAGE: case JANUS_WIDGET_RADIOBUTTON: case JANUS_WIDGET_PROGRESS:
         case JANUS_WIDGET_GAUGE: case JANUS_WIDGET_CHECKBOX: case JANUS_WIDGET_LED:
         case JANUS_WIDGET_DIVIDER: case JANUS_WIDGET_TOGGLE: case JANUS_WIDGET_BADGE:
-        case JANUS_WIDGET_SLIDER:
+        case JANUS_WIDGET_SLIDER: case JANUS_WIDGET_VU:
             if (!bind_consume_dirty(&lw.bind, bound_dirty)) return;
             break;
         default:
@@ -907,6 +918,7 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
         case JANUS_WIDGET_TOGGLE: draw_toggle(w, bound_struct); return;
         case JANUS_WIDGET_BADGE: draw_badge(w, bound_struct); return;
         case JANUS_WIDGET_SLIDER: draw_slider(w, bound_struct); return;
+        case JANUS_WIDGET_VU: draw_vu(w, bound_struct); return;
 
         case JANUS_WIDGET_BOX:
             draw_box_header(w, bound_struct, bound_dirty);

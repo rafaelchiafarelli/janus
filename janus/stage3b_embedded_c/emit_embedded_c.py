@@ -43,6 +43,7 @@ _KIND_ENUM = {
     "toggle": "JANUS_WIDGET_TOGGLE",
     "badge": "JANUS_WIDGET_BADGE",
     "slider": "JANUS_WIDGET_SLIDER",
+    "vu": "JANUS_WIDGET_VU",
 }
 
 _FIELD_TYPE_ENUM = {
