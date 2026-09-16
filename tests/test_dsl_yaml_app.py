@@ -191,6 +191,40 @@ class TestAppFromDictDisplay(unittest.TestCase):
             app_from_dict(data, self._screens())
 
 
+class TestAppFromDictStatusValidation(unittest.TestCase):
+    def _screens(self) -> list[Screen]:
+        return [Screen(name="One", root=Widget(kind="column", id="r1", children=[]))]
+
+    def test_no_status_key_means_none(self) -> None:
+        app = app_from_dict({"screens": []}, self._screens())
+        self.assertIsNone(app.status)
+
+    def test_status_with_display_accepted(self) -> None:
+        data = {
+            "screens": [],
+            "status": {"text": "Status: OK"},
+            "display": {"size": {"w": 240, "h": 320}},
+        }
+        app = app_from_dict(data, self._screens())
+        self.assertEqual(app.status.text, "Status: OK")
+
+    def test_status_without_display_rejected(self) -> None:
+        data = {"screens": [], "status": {"text": "Status: OK"}}
+        with self.assertRaises(ValueError):
+            app_from_dict(data, self._screens())
+
+    def test_status_and_nav_can_coexist(self) -> None:
+        data = {
+            "screens": [],
+            "status": {"text": "Status: OK"},
+            "nav": {"kind": "tabs", "targets": [{"screen": "One", "title": "1"}]},
+            "display": {"size": {"w": 240, "h": 320}},
+        }
+        app = app_from_dict(data, self._screens())
+        self.assertEqual(app.status.text, "Status: OK")
+        self.assertEqual(app.nav, [NavTarget(screen="One", title="1")])
+
+
 class TestAppFromDictInput(unittest.TestCase):
     def _screens(self) -> list[Screen]:
         return [Screen(name="One", root=Widget(kind="column", id="r1", children=[]))]

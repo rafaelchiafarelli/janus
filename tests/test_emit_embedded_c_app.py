@@ -7,7 +7,7 @@ from janus.stage3b_embedded_c.emit_embedded_c import (
     emit_screen,
     screen_index_map,
 )
-from janus.ir import App, DisplayConfig, NavTarget, Screen, Widget
+from janus.ir import App, DisplayConfig, NavTarget, Screen, StatusConfig, Widget
 from janus.stage2_layout.layout import layout_screen
 
 
@@ -115,6 +115,27 @@ class TestActionsAndAppTable(unittest.TestCase):
         bad_app = App(screens=self.app.screens, nav=[NavTarget(screen="One", title="Status")])
         with self.assertRaises(ValueError):
             emit_app_table(bad_app)
+
+    def test_app_table_without_status_has_null_status_bar(self) -> None:
+        out = emit_app_table(App(screens=self.app.screens, status=None))
+        self.assertIn(".status_bar = NULL,", out)
+
+    def test_app_table_bakes_status_bar_descriptor(self) -> None:
+        app = App(
+            screens=self.app.screens,
+            status=StatusConfig(text="Status: OK"),
+            display=DisplayConfig(width=200, height=320, color="rgb565"),
+        )
+        out = emit_app_table(app)
+        self.assertIn(
+            "static const janus_status_bar_t janus_app_status_bar_desc JANUS_PROGMEM = "
+            "{ {0, 0, 200, 20}, janus_app_status_text };",
+            out,
+        )
+        self.assertIn(
+            'static const char janus_app_status_text[] JANUS_PROGMEM = "Status: OK";', out
+        )
+        self.assertIn(".status_bar = &janus_app_status_bar_desc,", out)
 
 
 if __name__ == "__main__":

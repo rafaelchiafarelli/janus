@@ -1068,6 +1068,32 @@ void janus_clear_screen(const janus_screen_desc_t *screen) {
 #endif  /* JANUS_DISPLAY_BACKGROUND && panel size */
 }
 
+/* --------------------------------------------------------- status band --
+ * app.yaml `status: { text: "..." }`. Geometry is baked (a single
+ * janus_status_bar_t, full panel width — stage2_layout); this just paints
+ * it. Fixed colours, deliberately not authorable (status_bar epic
+ * decision 3) — same "Janus-owned UI affordance" spirit as
+ * JANUS_COLOR_NAV_* / JANUS_COLOR_FOCUS_RING. The bg/ink pair reuses the nav
+ * strip's own inactive-cell/active-label colours so the two bands read as
+ * one chrome family. Static text only in v1 (epic out-of-scope) — no
+ * live/bound content, so nothing here ever needs re-painting outside a
+ * screen switch or scaffold startup (see the call sites below). */
+#define JANUS_COLOR_STATUS_BG  ((uint16_t)0x18e3)  /* same as JANUS_COLOR_NAV_BG */
+#define JANUS_COLOR_STATUS_INK ((uint16_t)0xffff)  /* same as JANUS_COLOR_NAV_INK_ACTIVE */
+
+static void draw_status_bar(const janus_app_t *app) {
+    if (app == NULL || app->status_bar == NULL) return;
+    janus_status_bar_t bar = janus_status_bar_load(app->status_bar);
+    fill_rect(bar.rect, JANUS_COLOR_STATUS_BG);
+    draw_string(bar.rect, bar.text, JANUS_COLOR_STATUS_INK, JANUS_COLOR_STATUS_BG,
+                /*from_flash=*/true, JANUS_FONT_SIZE_MEDIUM, 1,
+                /*center=*/true, /*allow_shrink=*/false);
+}
+
+void janus_render_status_bar(const janus_app_t *app) {
+    draw_status_bar(app);
+}
+
 /* ------------------------------------------------------------ nav strip --
  * app.yaml `nav: { kind: tabs }`. Geometry is baked (janus_nav_tab_t per
  * cell, equal widths across the panel — stage2_layout); this just paints
@@ -1130,6 +1156,7 @@ void janus_switch_screen(janus_app_t *app, uint16_t screen_index) {
     janus_clear_screen(janus_app_get_screen(app, app->active_screen));
     app->active_screen = screen_index;
     janus_render_screen(janus_app_get_screen(app, screen_index));
+    draw_status_bar(app);   /* true top-most band; no-op without app.status */
     draw_nav_bar(app);   /* strip lives in its own band above the screen; repaint the active tab */
 }
 
@@ -1208,6 +1235,7 @@ void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index) {
     janus_set_focus(NULL);   /* same reasoning as janus_switch_screen */
     janus_clear_screen(janus_app_get_screen(app, app->active_screen));  /* erase outgoing (synchronous, one-shot) */
     app->active_screen = screen_index;
+    draw_status_bar(app);   /* synchronous, one-shot, same as draw_nav_bar below */
     draw_nav_bar(app);   /* synchronous, one-shot — like the clear above; the screen render below is the async part */
     janus_render_screen_async_start(janus_app_get_screen(app, screen_index));
 }

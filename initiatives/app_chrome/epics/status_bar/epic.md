@@ -62,8 +62,8 @@ this belongs at the app level, not per-screen, same as `nav_tabs`.
 
 | # | file | status | contract (one line) |
 |---|---|---|---|
-| 1 | `tasks/1-status-bar-field-and-layout.md` | ⬜ ready to implement | Stage 1 parses `app.yaml status:`; Stage 2 reserves `STATUS_BAR_H` as the true top band; Stage 3b bakes a status descriptor. Data only, nothing draws. |
-| 2 | `tasks/2-draw-and-wire-status-bar.md` | ⬜ planned, depends on task 1 | `draw_status_bar` in the fixed runtime, wired into the same call sites `draw_nav_bar` uses (`janus_switch_screen[_async_start]`, all 6 scaffold templates). |
+| 1 | `tasks/1-status-bar-field-and-layout-done.md` | ✅ done | Stage 1 parses `app.yaml status:`; Stage 2 reserves `STATUS_BAR_H` as the true top band; Stage 3b bakes a status descriptor. Data only, nothing draws. |
+| 2 | `tasks/2-draw-and-wire-status-bar-done.md` | ✅ done | `draw_status_bar` in the fixed runtime, wired into the same call sites `draw_nav_bar` uses (`janus_switch_screen[_async_start]`, all 6 scaffold templates). |
 
 ## Acceptance gate
 
