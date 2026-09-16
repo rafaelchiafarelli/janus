@@ -19,46 +19,51 @@ above it. ArduinoIHM's three `.screen.yaml` files each hand-author an
 (silent duplicate-key row drop, see `initiative.md`) — a strong signal
 this belongs at the app level, not per-screen, same as `nav_tabs`.
 
-## Proposed shape (not yet settled with Rafael — confirm before task 1 starts)
+## Decisions (settled with Rafael 2026-09-15 — these are fixed constraints for the tasks below)
 
-Carried over from the handoff doc's "suggested shape," as a starting
-point only:
-
-1. A new optional `app.yaml` block, e.g. `status: { text: "..." }`
-   (static text only for v1 — no bound field; see "Out of scope").
-2. Stage 2's `layout_screen` reserves a second fixed-height band
-   *above* the nav band when `status` is set: `top = STATUS_BAR_H +
-   (NAV_BAR_H if has_nav else 0)`. `build_nav_bar` bakes the nav strip's
-   own `y` at `STATUS_BAR_H` instead of `0` when both are present.
-3. A fixed-runtime `draw_status_bar(app)` alongside `draw_nav_bar`,
-   called from the same call sites (`janus_switch_screen`, once at
-   scaffold startup) — never from the periodic render tick (same
-   "chrome repaints on screen-change, not per-frame" rule `nav_tabs`
-   established, and the reason ArduinoIHM's own status-bar flicker bug —
-   see `janus_handoff`, item 3 — was a *consumer*-side mistake, not
-   something Janus should make easy to repeat).
-
-## Open questions to settle with Rafael before task 1
-
-- Does `status` require `display.size`, same as `nav` does (decision 1
-  of the `nav_tabs` epic)? Almost certainly yes, for the same reason
-  (the band needs the panel width to paint full-width) — but that's a
-  DSL constraint, not this session's call to make alone.
-- Exact `STATUS_BAR_H` value and colour constants (mirrors
-  `NAV_BAR_H` / `JANUS_COLOR_NAV_*` as fixed Janus constants, not
-  authored styling — same precedent, needs the same explicit sign-off).
-- Field name/shape: `status: { text: "..." }` vs. folding into an
-  existing block vs. something else entirely.
-- Whether `status` can be set without `nav` (band alone, no tab strip)
-  — the "true top-most band" framing in the handoff implies yes.
+1. **Status is app-level only, never a per-screen widget.** A new
+   optional `app.yaml` block, `status: { text: "..." }`, parsed in
+   Stage 1 next to `nav`/`display`/`input` (same spot `nav_data =
+   data.get("nav")` is handled, `janus/stage1_parse/dsl_yaml.py:348`).
+   `App` (`janus/ir.py:174`) gets `status: Optional[StatusConfig] =
+   None`; static text only for v1 (see "Out of scope" — no bound field).
+2. **`display.size` is required when `status` is set** — same reasoning
+   as `nav` decision 1 (`nav_tabs` epic): the band needs the panel width
+   to paint full-width, and the `JANUS_DISPLAY_PANEL_W/H` seam
+   (`emit_embedded_c.py` ~line 612-618) already exists for exactly this,
+   just needs `status` added to its trigger condition alongside
+   `nav`/`background`.
+3. **`STATUS_BAR_H = 20`**, a fixed Janus layout constant
+   (`janus/stage2_layout/layout.py`, alongside `NAV_BAR_H = 28` at line
+   16) — one line of `medium` text (`JANUS_FONT_MEDIUM_GLYPH_H` = 14)
+   plus ~3px padding top/bottom. `JANUS_COLOR_STATUS_BG` (`0x18e3`) /
+   `JANUS_COLOR_STATUS_INK` (`0xffff`) fixed runtime constants
+   (`runtime/embedded_c/src/janus_runtime.c`, alongside
+   `JANUS_COLOR_NAV_*` at line 1079) — reuses the nav strip's own
+   inactive-bg/active-label pairing so the two bands read as one chrome
+   family rather than clashing. Like `NAV_BAR_H`/`JANUS_COLOR_NAV_*`,
+   these are Janus constants, not authored styling — revisit only if a
+   real project needs it.
+4. **The status band is the true top of the panel; the nav strip shifts
+   down under it, not the other way round.** `layout_screen`'s `top =
+   NAV_BAR_H if has_nav else 0` (`layout.py:57`) becomes `top =
+   (STATUS_BAR_H if has_status else 0) + (NAV_BAR_H if has_nav else 0)`;
+   `build_nav_bar`'s tab rects (`layout.py:99`, currently `y=0`) move to
+   `y = STATUS_BAR_H if has_status else 0`. `status` can be set with or
+   without `nav` — a project with no tabs still gets a top-most status
+   band if it declares one.
+5. **Two tasks, not three.** Unlike `nav_tabs`, the status band is
+   display-only — no touch hit-test, no focus/encoder interaction, no
+   Stage 6 work at all. "Wiring" is light enough (the same call sites
+   `draw_nav_bar` already uses) to fold into the draw task instead of
+   standing alone.
 
 ## Tasks
 
 | # | file | status | contract (one line) |
 |---|---|---|---|
-| 1 | `tasks/1-status-bar-field-and-layout.md` | ⬜ blocked on open questions above | Stage 1 parses `app.yaml status:`; Stage 2 reserves `STATUS_BAR_H` above the nav band (or at `y = 0` with no nav); Stage 3b bakes a status descriptor. Data only, nothing draws. |
-| 2 | `tasks/2-draw-status-bar.md` | ⬜ planned, depends on task 1 | `draw_status_bar` in the fixed runtime — static text centered in the band. |
-| 3 | `tasks/3-status-bar-wiring.md` | ⬜ planned, depends on task 2 | Call sites (`janus_switch_screen`, scaffold startup) wired, same pattern as `draw_nav_bar`; `architecture.md` updated. |
+| 1 | `tasks/1-status-bar-field-and-layout.md` | ⬜ ready to implement | Stage 1 parses `app.yaml status:`; Stage 2 reserves `STATUS_BAR_H` as the true top band; Stage 3b bakes a status descriptor. Data only, nothing draws. |
+| 2 | `tasks/2-draw-and-wire-status-bar.md` | ⬜ planned, depends on task 1 | `draw_status_bar` in the fixed runtime, wired into the same call sites `draw_nav_bar` uses (`janus_switch_screen[_async_start]`, all 6 scaffold templates). |
 
 ## Acceptance gate
 
