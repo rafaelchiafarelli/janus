@@ -1219,7 +1219,22 @@ void janus_set_focus(const janus_widget_desc_t *widget) {
 
     const void *bound_struct = g_current_screen != NULL ? janus_screen_load(g_current_screen).bound_struct : NULL;
     g_focused_widget = widget;
-    if (previous != NULL) render_widget(previous, bound_struct, NULL);
+    if (previous != NULL) {
+        janus_widget_desc_t lp = janus_widget_load(previous);
+        /* A box with no header strip rings its *full body* instead of a
+         * header band (draw_box_header, has_strip == false) -- unlike every
+         * other focusable widget, nothing in its normal redraw path repaints
+         * that band on its own: draw_box_header skips painting entirely when
+         * there's no strip, and children are laid out inside the box, not
+         * necessarily flush with its outer edge, so they don't reliably
+         * cover the inset ring either. The stale ring survives a plain
+         * render_widget. Clear the box's own footprint first -- same fix
+         * janus_toggle_box already applies, for the same reason. */
+        if (lp.kind == JANUS_WIDGET_BOX && lp.geometry_collapsed.h == 0) {
+            fill_rect(lp.geometry, lp.bg_color);
+        }
+        render_widget(previous, bound_struct, NULL);
+    }
     if (widget != NULL) render_widget(widget, bound_struct, NULL);
 }
 

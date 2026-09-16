@@ -832,6 +832,19 @@ redrawn on top of the incoming screen's freshly rendered content. Only
 focusable, so the redraw never needs `bind` data — `read_bound_value`/
 `read_bound_string` are never called from this path.
 
+**Headerless box unfocus (fixes/000004, 2026-09-15).** A `box` with no
+header strip (`geometry_collapsed.h == 0` — no `text:`/`summary:`) rings
+its *full body* on focus (`draw_box_header`'s `has_strip ? geometry_collapsed
+: geometry`), but paints nothing at all on the plain `render_widget` the
+unfocus redraw above relies on (`draw_box_header` only has a painting
+branch when `has_strip` is true) — so the stale ring survived a focus move
+to another widget. Every other focusable kind avoids this because its own
+normal draw already repaints the exact band the ring sits in; a headerless
+box is the one case nothing does. `janus_set_focus` now does an explicit
+`fill_rect(lp.geometry, lp.bg_color)` on the outgoing widget first, but only
+for this case — same fix `janus_toggle_box` already applied for the
+identical reason.
+
 **Nav strip rendering (nav_tabs epic task 2).** `janus_render_nav_bar(app)`
 (internal `draw_nav_bar`) paints the app-level tab strip into its band:
 one `fill_rect` per `app->nav_tabs` cell (baked geometry, loaded pgm-safe
