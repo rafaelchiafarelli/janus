@@ -47,6 +47,12 @@ class TestRenderMainC(unittest.TestCase):
         # nav check comes before the per-screen hit-test
         self.assertLess(out.index("janus_nav_hit_test"), out.index("janus_touch_hit_test(screen"))
 
+    def test_renders_status_bar_at_startup(self) -> None:
+        # status_bar epic task 2 — same "no-op if app.yaml has no status:"
+        # unconditional call janus_render_nav_bar already gets
+        out = render_main_c()
+        self.assertIn("janus_render_status_bar(&janus_app);", out)
+
 
 class TestRenderMainCEncoder(unittest.TestCase):
     def test_polls_encoder_and_moves_focus(self) -> None:

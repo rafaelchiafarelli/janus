@@ -11,6 +11,7 @@ void display_driver_init(void);  /* vendor-provided, see src/display_driver.c */
 int main(void) {
     display_driver_init();
     janus_render_screen_async_start(janus_app_get_screen(&janus_app, janus_app.active_screen));
+    janus_render_status_bar(&janus_app);   /* app-level status band (no-op if app.yaml has no `status:`) */
     janus_render_nav_bar(&janus_app);   /* app-level tab strip (no-op if app.yaml has no `nav:`) */
 
     while (1) {

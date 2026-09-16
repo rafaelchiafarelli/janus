@@ -412,6 +412,20 @@ catch-up to match it (2026-09-15) — a reminder that any project's
 already-scaffolded, hand-frozen `main.c` needs the same catch-up by hand
 if it was written before `nav:` was added to its `app.yaml`.
 
+Project-level status band (also not an in-screen widget kind):
+
+| kind | shape | notes |
+|---|---|---|
+| `status` | `text: "..."` in `app.yaml` | app-level-only chrome — never a per-screen widget (status_bar epic, settled 2026-09-15: per-screen hand-authored status rows had already drifted out of sync across a real project's screens). **Requires a `display:` block**, same reasoning as `nav`. Janus reserves a fixed `STATUS_BAR_H` band as the true top of every screen — above the nav strip, if `nav` is also declared — bakes a `janus_app_status_bar` descriptor (rect + flash text), and the fixed runtime's `janus_render_status_bar(app)` paints it — full-width fill, centered text — on every `janus_switch_screen` and once at startup (the scaffolds call it), never per frame. Static text only in v1, no bound field. |
+
+**How to use:** declare `status: { text: "..." }` + `display:` in
+`app.yaml`, same shape as `nav` above — nothing else to author. The
+generated scaffolds already call `janus_render_status_bar` right where
+they call `janus_render_nav_bar`, so a fresh project needs no
+hand-wiring; `examples/host_demo`'s hand-frozen `src/main.c` got the same
+one-time manual catch-up `nav:` needed (2026-09-15). `status` and `nav`
+can be declared together or independently.
+
 **Project layout is multi-file**, one screen per file, matching harpia's own multi-Include precedent (`test.harpia` importing `file{1,2,3}.harpia`):
 
 ```
