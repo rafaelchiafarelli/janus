@@ -214,6 +214,18 @@ typedef struct {
     int16_t target;
 } janus_nav_tab_t;
 
+/* The app-level status band (app.yaml `status: { text: "..." }`).
+ * Geometry is baked at generation time — a full-width band at the true
+ * top of the panel (STATUS_BAR_H tall; above the nav strip when app.nav
+ * is also set, per stage2_layout; architecture.md Stage 2). `text` is
+ * flash-resident on AVR, same caveat as janus_nav_tab_t.title. Rendered
+ * by draw_status_bar (status_bar epic task 2) — no runtime code reads
+ * this yet as of task 1. */
+typedef struct {
+    janus_rect_t rect;
+    const char *text;
+} janus_status_bar_t;
+
 typedef struct {
     const janus_screen_desc_t *const *screens;   /* generated as a JANUS_PROGMEM pointer table on
                                                    * AVR — read via janus_app_get_screen(app, i)
@@ -223,6 +235,7 @@ typedef struct {
                                        * `nav_tabs` below (nav order + baked geometry). */
     const janus_nav_tab_t *nav_tabs; /* JANUS_PROGMEM array in nav order; NULL if app.nav is unset */
     uint16_t nav_tab_count;          /* 0 if app.nav is unset */
+    const janus_status_bar_t *status_bar; /* JANUS_PROGMEM, singular; NULL if app.status is unset */
     uint16_t screen_count;
     uint16_t active_screen;          /* the one piece of app-level runtime state */
 } janus_app_t;
@@ -253,6 +266,12 @@ static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *s
 static inline janus_nav_tab_t janus_nav_tab_load(const janus_nav_tab_t *tab) {
     janus_nav_tab_t out;
     JANUS_MEMCPY_P(&out, tab, sizeof(out));
+    return out;
+}
+
+static inline janus_status_bar_t janus_status_bar_load(const janus_status_bar_t *bar) {
+    janus_status_bar_t out;
+    JANUS_MEMCPY_P(&out, bar, sizeof(out));
     return out;
 }
 
