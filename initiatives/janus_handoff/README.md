@@ -87,7 +87,7 @@ handoff's fix being folded into Stage 4's docs. Still outstanding, on the
 ArduinoIHM side: the "not yet visually confirmed on the physical panel"
 point above — that verification belongs to that project, not this one.
 
-## 2. Status bar should render above the nav strip, not below it — not built, scoped only
+## 2. Status bar should render above the nav strip, not below it — done, Janus side (2026-09-19)
 
 **What's wanted:** every screen currently renders
 `[nav strip: tab cells] → [status_bar row] → [screen content]`,
@@ -144,6 +144,21 @@ this project's own three `status_bar` rows should be deleted from the
 `.screen.yaml` files in favor of the new app-level field — flagging that
 as a follow-up in *this* repo, not something to do as part of the Janus
 work itself.
+
+**Done, Janus side (2026-09-19):** landed as the `app_chrome` initiative's
+`status_bar` epic (2 tasks), merged to `main` (`eeb0940`). Shipped
+exactly the suggested shape above: `app.yaml status: { text: "..." }`
+(requires `display.size`, same as `nav`), `STATUS_BAR_H = 20` reserved as
+the true top band (nav strip shifts under it when both are set),
+`janus_render_status_bar(app)` wired into the same call sites
+`janus_render_nav_bar` uses, never called from the periodic
+`_if_dirty` tick (so this can't regress into the same flicker bug item 3
+below describes). Static text only, v1, as scoped. Full suite reverified
+before merge (268 Python `unittest`, 11/11 host `ctest`, `avr_gate.sh`
+PASS at 13.5%/19.1% program/data). `architecture.md` and `Janus.md` both
+updated. Still outstanding, on the ArduinoIHM side (not done here, not
+this repo's job): deleting the three hand-authored `status_bar` rows from
+`lib/GUI/*.screen.yaml` in favor of the new app-level field.
 
 ## Not a Janus bug — for context, don't rediscover this
 
