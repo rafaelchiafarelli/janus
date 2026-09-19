@@ -1,4 +1,4 @@
-# Task 3: janus-sh-target-install
+# Task 2: janus-sh-target-install
 
 ## Contract
 
@@ -57,10 +57,12 @@ so no consumer-facing contract changes except adding this one flag.
 ## Dependencies
 
 Task 1 delivered and merged (the registry `python -m janus.cli` writes
-into the temp dir from). Not dependent on task 2, but task 2's
-`host_demo` update should point at this script (`--target embedded_c`)
-once this task lands, rather than calling `python -m janus.cli` directly,
-if it doesn't already.
+into the temp dir from). Task 3 (`host-demo-path-update`) depends on
+*this* task, not the other way around: `examples/host_demo/generate.py`
+currently calls `janus.cli.main()` directly in-process, bypassing this
+script entirely, and task 3's job is to switch it over to shelling out to
+`scripts/janus.sh --target embedded_c` — which only exists once this task
+lands.
 
 ## Tests
 
@@ -78,9 +80,8 @@ if it doesn't already.
 ## DoD
 
 Contract delivered · `python -m unittest discover -s tests` green ·
-`ctest` green · `scripts/avr_gate.sh` green · the epic's acceptance gate
-(items 2–3 in `epic.md`) verified directly · docs updated · this file
-`git mv`-ed to `3-janus-sh-target-install-done.md` · commit + merge
-`3-janus-sh-target-install → tasks` · `tasks` merges up through
-`multi_target_pipeline → epics` (epic's acceptance gate is the last check
-before that merge; `desktop_target` stays open for the next two epics).
+`ctest` green · `scripts/avr_gate.sh` green · epic acceptance gate items
+2–3 verified directly · docs updated · this file `git mv`-ed to
+`2-janus-sh-target-install-done.md` · commit + merge
+`2-janus-sh-target-install → tasks` (task 3, `host-demo-path-update`,
+still pending — `tasks` does not merge up to `epics` yet).
