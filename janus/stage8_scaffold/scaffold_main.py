@@ -34,18 +34,32 @@ _TEMPLATE_BY_MODALITY_AND_RENDER_MODE: dict[tuple[InputModality, RenderMode], st
     ("buttons", "non_blocking"): "main_buttons_async.c.tmpl",
 }
 
+# The desktop target has no async variants: its draw_area_async is
+# always instant (desktop_sdl2_runtime epic decision 5), so a
+# `non_blocking` app.yaml still runs correctly on the blocking loop.
+_DESKTOP_TEMPLATE_BY_MODALITY: dict[InputModality, str] = {
+    "touch": "main_desktop_touch.c.tmpl",
+    "encoder": "main_desktop_encoder.c.tmpl",
+    "buttons": "main_desktop_buttons.c.tmpl",
+}
 
-def render_main_c(modality: InputModality = "touch", render_mode: RenderMode = "blocking") -> str:
-    """Static per (modality, render_mode) pair — the documented boot
+
+def render_main_c(
+    modality: InputModality = "touch", render_mode: RenderMode = "blocking", target: str = "embedded_c",
+) -> str:
+    """Static per (target, modality, render_mode) — the documented boot
     sequence (driver init, render the active screen from the generated
-    janus_app table) doesn't depend on any other per-app data."""
+    janus_app table) doesn't depend on any other per-app data. `desktop`
+    ignores `render_mode` (see _DESKTOP_TEMPLATE_BY_MODALITY)."""
+    if target == "desktop":
+        return load_template(_DESKTOP_TEMPLATE_BY_MODALITY[modality])
     return load_template(_TEMPLATE_BY_MODALITY_AND_RENDER_MODE[(modality, render_mode)])
 
 
-def scaffold_main_c(app: App, path: str | Path) -> bool:
-    """Writes a starter main.c (for `app.input_modality` and
+def scaffold_main_c(app: App, path: str | Path, target: str = "embedded_c") -> bool:
+    """Writes a starter main.c (for `target`, `app.input_modality` and
     `app.display.render_mode`, if `app.display` is set — `blocking`
     otherwise, matching today's behavior) only if `path` doesn't exist
     yet. Same once-only semantics as scaffold_actions_c."""
     render_mode = app.display.render_mode if app.display is not None else "blocking"
-    return write_if_missing(path, render_main_c(app.input_modality, render_mode))
+    return write_if_missing(path, render_main_c(app.input_modality, render_mode, target))

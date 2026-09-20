@@ -25,13 +25,13 @@ self-contained to this repo.
 
 ## Epics
 
-- **multi_target_pipeline** — restructure Janus's CLI/`generate()` to
+- **multi_target_pipeline** — *(done, 2026-09-20)* restructure Janus's CLI/`generate()` to
   produce every known target (`embedded_c`, `desktop`, `android`
   reserved) in one run, nested per target internally, and teach
   `scripts/janus.sh` to install just the caller's selected target flat
   into their project — before any new target actually exists, so
   `embedded_c`'s own output stays byte-identical, only relocated.
-- **desktop_sdl2_runtime** — the new target's Stage 4: an SDL2-backed
+- **desktop_sdl2_runtime** — *(done, 2026-09-20)* the new target's Stage 4: an SDL2-backed
   `draw_area_sync`/`draw_area_async`/`display_busy` window driver,
   blocking render mode only (SDL2's present is fast enough that the
   tiled/non-blocking path this exists for on SPI panels has no reason to

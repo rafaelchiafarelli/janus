@@ -1,0 +1,55 @@
+# Desktop (SDL2) build for this Janus app. Scaffolded once by Janus, then
+# yours — edit freely (extra libraries, flags, more sources).
+#
+# Configure with the folder scripts/janus.sh installed the desktop target
+# into (the one holding runtime/, src/*.gen.c, include/):
+#
+#   cmake -S . -B build -DJANUS_GENERATED_DIR=/path/to/generated
+#   cmake --build build
+#
+# A relative JANUS_GENERATED_DIR is taken relative to this folder (it is a
+# STRING, not a PATH, cache entry precisely so CMake does not resolve it
+# against the current directory first). The
+# generated sources are globbed, so adding a screen to app.yaml and
+# regenerating needs no edit here (re-run cmake once to pick up new files).
+cmake_minimum_required(VERSION 3.16)
+project(janus_desktop_app C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+set(JANUS_GENERATED_DIR "" CACHE STRING "Folder scripts/janus.sh installed the desktop target into")
+if(JANUS_GENERATED_DIR STREQUAL "")
+    message(FATAL_ERROR
+        "JANUS_GENERATED_DIR is not set. Pass the folder scripts/janus.sh "
+        "installed the desktop target into:\n"
+        "  cmake -S . -B build -DJANUS_GENERATED_DIR=/path/to/generated")
+endif()
+get_filename_component(JANUS_GENERATED_DIR "${JANUS_GENERATED_DIR}"
+    ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+if(NOT EXISTS "${JANUS_GENERATED_DIR}/runtime/CMakeLists.txt")
+    message(FATAL_ERROR
+        "${JANUS_GENERATED_DIR}/runtime/CMakeLists.txt not found — is "
+        "JANUS_GENERATED_DIR the desktop target's install folder? "
+        "(Generate with scaffold mode: --scaffold-src.)")
+endif()
+
+# The vendored runtime library (janus_runtime + janus_desktop_driver);
+# its own host-side tests aren't part of an app build.
+set(JANUS_RUNTIME_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory("${JANUS_GENERATED_DIR}/runtime" janus_runtime_build)
+
+file(GLOB JANUS_GENERATED_SOURCES CONFIGURE_DEPENDS "${JANUS_GENERATED_DIR}/src/*.gen.c")
+
+add_executable(janus_desktop_app
+    main.c
+    janus_actions.c
+    desktop_input.c
+    ${JANUS_GENERATED_SOURCES}
+)
+target_include_directories(janus_desktop_app PRIVATE "${JANUS_GENERATED_DIR}/include")
+target_link_libraries(janus_desktop_app PRIVATE janus_desktop_driver janus_runtime)
+if(UNIX)
+    target_link_libraries(janus_desktop_app PRIVATE m)
+endif()
+target_compile_options(janus_desktop_app PRIVATE -Wall -Wextra)
