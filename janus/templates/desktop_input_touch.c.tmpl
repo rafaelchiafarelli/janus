@@ -1,0 +1,27 @@
+/* Desktop input for a touch-modality app: the mouse stands in for the
+ * touch panel. Scaffolded once by Janus, then yours — edit freely.
+ *
+ * Polls SDL *state* (not events): janus_desktop_driver_pump() drains the
+ * event queue to detect the close button, so events never reach here. */
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <SDL.h>
+
+#include "janus_input_touch.h"
+
+/* One "touch" per left-button press, at the cursor. The window is 1:1
+ * with the panel, so window coordinates are panel coordinates. */
+bool janus_touch_poll(int16_t *x, int16_t *y) {
+    static bool was_down = false;
+
+    int mx, my;
+    bool down = (SDL_GetMouseState(&mx, &my) & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+    bool pressed = down && !was_down;
+    was_down = down;
+
+    if (!pressed) return false;
+    *x = (int16_t)mx;
+    *y = (int16_t)my;
+    return true;
+}
