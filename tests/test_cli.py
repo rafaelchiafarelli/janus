@@ -27,8 +27,18 @@ class TestGenerate(unittest.TestCase):
             "janus_app.gen.c",
             "janus_bindings.gen.c",
         }
-        self.assertEqual(expected_headers, {p.name for p in (self.target_dir / "include").iterdir()})
-        self.assertEqual(expected_sources, {p.name for p in (self.target_dir / "src").iterdir()})
+        embedded_c_dir = self.target_dir / "embedded_c"
+        self.assertEqual(expected_headers, {p.name for p in (embedded_c_dir / "include").iterdir()})
+        self.assertEqual(expected_sources, {p.name for p in (embedded_c_dir / "src").iterdir()})
+
+    def test_unimplemented_targets_are_not_written_as_empty_directories(self) -> None:
+        generate(FIXTURES / "app.yaml", self.target_dir)
+        self.assertFalse((self.target_dir / "android").exists())
+
+    def test_desktop_target_is_also_written(self) -> None:
+        generate(FIXTURES / "app.yaml", self.target_dir)
+        self.assertTrue((self.target_dir / "desktop" / "include").exists())
+        self.assertTrue((self.target_dir / "desktop" / "src").exists())
 
     def test_second_run_with_no_changes_writes_nothing(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
@@ -39,14 +49,16 @@ class TestGenerate(unittest.TestCase):
         src_dir = Path(self._tmp.name) / "src"
         written = generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
 
-        self.assertTrue((src_dir / "main.c").exists())
-        self.assertTrue((src_dir / "janus_actions.c").exists())
-        self.assertIn(src_dir / "main.c", written)
-        self.assertIn(src_dir / "janus_actions.c", written)
+        main_c = src_dir / "embedded_c" / "main.c"
+        actions_c = src_dir / "embedded_c" / "janus_actions.c"
+        self.assertTrue(main_c.exists())
+        self.assertTrue(actions_c.exists())
+        self.assertIn(main_c, written)
+        self.assertIn(actions_c, written)
 
-        (src_dir / "main.c").write_text("/* hand-edited */\n")
+        main_c.write_text("/* hand-edited */\n")
         generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
-        self.assertEqual((src_dir / "main.c").read_text(), "/* hand-edited */\n")
+        self.assertEqual(main_c.read_text(), "/* hand-edited */\n")
 
     def test_without_scaffold_src_no_src_files_are_written(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
@@ -54,13 +66,14 @@ class TestGenerate(unittest.TestCase):
 
     def test_display_config_written_when_app_yaml_declares_a_display(self) -> None:
         generate(FIXTURES / "app_with_display.yaml", self.target_dir)
-        self.assertTrue((self.target_dir / "include" / "janus_display_config.gen.h").exists())
+        cfg = self.target_dir / "embedded_c" / "include" / "janus_display_config.gen.h"
+        self.assertTrue(cfg.exists())
 
     def test_scaffold_src_also_vendors_the_fixed_runtime_library(self) -> None:
         src_dir = Path(self._tmp.name) / "src"
         written = generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
 
-        runtime_dir = self.target_dir / "runtime"
+        runtime_dir = self.target_dir / "embedded_c" / "runtime"
         repo_root = Path(__file__).resolve().parents[1]
         source_cmakelists = repo_root / "runtime" / "embedded_c" / "CMakeLists.txt"
         self.assertEqual((runtime_dir / "CMakeLists.txt").read_text(), source_cmakelists.read_text())
@@ -77,7 +90,7 @@ class TestGenerate(unittest.TestCase):
 
     def test_scaffold_src_writes_render_config_into_the_vendored_runtime(self) -> None:
         src_dir = Path(self._tmp.name) / "src"
-        cfg = self.target_dir / "runtime" / "include" / "janus_render_config.gen.h"
+        cfg = self.target_dir / "embedded_c" / "runtime" / "include" / "janus_render_config.gen.h"
 
         # default app.yaml has no display -> blocking -> macro absent
         written = generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
@@ -90,7 +103,7 @@ class TestGenerate(unittest.TestCase):
 
     def test_render_config_not_written_without_scaffold_src(self) -> None:
         generate(FIXTURES / "app_with_display_non_blocking.yaml", self.target_dir)
-        self.assertFalse((self.target_dir / "runtime").exists())
+        self.assertFalse((self.target_dir / "embedded_c" / "runtime").exists())
 
     def test_scaffold_src_vendoring_second_run_with_no_changes_writes_nothing(self) -> None:
         src_dir = Path(self._tmp.name) / "src"
@@ -100,7 +113,7 @@ class TestGenerate(unittest.TestCase):
 
     def test_without_scaffold_src_runtime_is_not_vendored(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
-        self.assertFalse((self.target_dir / "runtime").exists())
+        self.assertFalse((self.target_dir / "embedded_c" / "runtime").exists())
 
     def test_screen_too_big_for_declared_display_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -116,7 +129,7 @@ class TestMain(unittest.TestCase):
     def test_returns_zero_and_writes_files(self) -> None:
         exit_code = main([str(FIXTURES / "app.yaml"), str(self.target_dir)])
         self.assertEqual(exit_code, 0)
-        self.assertTrue((self.target_dir / "janus_generated.harpia").exists())
+        self.assertTrue((self.target_dir / "embedded_c" / "janus_generated.harpia").exists())
 
     def test_missing_app_yaml_is_a_usage_error(self) -> None:
         with self.assertRaises(SystemExit) as ctx:
