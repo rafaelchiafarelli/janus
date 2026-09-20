@@ -1,0 +1,44 @@
+/* Desktop input for a buttons-modality app: the keyboard stands in for
+ * the next / prev / select push-buttons. Scaffolded once by Janus, then
+ * yours — edit freely.
+ *
+ *   Left arrow  -> PREV      Right arrow -> NEXT      Enter -> SELECT
+ *
+ * Polls SDL *state* (not events): janus_desktop_driver_pump() drains the
+ * event queue to detect the close button, so events never reach here.
+ * Holding a key does not repeat — state polling only sees press edges. */
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <SDL.h>
+
+#include "janus_input_buttons.h"
+
+typedef struct {
+    SDL_Scancode key;
+    janus_button_event_t event;
+    bool was_down;
+} binding_t;
+
+static binding_t g_bindings[] = {
+    { SDL_SCANCODE_LEFT,   JANUS_BUTTON_PREV,   false },
+    { SDL_SCANCODE_RIGHT,  JANUS_BUTTON_NEXT,   false },
+    { SDL_SCANCODE_RETURN, JANUS_BUTTON_SELECT, false },
+};
+
+/* At most one event per call. A key's edge is only consumed when it is
+ * returned, so two keys pressed in the same frame both get delivered
+ * (on consecutive calls) rather than the second being lost. */
+bool janus_buttons_poll(janus_button_event_t *event) {
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    for (unsigned i = 0; i < sizeof g_bindings / sizeof g_bindings[0]; i++) {
+        bool down = keys[g_bindings[i].key] != 0;
+        if (down && !g_bindings[i].was_down) {
+            g_bindings[i].was_down = true;
+            *event = g_bindings[i].event;
+            return true;
+        }
+        g_bindings[i].was_down = down;
+    }
+    return false;
+}

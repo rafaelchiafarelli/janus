@@ -58,7 +58,7 @@ relative to `dev`/`main`.
 | # | file | status | contract (one line) |
 |---|---|---|---|
 | 1 | `tasks/1-desktop-main-templates-done.md` | ✅ done | Three `main_desktop_*` templates + target-aware `scaffold_main_c`; `generate()` passes the target. |
-| 2 | `tasks/2-desktop-input-scaffold.md` | not started | Once-only `src/desktop_input.c` per modality (SDL state polling, default mappings). |
+| 2 | `tasks/2-desktop-input-scaffold-done.md` | ✅ done | Once-only `src/desktop_input.c` per modality (SDL state polling, default mappings). |
 | 3 | `tasks/3-desktop-app-cmake.md` | not started | Once-only app `CMakeLists.txt` scaffold (`JANUS_GENERATED_DIR`, glob, links runtime + driver). |
 | 4 | `tasks/4-desktop-demo.md` | not started | `examples/desktop_demo` builds via the scaffolds and runs headless; epic gate. |
 

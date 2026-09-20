@@ -19,6 +19,7 @@ from .stage1_parse.dsl_yaml import parse_app
 from .stage2_layout.layout import build_nav_bar, build_status_bar, check_fits_display, layout_screen
 from .stage3b_embedded_c.emit_files import render_render_config_header
 from .stage5_actions.scaffold_actions import scaffold_actions_c
+from .stage8_scaffold.scaffold_input import scaffold_desktop_input_c
 from .stage8_scaffold.scaffold_main import scaffold_main_c
 from .targets import Target, implemented_targets
 from .writer import copy_tree_if_changed, write_if_changed
@@ -111,6 +112,12 @@ def generate(
                 written.append(target_scaffold / "janus_actions.c")
             if scaffold_main_c(app, target_scaffold / "main.c", target.name):
                 written.append(target_scaffold / "main.c")
+            # The desktop main's poll functions have no vendor to supply
+            # them (there's no board) — scaffold the default SDL ones.
+            if target.name == "desktop" and scaffold_desktop_input_c(
+                app, target_scaffold / "desktop_input.c"
+            ):
+                written.append(target_scaffold / "desktop_input.c")
             written.extend(
                 _vendor_runtime(
                     target, target_out / "runtime", render_mode, app.display, has_nav, has_status,
