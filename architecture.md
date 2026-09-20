@@ -1042,6 +1042,37 @@ covers the blocking side (links `examples/host_demo` for
 `draw_<kind>()` function here + one enum value + one entry in the Python
 kind catalog — nothing else in this document changes.**
 
+**Desktop driver (`runtime/desktop/`, added 2026-09-19,
+`desktop_sdl2_runtime` epic).** The `desktop` target's implementation of
+this same driver contract — a real SDL2 window instead of real hardware
+or the test mock. `janus/targets.py`'s `Target.vendor_from` lets
+`desktop` vendor two source roots into one destination: `runtime/
+embedded_c`'s `{include,src,tests,host_mock}` (this section's core,
+reused byte-for-byte — already proven on x86 via `host_mock`) plus
+`runtime/desktop`'s own `{include,driver}` and `CMakeLists.txt` (which
+wins the name collision, vendored second). `driver/
+janus_desktop_driver.c` implements `draw_area_sync` (blits the RGB565
+buffer straight into an `SDL_PIXELFORMAT_RGB565` streaming texture, no
+conversion, then presents), `draw_area_async` (identical, returns
+`true` — always instant, no real deferral, since SDL2's present is fast
+enough that the tiled/backoff path this exists for on SPI panels has no
+reason to exist here), and `display_busy` (always `false`) — plus a
+small lifecycle API (`janus_desktop_driver_init`/`_pump`/`_shutdown`)
+the scaffold's `main.c` calls. `_pump` drains the SDL2 event queue only
+enough to detect a close request; it interprets no event as touch/
+encoder/button input — that mapping is the scaffold's own job (Stage 8),
+never the driver's, same as no real hardware signal is ever Janus's to
+interpret either.
+
+**Compiled as its own CMake library, `janus_desktop_driver`, deliberately
+never linked together with `janus_host_mock`** — both define the same
+three driver-contract symbols, so a consumer links `janus_runtime` +
+`janus_desktop_driver` for a real app, or `janus_runtime` +
+`janus_host_mock` for the fixed library's own tests, never both. Runs
+headlessly under `SDL_VIDEODRIVER=dummy` (no real display needed) — the
+driver's own tests (`runtime/desktop/tests/test_desktop_driver.c`,
+`desktop_sdl2_runtime` epic task 2) rely on this.
+
 ---
 
 ## Stage 5 — Action dispatch
@@ -1388,6 +1419,23 @@ synchronous, tile-scoped, unaffected by render mode.
 ---
 
 ## Ownership quick reference
+
+**Per-target output (added 2026-09-19, `desktop_target` initiative,
+`multi_target_pipeline` epic; `desktop` populated the same day,
+`desktop_sdl2_runtime` epic).** `generate()` writes every registered
+target (`janus/targets.py`) on every run, each into its own subtree —
+`target_dir/embedded_c/...`, `target_dir/desktop/...`,
+`target_dir/android/...` (still reserved, not yet populated) — instead
+of writing straight into `target_dir`. Every `target_dir/...` path below
+applies equally to `target_dir/embedded_c/...` and
+`target_dir/desktop/...`; the same applies to `--scaffold-src DIR`,
+whose scaffolded files land under `DIR/<target>/`. This nesting is
+Janus's own internal shape — `scripts/janus.sh <app.yaml> --target
+<name> <dest> [--target <name> <dest> ...]` installs only the caller's
+chosen target(s), each flat into its own destination, from a single
+pipeline run, so no consumer ever sees `embedded_c/` in its own build.
+With several targets, `--scaffold-src DIR` scaffolds into
+`DIR/<target>/`; with one, flat into `DIR/`.
 
 | artifact | owner | regenerated? |
 |---|---|---|
