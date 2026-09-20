@@ -10,6 +10,6 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JANUS_ROOT="$(cd "$HERE/../.." && pwd)"
 
-"$JANUS_ROOT/scripts/janus.sh" "$HERE/app.yaml" "$HERE/build/generated" \
-    --target embedded_c \
+"$JANUS_ROOT/scripts/janus.sh" "$HERE/app.yaml" \
+    --target embedded_c "$HERE/build/generated" \
     --scaffold-src "$HERE/src"
