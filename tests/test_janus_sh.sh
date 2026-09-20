@@ -93,6 +93,8 @@ echo "  ok"
 echo "== (i) multi-target --scaffold-src uses DIR/<target>/ =="
 [ -f "$MULTI/src/embedded_c/main.c" ] || fail "missing $MULTI/src/embedded_c/main.c"
 [ -f "$MULTI/src/desktop/main.c" ] || fail "missing $MULTI/src/desktop/main.c"
+[ -f "$MULTI/src/desktop/desktop_input.c" ] || fail "missing $MULTI/src/desktop/desktop_input.c"
+[ ! -e "$MULTI/src/embedded_c/desktop_input.c" ] || fail "desktop_input.c leaked into embedded_c's scaffold"
 [ ! -e "$MULTI/src/main.c" ] || fail "flat main.c written despite multiple targets"
 echo "  ok"
 

@@ -60,6 +60,17 @@ class TestGenerate(unittest.TestCase):
         generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
         self.assertEqual(main_c.read_text(), "/* hand-edited */\n")
 
+    def test_each_target_gets_its_own_main_c_shape(self) -> None:
+        src_dir = Path(self._tmp.name) / "src"
+        generate(FIXTURES / "app.yaml", self.target_dir, scaffold_src=src_dir)
+
+        embedded = (src_dir / "embedded_c" / "main.c").read_text()
+        desktop = (src_dir / "desktop" / "main.c").read_text()
+        self.assertIn("display_driver_init", embedded)
+        self.assertNotIn("janus_desktop_driver", embedded)
+        self.assertIn("janus_desktop_driver_pump", desktop)
+        self.assertNotIn("display_driver_init", desktop)
+
     def test_without_scaffold_src_no_src_files_are_written(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
         self.assertFalse((Path(self._tmp.name) / "src").exists())
