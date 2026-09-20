@@ -109,7 +109,7 @@ def generate(
             target_scaffold = scaffold_src / target.name
             if scaffold_actions_c(app, target_scaffold / "janus_actions.c"):
                 written.append(target_scaffold / "janus_actions.c")
-            if scaffold_main_c(app, target_scaffold / "main.c"):
+            if scaffold_main_c(app, target_scaffold / "main.c", target.name):
                 written.append(target_scaffold / "main.c")
             written.extend(
                 _vendor_runtime(

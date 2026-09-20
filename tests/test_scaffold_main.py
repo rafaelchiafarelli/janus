@@ -139,5 +139,40 @@ class TestScaffoldMainC(unittest.TestCase):
         self.assertIn("janus_render_screen_async_start", self.path.read_text())
 
 
+class TestDesktopTarget(unittest.TestCase):
+    def test_one_desktop_template_per_modality(self) -> None:
+        for modality, poll in (("touch", "janus_touch_poll"), ("encoder", "janus_encoder_poll"), ("buttons", "janus_buttons_poll")):
+            out = render_main_c(modality, "blocking", "desktop")
+            self.assertIn(poll, out)
+            self.assertIn("while (janus_desktop_driver_pump())", out)
+            self.assertIn("janus_desktop_driver_init(JANUS_DISPLAY_WIDTH, JANUS_DISPLAY_HEIGHT", out)
+            self.assertIn("janus_desktop_driver_shutdown();", out)
+            self.assertNotIn("display_driver_init", out)
+            self.assertTrue(_balanced_braces(out))
+
+    def test_desktop_ignores_render_mode(self) -> None:
+        for modality in ("touch", "encoder", "buttons"):
+            self.assertEqual(
+                render_main_c(modality, "non_blocking", "desktop"),
+                render_main_c(modality, "blocking", "desktop"),
+            )
+        self.assertNotIn("async_start", render_main_c("touch", "non_blocking", "desktop"))
+
+    def test_embedded_c_output_unchanged_by_the_target_argument(self) -> None:
+        for modality in ("touch", "encoder", "buttons"):
+            for mode in ("blocking", "non_blocking"):
+                self.assertEqual(render_main_c(modality, mode), render_main_c(modality, mode, "embedded_c"))
+
+    def test_scaffold_main_c_picks_the_desktop_template_and_stays_once_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "main.c"
+            app = App(screens=[], input_modality="encoder")
+            self.assertTrue(scaffold_main_c(app, path, "desktop"))
+            self.assertIn("janus_desktop_driver_pump", path.read_text())
+            path.write_text("/* mine */\n")
+            self.assertFalse(scaffold_main_c(app, path, "desktop"))
+            self.assertEqual(path.read_text(), "/* mine */\n")
+
+
 if __name__ == "__main__":
     unittest.main()
