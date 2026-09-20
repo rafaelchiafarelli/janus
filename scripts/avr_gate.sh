@@ -27,15 +27,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST_DEMO="$REPO_ROOT/examples/host_demo"
 RT="$REPO_ROOT/runtime/embedded_c"
-GEN="$HOST_DEMO/build/generated/embedded_c"
+GEN="$HOST_DEMO/build/generated"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-PY="${PYTHON:-python3}"
 command -v avr-gcc >/dev/null || { echo "avr-gcc not found" >&2; exit 1; }
 
 echo "== regenerating examples/host_demo =="
-"$PY" "$HOST_DEMO/generate.py"
+"$HOST_DEMO/generate.sh"
 
 echo "== compiling for -mmcu=atmega2560 (render_mode: blocking) =="
 CFLAGS=(-mmcu=atmega2560 -Os -Wall -Wextra -DNDEBUG

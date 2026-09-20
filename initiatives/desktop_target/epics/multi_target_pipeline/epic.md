@@ -71,7 +71,7 @@ since `android` is coming after it.
 |---|---|---|---|
 | 1 | `tasks/1-target-registry-and-pipeline-done.md` | ✅ done | A small `TARGETS` registry drives `write_project`/`generate()`; `embedded_c` moves through it into `target_dir/embedded_c/...` + `scaffold_src/embedded_c/...`, byte-identical content, nothing else changes. |
 | 2 | `tasks/2-janus-sh-target-install-done.md` | ✅ done | `scripts/janus.sh` gains `--target <name>`: generates into a temp dir, installs the selected target flat into the caller's `dest-dir`/`--scaffold-src`, no-clobber on scaffold files, clear error for an unimplemented target. |
-| 3 | `tasks/3-host-demo-path-update.md` | not started | `examples/host_demo`'s `generate.py` (which calls `janus.cli.main()` in-process — no real consumer can do that once task 2 lands) replaced by `generate.sh`, calling `scripts/janus.sh --target embedded_c` like any real consumer must; `CMakeLists.txt` updated for the resulting flat paths. |
+| 3 | `tasks/3-host-demo-path-update-done.md` | ✅ done | `examples/host_demo`'s `generate.py` (which called `janus.cli.main()` in-process — no real consumer can do that once task 2 lands) replaced by `generate.sh`, calling `scripts/janus.sh --target embedded_c` like any real consumer must. `CMakeLists.txt` needed no changes — task 2's flattening already keeps its paths exactly as they were. |
 
 ## Acceptance gate
 
