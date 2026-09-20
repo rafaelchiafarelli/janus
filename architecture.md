@@ -1391,6 +1391,14 @@ folder; unset or wrong fails with a clear message). It adds the vendored
 cmake re-run, never an edit — and links `janus_runtime` +
 `janus_desktop_driver` into `janus_desktop_app`.
 
+`examples/desktop_demo` is the worked example: `generate.sh` renders
+`examples/host_demo`'s own `app.yaml` for the `desktop` target (one spec,
+two targets), and `tests/test_desktop_demo.sh` proves the whole path —
+generate, build with no hand edits, run headless under
+`SDL_VIDEODRIVER=dummy`, exit 0 on quit (SIGTERM → `SDL_QUIT`). The
+window itself has only been checked headlessly; a human eyeball on a real
+display is still outstanding.
+
 **Runtime call flow, boot to first render:**
 1. `main()` calls the vendor's `display_driver_init()`.
 2. `main()` constructs `janus_app_t app` from `janus_app.gen.c`'s table,
