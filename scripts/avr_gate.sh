@@ -27,7 +27,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST_DEMO="$REPO_ROOT/examples/host_demo"
 RT="$REPO_ROOT/runtime/embedded_c"
-GEN="$HOST_DEMO/build/generated"
+GEN="$HOST_DEMO/build/generated/embedded_c"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

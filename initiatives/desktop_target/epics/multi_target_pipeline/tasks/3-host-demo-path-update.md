@@ -19,6 +19,18 @@ only sanctioned entry point.
 
 ### Delivered
 
+- **`git mv examples/host_demo/src/main.c examples/host_demo/src/embedded_c/main.c`
+  and the same for `janus_actions.c`, done first, before anything else.**
+  These are real, hand-edited files (relay-toggle demo logic, encoder
+  focus/nav handling) — not stock templates. Confirmed while testing
+  task 1: pointing the new nested scaffold path at the *existing* flat
+  `src/` without moving these first silently scaffolds fresh stub
+  templates at `src/embedded_c/{main.c,janus_actions.c}` (since
+  `write_if_missing` sees no file at that new path) while the real,
+  git-tracked content sits orphaned at the old flat path, unreferenced
+  by anything. `git mv` first so the same file, same content, just
+  changes address — `write_if_missing` then correctly sees it as already
+  scaffolded and leaves it alone on every subsequent regen.
 - **`examples/host_demo/generate.py` deleted**, replaced by
   **`examples/host_demo/generate.sh`**: a small bash script (matching
   this repo's own convention for these — see `scripts/janus.sh`,
@@ -39,6 +51,11 @@ only sanctioned entry point.
 - Any place that currently invokes `examples/host_demo/generate.py`
   (a CMake custom command, a CI-style script, or purely manual — check
   before assuming which) updated to call `generate.sh` instead.
+  **Known one: `scripts/avr_gate.sh`** regenerates via
+  `"$PY" "$HOST_DEMO/generate.py"` directly — task 1 already repointed
+  its `GEN` path at `.../embedded_c` (needed for its own DoD to pass),
+  but this call site itself still names the file this task deletes; swap
+  it for `"$HOST_DEMO/generate.sh"`.
 - **Docs**: any doc referencing `examples/host_demo/generate.py` by name
   (`Janus.md`, `architecture.md`) updated to `generate.sh`.
 
