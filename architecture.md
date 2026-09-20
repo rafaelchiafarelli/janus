@@ -1430,9 +1430,12 @@ of writing straight into `target_dir`. Every `target_dir/...` path below
 applies equally to `target_dir/embedded_c/...` and
 `target_dir/desktop/...`; the same applies to `--scaffold-src DIR`,
 whose scaffolded files land under `DIR/<target>/`. This nesting is
-Janus's own internal shape — `scripts/janus.sh --target <name>`
-installs only the caller's chosen target flat into the paths they gave
-it, so no consumer ever sees `embedded_c/` in its own build.
+Janus's own internal shape — `scripts/janus.sh <app.yaml> --target
+<name> <dest> [--target <name> <dest> ...]` installs only the caller's
+chosen target(s), each flat into its own destination, from a single
+pipeline run, so no consumer ever sees `embedded_c/` in its own build.
+With several targets, `--scaffold-src DIR` scaffolds into
+`DIR/<target>/`; with one, flat into `DIR/`.
 
 | artifact | owner | regenerated? |
 |---|---|---|
