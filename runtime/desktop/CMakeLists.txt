@@ -114,6 +114,13 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_draw_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_draw_tests PRIVATE -Wall -Wextra)
 
+    # The real SDL2 driver, exercised headlessly: this executable alone
+    # needs SDL_VIDEODRIVER=dummy (the mock-based tests above touch no
+    # SDL2 state), so it's set per-test and a plain `ctest` just works.
+    add_executable(janus_desktop_driver_tests tests/test_desktop_driver.c)
+    target_link_libraries(janus_desktop_driver_tests PRIVATE janus_desktop_driver)
+    target_compile_options(janus_desktop_driver_tests PRIVATE -Wall -Wextra)
+
     enable_testing()
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
     add_test(NAME janus_input_touch_tests COMMAND janus_input_touch_tests)
@@ -126,4 +133,7 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_draw_tests COMMAND janus_draw_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
     add_test(NAME janus_clear_screen_bg_tests COMMAND janus_clear_screen_bg_tests)
+    add_test(NAME janus_desktop_driver_tests COMMAND janus_desktop_driver_tests)
+    set_tests_properties(janus_desktop_driver_tests PROPERTIES
+        ENVIRONMENT "SDL_VIDEODRIVER=dummy")
 endif()
