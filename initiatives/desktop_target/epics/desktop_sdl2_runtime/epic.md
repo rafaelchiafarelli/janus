@@ -81,7 +81,7 @@ independent epics.
 
 | # | file | status | contract (one line) |
 |---|---|---|---|
-| 1 | `tasks/1-desktop-driver-and-registry.md` | not started | `runtime/desktop/` (SDL2 driver + `CMakeLists.txt`) exists; `janus/targets.py`'s multi-root `vendor_from` lands; `desktop` registered for real. `scripts/janus.sh --target desktop` stops failing. |
+| 1 | `tasks/1-desktop-driver-and-registry-done.md` | ✅ done | `runtime/desktop/` (SDL2 driver, its own `janus_desktop_driver` library, `CMakeLists.txt`) exists; `janus/targets.py`'s multi-root `vendor_from` lands; `desktop` registered for real. `scripts/janus.sh --target desktop` installs a real, buildable runtime. |
 | 2 | `tasks/2-desktop-driver-tests.md` | not started | Host-side test coverage for the driver (headless, `SDL_VIDEODRIVER=dummy`), wired into `ctest`. |
 
 ## Acceptance gate
