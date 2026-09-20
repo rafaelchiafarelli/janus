@@ -1361,8 +1361,43 @@ This is the "how does it all actually get compiled" question.
 | `build/generated/include/janus_display_config.gen.h` | Janus | yes, every build (only if `app.display` set — now also carries `JANUS_DISPLAY_RENDER_MODE`) |
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
-| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`/`main_touch_async.c.tmpl`/`main_encoder_async.c.tmpl`/`main_buttons_async.c.tmpl`, picked by `app.input_modality` × `app.display.render_mode`) | no |
+| `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`/`main_touch_async.c.tmpl`/`main_encoder_async.c.tmpl`/`main_buttons_async.c.tmpl`, picked by `app.input_modality` × `app.display.render_mode`; for the `desktop` target one of `main_desktop_touch/encoder/buttons.c.tmpl` instead, picked by `app.input_modality` alone — desktop has no async variants, see below) | no |
+| `src/desktop_input.c` (`desktop` target only) | human (Janus-scaffolded once, `scaffold_desktop_input_c` — one of `desktop_input_touch/encoder/buttons.c.tmpl`, picked by `app.input_modality`) | no |
+| `CMakeLists.txt` (scaffold folder, `desktop` target only) | human (Janus-scaffolded once, `scaffold_desktop_cmake` — static `desktop_app_CMakeLists.txt.tmpl`) | no |
 | `src/display_driver.c` | human/vendor | no |
+
+**Desktop `main.c` (added 2026-09-20, `desktop_scaffold` epic task 1).**
+For the `desktop` target `scaffold_main_c` picks `main_desktop_<modality>.c.tmpl`
+regardless of `render_mode` — desktop's `draw_area_async` is always
+instant, so a `non_blocking` app.yaml still runs on the blocking loop.
+The desktop `main` calls `janus_desktop_driver_init` with the window
+size from `janus_display_config.gen.h` (`display: size:`; 320×240 if the
+app declares no `display:`), loops `while (janus_desktop_driver_pump())`
+with the same per-modality body as the embedded template, then
+`janus_desktop_driver_shutdown()`. The pump drains and discards SDL
+events, so the poll functions must read SDL *state* — scaffolded once
+into `src/desktop_input.c` (task 2) and human-owned afterward. Defaults:
+touch = left mouse press at the cursor (window is 1:1 with the panel);
+encoder = Left/Right arrows rotate −1/+1, Enter clicks; buttons = Left =
+PREV, Right = NEXT, Enter = SELECT. State polling sees press edges
+only (no key repeat), and no mouse-wheel default — both are the human's
+to add in that file.
+
+**Desktop app build (task 3).** The scaffolded `CMakeLists.txt` takes one
+required setting, `-DJANUS_GENERATED_DIR=<the folder janus.sh installed
+the desktop target into>` (relative paths resolve against the scaffold
+folder; unset or wrong fails with a clear message). It adds the vendored
+`runtime/` (tests off), globs `src/*.gen.c` — a new screen needs only a
+cmake re-run, never an edit — and links `janus_runtime` +
+`janus_desktop_driver` into `janus_desktop_app`.
+
+`examples/desktop_demo` is the worked example: `generate.sh` renders
+`examples/host_demo`'s own `app.yaml` for the `desktop` target (one spec,
+two targets), and `tests/test_desktop_demo.sh` proves the whole path —
+generate, build with no hand edits, run headless under
+`SDL_VIDEODRIVER=dummy`, exit 0 on quit (SIGTERM → `SDL_QUIT`). The
+window itself has only been checked headlessly; a human eyeball on a real
+display is still outstanding.
 
 **Runtime call flow, boot to first render:**
 1. `main()` calls the vendor's `display_driver_init()`.
