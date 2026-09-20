@@ -19,6 +19,7 @@ from .stage1_parse.dsl_yaml import parse_app
 from .stage2_layout.layout import build_nav_bar, build_status_bar, check_fits_display, layout_screen
 from .stage3b_embedded_c.emit_files import render_render_config_header
 from .stage5_actions.scaffold_actions import scaffold_actions_c
+from .stage8_scaffold.scaffold_cmake import scaffold_desktop_cmake
 from .stage8_scaffold.scaffold_input import scaffold_desktop_input_c
 from .stage8_scaffold.scaffold_main import scaffold_main_c
 from .targets import Target, implemented_targets
@@ -118,6 +119,10 @@ def generate(
                 app, target_scaffold / "desktop_input.c"
             ):
                 written.append(target_scaffold / "desktop_input.c")
+            if target.name == "desktop" and scaffold_desktop_cmake(
+                app, target_scaffold / "CMakeLists.txt"
+            ):
+                written.append(target_scaffold / "CMakeLists.txt")
             written.extend(
                 _vendor_runtime(
                     target, target_out / "runtime", render_mode, app.display, has_nav, has_status,
