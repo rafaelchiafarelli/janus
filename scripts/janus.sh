@@ -3,19 +3,24 @@
 # janus.cli` (via janus/targets.py's TARGETS registry) always writes
 # every implemented target it knows about, nested under a throwaway
 # temp directory this script owns — this script's job is to install
-# only the target you actually asked for, flat, into the paths you gave
+# only the target(s) you actually asked for, flat, into the paths you gave
 # it, exactly the shape every consumer already expects regardless of how
 # many targets Janus internally knows about.
 #
-#   scripts/janus.sh <app.yaml> <dest-dir> --target <name> [--scaffold-src DIR]
+#   scripts/janus.sh <app.yaml> --target <name> <dest-dir> [--target <name> <dest-dir> ...] [--scaffold-src DIR]
 #
-# --target is required. A name with no generator yet (e.g. `desktop`,
-# `android`, until their own epics land) fails loudly, no partial copy
-# left in <dest-dir>.
+# One run, any number of targets: each --target takes its own destination.
+# At least one is required; a name may not repeat. If any requested target
+# has no generator yet (e.g. `android`, until its own epic lands) the
+# whole run fails loudly before anything is installed anywhere.
+#
+# --scaffold-src DIR: with one --target, main.c/janus_actions.c land flat
+# in DIR; with several, each target's land in DIR/<target>/ (they differ
+# per target). Existing files are never overwritten.
 #
 # Examples:
-#   scripts/janus.sh examples/host_demo/app.yaml examples/host_demo/build/generated --target embedded_c --scaffold-src examples/host_demo/src
-#   scripts/janus.sh /path/to/board/app.yaml /path/to/board/gui --target embedded_c --scaffold-src "$(mktemp -d)"   # keep scaffold main.c out of the tree
+#   scripts/janus.sh examples/host_demo/app.yaml --target embedded_c examples/host_demo/build/generated --scaffold-src examples/host_demo/src
+#   scripts/janus.sh app.yaml --target embedded_c out/embedded --target desktop out/desktop --scaffold-src "$(mktemp -d)"
 #
 # Calling `python -m janus.cli` directly is no longer a supported way
 # for a consumer to run Janus — see the desktop_target initiative's
@@ -25,21 +30,26 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^#\( \|$\)//' >&2
+    sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^#\( \|$\)//' >&2
     exit 1
 }
 
 [ "$#" -eq 0 ] && usage
 
-target=""
+targets=()
+dests=()
 scaffold_src=""
 positional=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --target)
-            [ "$#" -ge 2 ] || { echo "janus.sh: --target needs a value" >&2; exit 2; }
-            target="$2"
-            shift 2
+            [ "$#" -ge 3 ] || { echo "janus.sh: --target needs <name> <dest-dir>" >&2; exit 2; }
+            for t in "${targets[@]+"${targets[@]}"}"; do
+                [ "$t" != "$2" ] || { echo "janus.sh: target '$2' given twice" >&2; exit 2; }
+            done
+            targets+=("$2")
+            dests+=("$3")
+            shift 3
             ;;
         --scaffold-src)
             [ "$#" -ge 2 ] || { echo "janus.sh: --scaffold-src needs a value" >&2; exit 2; }
@@ -60,14 +70,13 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-if [ "${#positional[@]}" -ne 2 ]; then
-    echo "janus.sh: expected <app.yaml> <dest-dir>, got ${#positional[@]} positional argument(s)" >&2
+if [ "${#positional[@]}" -ne 1 ]; then
+    echo "janus.sh: expected exactly one <app.yaml>, got ${#positional[@]} positional argument(s)" >&2
     usage
 fi
 app_yaml="${positional[0]}"
-dest_dir="${positional[1]}"
 
-[ -n "$target" ] || { echo "janus.sh: --target <name> is required" >&2; exit 2; }
+[ "${#targets[@]}" -ge 1 ] || { echo "janus.sh: at least one --target <name> <dest-dir> is required" >&2; exit 2; }
 
 # Prefer the repo venv; fall back to whatever python3 is on PATH.
 if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
@@ -84,11 +93,13 @@ gen_args=("$app_yaml" "$tmp/gen")
 [ -n "$scaffold_src" ] && gen_args+=(--scaffold-src "$tmp/scaffold")
 env PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$py" -m janus.cli "${gen_args[@]}"
 
-target_gen="$tmp/gen/$target"
-if [ ! -d "$target_gen" ]; then
-    echo "janus.sh: target '$target' has no generator yet" >&2
-    exit 1
-fi
+# Validate every requested target before touching any destination.
+for target in "${targets[@]}"; do
+    if [ ! -d "$tmp/gen/$target" ]; then
+        echo "janus.sh: target '$target' has no generator yet" >&2
+        exit 1
+    fi
+done
 
 # Content-diffed install: only copy a file if it's new or its content
 # differs, so an unchanged file's mtime is never touched — same
@@ -107,23 +118,31 @@ install_diffed() {
     done
 }
 
-install_diffed "$target_gen" "$dest_dir"
+for i in "${!targets[@]}"; do
+    target="${targets[$i]}"
+    install_diffed "$tmp/gen/$target" "${dests[$i]}"
 
-if [ -n "$scaffold_src" ]; then
-    target_scaffold="$tmp/scaffold/$target"
-    if [ -d "$target_scaffold" ]; then
-        mkdir -p "$scaffold_src"
-        # Never clobber a file that already exists — human-owned once
-        # scaffolded, matching write_if_missing's guarantee on the
-        # Python side.
-        find "$target_scaffold" -type f -print0 | while IFS= read -r -d '' f; do
-            rel="${f#"$target_scaffold"/}"
-            out="$scaffold_src/$rel"
-            if [ ! -f "$out" ]; then
-                mkdir -p "$(dirname "$out")"
-                cp "$f" "$out"
-                echo "scaffolded $out"
+    if [ -n "$scaffold_src" ]; then
+        target_scaffold="$tmp/scaffold/$target"
+        if [ -d "$target_scaffold" ]; then
+            if [ "${#targets[@]}" -gt 1 ]; then
+                scaffold_dest="$scaffold_src/$target"
+            else
+                scaffold_dest="$scaffold_src"
             fi
-        done
+            mkdir -p "$scaffold_dest"
+            # Never clobber a file that already exists — human-owned once
+            # scaffolded, matching write_if_missing's guarantee on the
+            # Python side.
+            find "$target_scaffold" -type f -print0 | while IFS= read -r -d '' f; do
+                rel="${f#"$target_scaffold"/}"
+                out="$scaffold_dest/$rel"
+                if [ ! -f "$out" ]; then
+                    mkdir -p "$(dirname "$out")"
+                    cp "$f" "$out"
+                    echo "scaffolded $out"
+                fi
+            done
+        fi
     fi
-fi
+done
