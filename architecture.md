@@ -1362,6 +1362,7 @@ This is the "how does it all actually get compiled" question.
 | `janus_generated.harpia` → harpia's own codegen output | harpia (external) | yes, via `harpia` CLI |
 | `src/janus_actions.c` | human | no |
 | `src/main.c` | human (Janus-scaffolded once, `scaffold_main_c` — one of `main_touch.c.tmpl`/`main_encoder.c.tmpl`/`main_buttons.c.tmpl`/`main_touch_async.c.tmpl`/`main_encoder_async.c.tmpl`/`main_buttons_async.c.tmpl`, picked by `app.input_modality` × `app.display.render_mode`; for the `desktop` target one of `main_desktop_touch/encoder/buttons.c.tmpl` instead, picked by `app.input_modality` alone — desktop has no async variants, see below) | no |
+| `src/desktop_input.c` (`desktop` target only) | human (Janus-scaffolded once, `scaffold_desktop_input_c` — one of `desktop_input_touch/encoder/buttons.c.tmpl`, picked by `app.input_modality`) | no |
 | `src/display_driver.c` | human/vendor | no |
 
 **Desktop `main.c` (added 2026-09-20, `desktop_scaffold` epic task 1).**
@@ -1373,8 +1374,13 @@ size from `janus_display_config.gen.h` (`display: size:`; 320×240 if the
 app declares no `display:`), loops `while (janus_desktop_driver_pump())`
 with the same per-modality body as the embedded template, then
 `janus_desktop_driver_shutdown()`. The pump drains and discards SDL
-events, so the poll functions must read SDL *state* — scaffolded in
-task 2 (`src/desktop_input.c`).
+events, so the poll functions must read SDL *state* — scaffolded once
+into `src/desktop_input.c` (task 2) and human-owned afterward. Defaults:
+touch = left mouse press at the cursor (window is 1:1 with the panel);
+encoder = Left/Right arrows rotate −1/+1, Enter clicks; buttons = Left =
+PREV, Right = NEXT, Enter = SELECT. State polling sees press edges
+only (no key repeat), and no mouse-wheel default — both are the human's
+to add in that file.
 
 **Runtime call flow, boot to first render:**
 1. `main()` calls the vendor's `display_driver_init()`.
