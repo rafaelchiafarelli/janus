@@ -32,15 +32,24 @@ byte — only where it lands on disk does.
   runtime into `target_dir / target_name / "runtime"`. `_vendor_runtime()`
   takes its source/subdirs/root-files from the registry entry instead of
   the current module-level constants.
-- **`janus/stage8_scaffold/scaffold_main.py`**: `scaffold_main_c()`/
-  `render_main_c()` become target-aware — the existing
-  `_TEMPLATE_BY_MODALITY_AND_RENDER_MODE` map is now `embedded_c`'s own
-  entry in a per-target structure (shape it however reads cleanest; the
-  only requirement is that `desktop_scaffold` can add its own map next to
-  it without touching `embedded_c`'s).
+- **`janus/stage8_scaffold/scaffold_main.py` / `janus/stage5_actions/scaffold_actions.py`:
+  unchanged, turned out not to need target-awareness.** Only one target
+  is ever implemented at a time in the registry today, so `cli.py`
+  calling `scaffold_main_c(app, target_scaffold / "main.c")` once per
+  implemented target (with a different path each time) is sufficient —
+  no template-map restructuring needed until `desktop_scaffold` actually
+  has a second template set to choose between. Simpler than sketched
+  during planning; revisit target-awareness there when that epic starts.
 - **`janus/generate.py`**: unchanged. `write_project(app, out_dir)` never
   knew about targets and still doesn't — `generate()` just calls it once
   per target with a different `out_dir`.
+- **`scripts/avr_gate.sh`**: its `GEN` path (`$HOST_DEMO/build/generated`)
+  updated to `$HOST_DEMO/build/generated/embedded_c` — not originally
+  scoped to this task, but its glob (`$GEN/src/*.gen.c`) and `-I` flag
+  broke immediately once `generate()` started nesting output, and its own
+  DoD line ("`scripts/avr_gate.sh` green") can't be satisfied without
+  this. Its `generate.py` invocation itself is untouched here — task 3
+  still owns replacing that call with `generate.sh`.
 - **`tests/test_cli.py`**: updated for the new nested paths (its
   assertions currently read `self.target_dir / "include"` /
   `self.target_dir / "src"` directly — they become

@@ -1389,6 +1389,19 @@ synchronous, tile-scoped, unaffected by render mode.
 
 ## Ownership quick reference
 
+**Per-target output (added 2026-09-19, `desktop_target` initiative,
+`multi_target_pipeline` epic).** `generate()` writes every registered
+target (`janus/targets.py`) on every run, each into its own subtree —
+`target_dir/embedded_c/...`, `target_dir/desktop/...` (reserved, not yet
+populated), `target_dir/android/...` (reserved, not yet populated) —
+instead of writing straight into `target_dir`. Every `target_dir/...`
+path below is really `target_dir/embedded_c/...` today, `embedded_c`
+being the only implemented target; the same applies to `--scaffold-src
+DIR`, whose scaffolded files land under `DIR/embedded_c/`. This nesting
+is Janus's own internal shape — `scripts/janus.sh --target <name>`
+installs only the caller's chosen target flat into the paths they gave
+it, so no consumer ever sees `embedded_c/` in its own build.
+
 | artifact | owner | regenerated? |
 |---|---|---|
 | `app.yaml`, `*.screen.yaml` | human | — (source of truth) |
