@@ -33,8 +33,12 @@ class TestGenerate(unittest.TestCase):
 
     def test_unimplemented_targets_are_not_written_as_empty_directories(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)
-        self.assertFalse((self.target_dir / "desktop").exists())
         self.assertFalse((self.target_dir / "android").exists())
+
+    def test_desktop_target_is_also_written(self) -> None:
+        generate(FIXTURES / "app.yaml", self.target_dir)
+        self.assertTrue((self.target_dir / "desktop" / "include").exists())
+        self.assertTrue((self.target_dir / "desktop" / "src").exists())
 
     def test_second_run_with_no_changes_writes_nothing(self) -> None:
         generate(FIXTURES / "app.yaml", self.target_dir)

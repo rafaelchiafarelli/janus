@@ -29,11 +29,26 @@ def _vendor_runtime(
     has_status: bool = False,
 ) -> list[Path]:
     written = []
+    # Root files (unlike subdirs) can legitimately exist under more than
+    # one vendor_from root with different content — e.g. desktop's own
+    # CMakeLists.txt overwriting embedded_c's shared one. Resolve which
+    # root actually wins *before* writing, so each file is written at
+    # most once per run: writing every root's version in sequence would
+    # never reach a stable no-op (each run's first write would differ
+    # from the previous run's final content).
     for fname in target.vendored_root_files:
-        if write_if_changed(dest_dir / fname, (target.runtime_dir / fname).read_text()):
+        src = None
+        for root in target.vendor_from:
+            candidate = root / fname
+            if candidate.is_file():
+                src = candidate
+        if src is not None and write_if_changed(dest_dir / fname, src.read_text()):
             written.append(dest_dir / fname)
     for subdir in target.vendored_subdirs:
-        written.extend(copy_tree_if_changed(target.runtime_dir / subdir, dest_dir / subdir))
+        for root in target.vendor_from:
+            src_subdir = root / subdir
+            if src_subdir.is_dir():
+                written.extend(copy_tree_if_changed(src_subdir, dest_dir / subdir))
 
     # The one generated file that lands *inside* the vendored fixed
     # library: janus_runtime.{c,h} pull it in via __has_include so a

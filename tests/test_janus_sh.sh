@@ -43,10 +43,10 @@ echo "  ok"
 
 echo "== (c) an unimplemented target fails loudly, no partial copy left behind =="
 DEST="$WORK/unimplemented_dest"
-if "$JANUS_SH" "$FIXTURE" "$DEST" --target desktop >/dev/null 2>"$WORK/stderr"; then
-    fail "expected --target desktop to fail"
+if "$JANUS_SH" "$FIXTURE" "$DEST" --target android >/dev/null 2>"$WORK/stderr"; then
+    fail "expected --target android to fail"
 fi
-grep -q "target 'desktop' has no generator yet" "$WORK/stderr" \
+grep -q "target 'android' has no generator yet" "$WORK/stderr" \
     || fail "missing/wrong error message: $(cat "$WORK/stderr")"
 [ ! -e "$DEST" ] || fail "$DEST was created despite the target having no generator"
 echo "  ok"
@@ -68,6 +68,18 @@ if "$JANUS_SH" "$FIXTURE" "$WORK/no_target_dest" 2>/dev/null; then
     fail "expected a missing --target to fail"
 fi
 [ ! -e "$WORK/no_target_dest" ] || fail "$WORK/no_target_dest was created without --target"
+echo "  ok"
+
+echo "== (f) --target desktop installs a real, buildable runtime =="
+DESKTOP_DEST="$WORK/desktop_dest"
+"$JANUS_SH" "$FIXTURE" "$DESKTOP_DEST" --target desktop --scaffold-src "$WORK/desktop_scaffold" >/dev/null
+[ -f "$DESKTOP_DEST/runtime/CMakeLists.txt" ] || fail "no runtime/CMakeLists.txt installed for desktop"
+[ -f "$DESKTOP_DEST/runtime/driver/janus_desktop_driver.c" ] \
+    || fail "the SDL2 driver itself wasn't installed"
+cmake -S "$DESKTOP_DEST/runtime" -B "$DESKTOP_DEST/build" >/dev/null \
+    || fail "desktop runtime failed to cmake-configure"
+cmake --build "$DESKTOP_DEST/build" -j"$(nproc)" >/dev/null \
+    || fail "desktop runtime failed to build"
 echo "  ok"
 
 echo "PASS"
