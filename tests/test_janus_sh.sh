@@ -115,4 +115,38 @@ fi
 [ ! -e "$WORK/d1" ] || fail "$WORK/d1 was created despite the usage error"
 echo "  ok"
 
+echo "== (k) --mirror scaffolds mirror_link.c instead of desktop_input.c, desktop only =="
+MIRROR="$WORK/mirror"
+"$JANUS_SH" "$FIXTURE" --target embedded_c "$MIRROR/emb" --target desktop "$MIRROR/desk" \
+    --scaffold-src "$MIRROR/src" --mirror >/dev/null
+[ -f "$MIRROR/src/desktop/mirror_link.c" ] || fail "mirror_link.c not scaffolded"
+[ ! -e "$MIRROR/src/desktop/desktop_input.c" ] || fail "desktop_input.c scaffolded despite --mirror"
+grep -q "janus_remote_state_apply" "$MIRROR/src/desktop/main.c" || fail "desktop main.c is not the mirror main"
+diff "$MIRROR/src/embedded_c/main.c" "$MULTI/src/embedded_c/main.c" >/dev/null \
+    || fail "--mirror changed the embedded_c main.c"
+echo "  ok"
+
+echo "== (l) --mirror without a desktop target, or without --scaffold-src, is a usage error =="
+if "$JANUS_SH" "$FIXTURE" --target embedded_c "$WORK/m1" --scaffold-src "$WORK/m1s" --mirror 2>/dev/null; then
+    fail "expected --mirror without --target desktop to fail"
+fi
+if "$JANUS_SH" "$FIXTURE" --target desktop "$WORK/m2" --mirror 2>/dev/null; then
+    fail "expected --mirror without --scaffold-src to fail"
+fi
+[ ! -e "$WORK/m1" ] && [ ! -e "$WORK/m2" ] || fail "a rejected --mirror run still wrote a destination"
+echo "  ok"
+
+echo "== (m) a mirror app builds with only JANUS_GENERATED_DIR, stays alive, exits 0 on quit =="
+cmake -S "$MIRROR/src/desktop" -B "$MIRROR/build" -DJANUS_GENERATED_DIR="$MIRROR/desk" >/dev/null \
+    || fail "mirror app failed to cmake-configure"
+cmake --build "$MIRROR/build" -j"$(nproc)" >/dev/null || fail "mirror app failed to build"
+SDL_VIDEODRIVER=dummy "$MIRROR/build/janus_desktop_app" &
+mirror_pid=$!
+sleep 1.5
+kill -0 "$mirror_pid" 2>/dev/null || fail "mirror app exited on its own"
+kill -TERM "$mirror_pid"
+rc=0; wait "$mirror_pid" || rc=$?
+[ "$rc" -eq 0 ] || fail "mirror app: expected a clean exit on quit, got rc=$rc"
+echo "  ok"
+
 echo "PASS"

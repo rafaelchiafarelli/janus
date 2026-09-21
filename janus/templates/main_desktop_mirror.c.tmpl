@@ -1,0 +1,55 @@
+/* Janus owns its entry point: keep SDL from rewriting `main` to `SDL_main`
+ * (Windows) and demanding SDL2main be linked. Must precede <SDL.h>. */
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
+
+#include "janus_runtime.h"
+#include "janus_desktop_driver.h"
+#include "janus_remote.h"
+
+/* Window size comes from app.yaml's `display: size:` (baked into
+ * janus_display_config.gen.h); an app with no `display:` block gets a
+ * default window instead. */
+#if defined(__has_include)
+#  if __has_include("janus_display_config.gen.h")
+#    include "janus_display_config.gen.h"
+#  endif
+#endif
+#ifndef JANUS_DISPLAY_WIDTH
+#  define JANUS_DISPLAY_WIDTH 320
+#  define JANUS_DISPLAY_HEIGHT 240
+#endif
+
+extern janus_app_t janus_app;
+
+/* Mirror mode (janus.sh --mirror): this window shows what a physical
+ * device shows. PC keyboard/mouse never change the UI — there is no input
+ * polling here at all. The device is the single source of UI truth;
+ * mirror_link_poll() (src/mirror_link.c, scaffolded once, yours) is where
+ * its reports arrive. */
+bool mirror_link_poll(janus_app_t *app, janus_remote_state_t *out);
+
+int main(void) {
+    if (!janus_desktop_driver_init(JANUS_DISPLAY_WIDTH, JANUS_DISPLAY_HEIGHT, "Janus (mirror)")) return 1;
+    janus_render_screen(janus_app_get_screen(&janus_app, janus_app.active_screen));
+    janus_render_status_bar(&janus_app);   /* app-level status band (no-op if app.yaml has no `status:`) */
+    janus_render_nav_bar(&janus_app);   /* app-level tab strip (no-op if app.yaml has no `nav:`) */
+
+    while (janus_desktop_driver_pump()) {
+        SDL_Delay(1);
+
+        /* UI state (screen / focus / open boxes) the device reported, if
+         * any: a full redraw of exactly that — fires no actions. */
+        janus_remote_state_t state;
+        if (mirror_link_poll(&janus_app, &state)) {
+            janus_remote_state_apply(&janus_app, &state);
+        }
+
+        /* Bound values the link wrote into the bindings struct: repaint
+         * only what changed. */
+        janus_render_screen_if_dirty(janus_app_get_screen(&janus_app, janus_app.active_screen));
+    }
+
+    janus_desktop_driver_shutdown();
+    return 0;
+}
