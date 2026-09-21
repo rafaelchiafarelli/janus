@@ -150,6 +150,12 @@ class TestDesktopTarget(unittest.TestCase):
             self.assertNotIn("display_driver_init", out)
             self.assertTrue(_balanced_braces(out))
 
+    def test_desktop_main_defines_sdl_main_handled_before_including_sdl(self) -> None:
+        for modality in ("touch", "encoder", "buttons"):
+            out = render_main_c(modality, "blocking", "desktop")
+            self.assertIn("#define SDL_MAIN_HANDLED", out)
+            self.assertLess(out.index("#define SDL_MAIN_HANDLED"), out.index("#include <SDL.h>"))
+
     def test_desktop_ignores_render_mode(self) -> None:
         for modality in ("touch", "encoder", "buttons"):
             self.assertEqual(
