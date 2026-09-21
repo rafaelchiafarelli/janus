@@ -1073,6 +1073,53 @@ headlessly under `SDL_VIDEODRIVER=dummy` (no real display needed) — the
 driver's own tests (`runtime/desktop/tests/test_desktop_driver.c`,
 `desktop_sdl2_runtime` epic task 2) rely on this.
 
+`-DJANUS_BUILD_DESKTOP_DRIVER=OFF` (default `ON`) skips SDL2 entirely —
+no `find_package(SDL2)`, no `janus_desktop_driver`, no driver test — so
+the runtime and its mock-based tests build on a machine without SDL2
+(`windows_build` epic task 3). An app that links `janus_desktop_driver`
+needs it `ON`.
+
+**Remote UI state — mirroring a device (`janus_remote.h`, added 2026-09-20,
+`desktop_windows_mirror` initiative, `mirror_mode` epic).** A host can
+*mirror* a device's UI: the device is the single source of UI truth, the
+viewer applies what the device reports and never lets its own input
+change the screen. The transferable state is deliberately small:
+
+```c
+typedef struct {
+    uint16_t screen;          /* app->active_screen */
+    int16_t  focus;           /* focused widget's index among the active screen's
+                               * reachable focusable widgets, in janus_focus_move
+                               * order; -1 = none */
+    int16_t  nav_focus;       /* previewed nav-strip tab; -1 = none */
+    uint16_t boxes_expanded;  /* bit i = i-th box of the active screen's tree
+                               * (depth-first, independent of expansion) is open */
+} janus_remote_state_t;
+```
+
+Two focus fields because the runtime itself keeps two focus states
+(widget vs. nav strip); a *bit per box, by tree position*, because the
+runtime's own box table is keyed by descriptor pointer in first-use order,
+which is not a stable name across two devices. `janus_remote_state_get`
+(device side) snapshots it; `janus_remote_state_apply` (viewer side) sets the
+active screen's box states, does a full erase + redraw through
+`janus_switch_screen` (also when the screen is unchanged), then restores
+focus — a pure function of the state, so the mirror is pixel-comparable to
+the device. It fires **no** actions, navigation or toggles (it is not an
+input path), returns `false` and draws nothing when the state already
+matches (a host may apply on every telemetry tick without flicker) or is
+out of range (`screen` past the end, `focus`/`nav_focus` below −1, a nav tab
+the app lacks); a `focus` index past the last reachable widget still
+redraws, with nothing focused. **Bound values are not in the struct** — they
+live in the app's generated `janus_bindings.gen.h` struct, which the
+transport already carries; the viewer writes that struct and redraws with
+`janus_render_screen_if_dirty`. The API is its own translation unit
+(`janus_remote.c`), so an app that never calls it links none of it (checked
+by `scripts/avr_gate.sh`, which compiles it for AVR). Two small helpers
+support it: `janus_focus_index` / `janus_focus_set_index`
+(`janus_input_focus.h`, where the traversal order is private) and
+`janus_box_set_expanded` (`janus_runtime.h`, state only, no redraw).
+
 ---
 
 ## Stage 5 — Action dispatch
@@ -1390,6 +1437,19 @@ folder; unset or wrong fails with a clear message). It adds the vendored
 `runtime/` (tests off), globs `src/*.gen.c` — a new screen needs only a
 cmake re-run, never an edit — and links `janus_runtime` +
 `janus_desktop_driver` into `janus_desktop_app`.
+
+**Mirror mode (`janus.sh --mirror`, `mirror_mode` epic tasks 2–3).** For a
+window that should show what a physical device shows rather than take local
+input, `--mirror` (desktop target only; it needs `--scaffold-src`, and
+`janus.sh` refuses it without a `desktop` target rather than silently doing
+nothing) scaffolds `main_desktop_mirror.c.tmpl` — no input polling, no
+focus/activate/action calls — and a once-only `src/mirror_link.c` (the
+transport hook `mirror_link_poll`) **instead of** `desktop_input.c`; the app
+`CMakeLists.txt` lists whichever one was scaffolded. The mirror loop is
+`pump` → `mirror_link_poll` → `janus_remote_state_apply` (Stage 4, "Remote UI
+state") → `janus_render_screen_if_dirty`; the link also writes the bound
+values into the bindings struct. The app.yaml is unchanged and shared with
+the board.
 
 `examples/desktop_demo` is the worked example: `generate.sh` renders
 `examples/host_demo`'s own `app.yaml` for the `desktop` target (one spec,

@@ -7,7 +7,7 @@
 # it, exactly the shape every consumer already expects regardless of how
 # many targets Janus internally knows about.
 #
-#   scripts/janus.sh <app.yaml> --target <name> <dest-dir> [--target <name> <dest-dir> ...] [--scaffold-src DIR]
+#   scripts/janus.sh <app.yaml> --target <name> <dest-dir> [--target <name> <dest-dir> ...] [--scaffold-src DIR] [--mirror]
 #
 # One run, any number of targets: each --target takes its own destination.
 # At least one is required; a name may not repeat. If any requested target
@@ -18,9 +18,15 @@
 # in DIR; with several, each target's land in DIR/<target>/ (they differ
 # per target). Existing files are never overwritten.
 #
+# --mirror: the desktop window shows what a physical device shows instead of
+# taking local input. Scaffolds a mirror main.c and a mirror_link.c transport
+# hook in place of desktop_input.c (see janus_remote.h). Needs --target desktop
+# and --scaffold-src; every other target is unaffected.
+#
 # Examples:
 #   scripts/janus.sh examples/host_demo/app.yaml --target embedded_c examples/host_demo/build/generated --scaffold-src examples/host_demo/src
 #   scripts/janus.sh app.yaml --target embedded_c out/embedded --target desktop out/desktop --scaffold-src "$(mktemp -d)"
+#   scripts/janus.sh app.yaml --target desktop out/desktop --scaffold-src src --mirror
 #
 # Calling `python -m janus.cli` directly is no longer a supported way
 # for a consumer to run Janus — see the desktop_target initiative's
@@ -30,7 +36,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
-    sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^#\( \|$\)//' >&2
+    # the leading comment block, until the first non-comment line
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}" >&2
     exit 1
 }
 
@@ -39,6 +46,7 @@ usage() {
 targets=()
 dests=()
 scaffold_src=""
+mirror=0
 positional=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -55,6 +63,10 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || { echo "janus.sh: --scaffold-src needs a value" >&2; exit 2; }
             scaffold_src="$2"
             shift 2
+            ;;
+        --mirror)
+            mirror=1
+            shift
             ;;
         -h|--help)
             usage
@@ -78,6 +90,15 @@ app_yaml="${positional[0]}"
 
 [ "${#targets[@]}" -ge 1 ] || { echo "janus.sh: at least one --target <name> <dest-dir> is required" >&2; exit 2; }
 
+if [ "$mirror" -eq 1 ]; then
+    # --mirror only changes what the desktop target scaffolds: without both,
+    # it would be a silent no-op — refuse it instead.
+    has_desktop=0
+    for t in "${targets[@]}"; do [ "$t" = "desktop" ] && has_desktop=1; done
+    [ "$has_desktop" -eq 1 ] || { echo "janus.sh: --mirror needs --target desktop" >&2; exit 2; }
+    [ -n "$scaffold_src" ] || { echo "janus.sh: --mirror needs --scaffold-src (it changes what gets scaffolded)" >&2; exit 2; }
+fi
+
 # Prefer the repo venv; fall back to whatever python3 is on PATH.
 if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
     py="$REPO_ROOT/.venv/bin/python"
@@ -91,6 +112,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 gen_args=("$app_yaml" "$tmp/gen")
 [ -n "$scaffold_src" ] && gen_args+=(--scaffold-src "$tmp/scaffold")
+[ "$mirror" -eq 1 ] && gen_args+=(--mirror)
 env PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$py" -m janus.cli "${gen_args[@]}"
 
 # Validate every requested target before touching any destination.

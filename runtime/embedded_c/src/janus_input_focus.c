@@ -139,6 +139,23 @@ void janus_focus_move(janus_app_t *app, int16_t delta) {
     janus_set_focus(widget_at(screen, next));
 }
 
+int16_t janus_focus_index(const janus_app_t *app) {
+    const janus_screen_desc_t *screen = janus_app_get_screen(app, app->active_screen);
+    return (int16_t)focus_position(screen, janus_get_focus());
+}
+
+bool janus_focus_set_index(janus_app_t *app, int16_t index) {
+    if (index < 0) {
+        janus_set_focus(NULL);
+        return true;
+    }
+    const janus_screen_desc_t *screen = janus_app_get_screen(app, app->active_screen);
+    const janus_widget_desc_t *w = widget_at(screen, index);
+    if (w == NULL) return false;
+    janus_set_focus(w);
+    return true;
+}
+
 janus_input_result_t janus_focus_activate(janus_app_t *app) {
     janus_input_result_t result = {
         .kind = JANUS_INPUT_NONE, .widget = NULL,
