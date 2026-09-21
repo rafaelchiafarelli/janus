@@ -20,7 +20,7 @@ from .stage2_layout.layout import build_nav_bar, build_status_bar, check_fits_di
 from .stage3b_embedded_c.emit_files import render_render_config_header
 from .stage5_actions.scaffold_actions import scaffold_actions_c
 from .stage8_scaffold.scaffold_cmake import scaffold_desktop_cmake
-from .stage8_scaffold.scaffold_input import scaffold_desktop_input_c
+from .stage8_scaffold.scaffold_input import scaffold_desktop_input_c, scaffold_mirror_link_c
 from .stage8_scaffold.scaffold_main import scaffold_main_c
 from .targets import Target, implemented_targets
 from .writer import copy_tree_if_changed, write_if_changed
@@ -67,6 +67,7 @@ def generate(
     app_yaml: str | Path,
     target_dir: str | Path,
     scaffold_src: str | Path | None = None,
+    mirror: bool = False,
 ) -> list[Path]:
     """Runs the pipeline against `app_yaml` and writes every implemented
     target (`janus/targets.py`) into its own subtree of `target_dir` —
@@ -84,6 +85,12 @@ def generate(
     Janus checkout. Without `scaffold_src`, neither happens — `target_dir`
     holds only the regenerated-every-run Janus output. Returns every path
     actually written (empty on a no-op re-run).
+
+    `mirror=True` (desktop target only; `janus.sh --mirror`) scaffolds the
+    input-less mirror `main.c` plus a transport-hook `mirror_link.c` in
+    place of `desktop_input.c` — the window then shows a device's UI
+    state (janus_remote.h) instead of taking local input. Every other
+    target is unaffected.
 
     Janus itself never selects a target — every implemented one is always
     written. `scripts/janus.sh --target <name>` is what a real consumer
@@ -111,18 +118,20 @@ def generate(
             target_scaffold = scaffold_src / target.name
             if scaffold_actions_c(app, target_scaffold / "janus_actions.c"):
                 written.append(target_scaffold / "janus_actions.c")
-            if scaffold_main_c(app, target_scaffold / "main.c", target.name):
+            if scaffold_main_c(
+                app, target_scaffold / "main.c", target.name, mirror and target.name == "desktop",
+            ):
                 written.append(target_scaffold / "main.c")
-            # The desktop main's poll functions have no vendor to supply
-            # them (there's no board) — scaffold the default SDL ones.
-            if target.name == "desktop" and scaffold_desktop_input_c(
-                app, target_scaffold / "desktop_input.c"
-            ):
-                written.append(target_scaffold / "desktop_input.c")
-            if target.name == "desktop" and scaffold_desktop_cmake(
-                app, target_scaffold / "CMakeLists.txt"
-            ):
-                written.append(target_scaffold / "CMakeLists.txt")
+            if target.name == "desktop":
+                # The desktop main's input source has no vendor to supply
+                # it (there's no board): the default SDL polls — or, in
+                # mirror mode, the transport hook that replaces them.
+                input_name = "mirror_link.c" if mirror else "desktop_input.c"
+                scaffold_input = scaffold_mirror_link_c if mirror else scaffold_desktop_input_c
+                if scaffold_input(app, target_scaffold / input_name):
+                    written.append(target_scaffold / input_name)
+                if scaffold_desktop_cmake(app, target_scaffold / "CMakeLists.txt", mirror):
+                    written.append(target_scaffold / "CMakeLists.txt")
             written.extend(
                 _vendor_runtime(
                     target, target_out / "runtime", render_mode, app.display, has_nav, has_status,
