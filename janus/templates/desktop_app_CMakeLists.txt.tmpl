@@ -15,6 +15,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(janus_desktop_app C)
 
+# Warning flags: GCC/Clang spelling everywhere except MSVC, where -Wextra is
+# a hard D8021 error, not a warning.
+set(JANUS_WARN_FLAGS
+    $<$<C_COMPILER_ID:MSVC>:/W3>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wextra>)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -52,4 +59,4 @@ target_link_libraries(janus_desktop_app PRIVATE janus_desktop_driver janus_runti
 if(UNIX)
     target_link_libraries(janus_desktop_app PRIVATE m)
 endif()
-target_compile_options(janus_desktop_app PRIVATE -Wall -Wextra)
+target_compile_options(janus_desktop_app PRIVATE ${JANUS_WARN_FLAGS})

@@ -1,10 +1,23 @@
 cmake_minimum_required(VERSION 3.16)
 project(janus_runtime C)
 
+# Warning flags: GCC/Clang spelling everywhere except MSVC, where -Wextra is
+# a hard D8021 error, not a warning.
+set(JANUS_WARN_FLAGS
+    $<$<C_COMPILER_ID:MSVC>:/W3>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wextra>)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(SDL2 REQUIRED)
+# The SDL2 driver is the only part of this tree that needs SDL2. Turning
+# it off lets the runtime + its mock-based tests build on a machine
+# without SDL2 installed (an app linking janus_desktop_driver needs it ON).
+option(JANUS_BUILD_DESKTOP_DRIVER "Build the SDL2 driver (needs SDL2)" ON)
+if(JANUS_BUILD_DESKTOP_DRIVER)
+    find_package(SDL2 REQUIRED)
+endif()
 
 # Same target name the embedded_c target's CMakeLists.txt defines — a
 # consumer's own target_link_libraries(x PRIVATE janus_runtime) doesn't
@@ -27,7 +40,7 @@ add_library(janus_runtime STATIC
     src/janus_format.c
 )
 target_include_directories(janus_runtime PUBLIC include)
-target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
+target_compile_options(janus_runtime PRIVATE ${JANUS_WARN_FLAGS})
 
 # The real SDL2 driver — a separate library, deliberately never linked
 # together with janus_host_mock below (both define draw_area_sync/
@@ -38,9 +51,11 @@ target_compile_options(janus_runtime PRIVATE -Wall -Wextra)
 # janus_runtime + janus_host_mock instead. Same relationship
 # display_driver_stub.c has to embedded_c's own janus_runtime — a real
 # driver and the test mock are always alternatives, never both at once.
-add_library(janus_desktop_driver STATIC driver/janus_desktop_driver.c)
-target_link_libraries(janus_desktop_driver PUBLIC janus_runtime SDL2::SDL2)
-target_compile_options(janus_desktop_driver PRIVATE -Wall -Wextra)
+if(JANUS_BUILD_DESKTOP_DRIVER)
+    add_library(janus_desktop_driver STATIC driver/janus_desktop_driver.c)
+    target_link_libraries(janus_desktop_driver PUBLIC janus_runtime SDL2::SDL2)
+    target_compile_options(janus_desktop_driver PRIVATE ${JANUS_WARN_FLAGS})
+endif()
 
 option(JANUS_RUNTIME_BUILD_TESTS "Build janus_runtime's own host-side tests" ON)
 if(JANUS_RUNTIME_BUILD_TESTS)
@@ -63,39 +78,39 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     # specific, and still make sense to run for this target too.
     add_executable(janus_runtime_tests tests/test_runtime.c)
     target_link_libraries(janus_runtime_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_runtime_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_runtime_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_input_touch_tests tests/test_input_touch.c)
     target_link_libraries(janus_input_touch_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_input_touch_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_input_touch_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_input_focus_tests tests/test_input_focus.c)
     target_link_libraries(janus_input_focus_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_input_focus_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_input_focus_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_input_encoder_tests tests/test_input_encoder.c)
     target_link_libraries(janus_input_encoder_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_input_encoder_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_input_encoder_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_input_buttons_tests tests/test_input_buttons.c)
     target_link_libraries(janus_input_buttons_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_input_buttons_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_input_buttons_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_nav_focus_tests tests/test_nav_focus.c)
     target_link_libraries(janus_nav_focus_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_nav_focus_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_nav_focus_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_font_tests tests/test_font.c)
     target_link_libraries(janus_font_tests PRIVATE janus_runtime)
-    target_compile_options(janus_font_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_font_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_format_tests tests/test_format.c)
     target_link_libraries(janus_format_tests PRIVATE janus_runtime)
-    target_compile_options(janus_format_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_format_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_render_async_tests tests/test_render_async.c)
     target_link_libraries(janus_render_async_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_render_async_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_render_async_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_clear_screen_bg_tests
         tests/test_clear_screen_bg.c
@@ -108,18 +123,20 @@ if(JANUS_RUNTIME_BUILD_TESTS)
         JANUS_RENDER_NONBLOCKING
         JANUS_DISPLAY_BACKGROUND=0x4321
         JANUS_DISPLAY_PANEL_W=48 JANUS_DISPLAY_PANEL_H=32)
-    target_compile_options(janus_clear_screen_bg_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_clear_screen_bg_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     add_executable(janus_draw_tests tests/test_draw.c)
     target_link_libraries(janus_draw_tests PRIVATE janus_runtime janus_host_mock)
-    target_compile_options(janus_draw_tests PRIVATE -Wall -Wextra)
+    target_compile_options(janus_draw_tests PRIVATE ${JANUS_WARN_FLAGS})
 
     # The real SDL2 driver, exercised headlessly: this executable alone
     # needs SDL_VIDEODRIVER=dummy (the mock-based tests above touch no
     # SDL2 state), so it's set per-test and a plain `ctest` just works.
-    add_executable(janus_desktop_driver_tests tests/test_desktop_driver.c)
-    target_link_libraries(janus_desktop_driver_tests PRIVATE janus_desktop_driver)
-    target_compile_options(janus_desktop_driver_tests PRIVATE -Wall -Wextra)
+    if(JANUS_BUILD_DESKTOP_DRIVER)
+        add_executable(janus_desktop_driver_tests tests/test_desktop_driver.c)
+        target_link_libraries(janus_desktop_driver_tests PRIVATE janus_desktop_driver)
+        target_compile_options(janus_desktop_driver_tests PRIVATE ${JANUS_WARN_FLAGS})
+    endif()
 
     enable_testing()
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
@@ -133,7 +150,9 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_draw_tests COMMAND janus_draw_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
     add_test(NAME janus_clear_screen_bg_tests COMMAND janus_clear_screen_bg_tests)
-    add_test(NAME janus_desktop_driver_tests COMMAND janus_desktop_driver_tests)
-    set_tests_properties(janus_desktop_driver_tests PROPERTIES
-        ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+    if(JANUS_BUILD_DESKTOP_DRIVER)
+        add_test(NAME janus_desktop_driver_tests COMMAND janus_desktop_driver_tests)
+        set_tests_properties(janus_desktop_driver_tests PROPERTIES
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+    endif()
 endif()
