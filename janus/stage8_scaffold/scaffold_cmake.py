@@ -15,10 +15,13 @@ from ..templates import load_template
 from ..writer import write_if_missing
 
 
-def render_desktop_cmake() -> str:
-    return load_template("desktop_app_CMakeLists.txt.tmpl")
+def render_desktop_cmake(mirror: bool = False) -> str:
+    """The input source it compiles is the only per-mode difference:
+    `desktop_input.c` normally, `mirror_link.c` in mirror mode."""
+    input_source = "mirror_link.c" if mirror else "desktop_input.c"
+    return load_template("desktop_app_CMakeLists.txt.tmpl").replace("@INPUT_SOURCE@", input_source)
 
 
-def scaffold_desktop_cmake(app: App, path: str | Path) -> bool:
+def scaffold_desktop_cmake(app: App, path: str | Path, mirror: bool = False) -> bool:
     """Writes the app CMakeLists.txt only if `path` doesn't exist yet."""
-    return write_if_missing(path, render_desktop_cmake())
+    return write_if_missing(path, render_desktop_cmake(mirror))

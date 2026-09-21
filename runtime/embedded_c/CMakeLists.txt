@@ -18,6 +18,7 @@ add_library(janus_runtime STATIC
     src/janus_font.c
     src/janus_bound.c
     src/janus_format.c
+    src/janus_remote.c
 )
 target_include_directories(janus_runtime PUBLIC include)
 target_compile_options(janus_runtime PRIVATE ${JANUS_WARN_FLAGS})
@@ -119,6 +120,10 @@ if(JANUS_RUNTIME_BUILD_TESTS)
 
     # janus_draw's helpers live in janus_runtime.o, which pulls the driver
     # contract — so this links the mock, same as janus_runtime_tests.
+    add_executable(janus_remote_tests tests/test_remote.c)
+    target_link_libraries(janus_remote_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_remote_tests PRIVATE ${JANUS_WARN_FLAGS})
+
     add_executable(janus_draw_tests tests/test_draw.c)
     target_link_libraries(janus_draw_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_draw_tests PRIVATE ${JANUS_WARN_FLAGS})
@@ -133,6 +138,7 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_font_tests COMMAND janus_font_tests)
     add_test(NAME janus_format_tests COMMAND janus_format_tests)
     add_test(NAME janus_draw_tests COMMAND janus_draw_tests)
+    add_test(NAME janus_remote_tests COMMAND janus_remote_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
     add_test(NAME janus_clear_screen_bg_tests COMMAND janus_clear_screen_bg_tests)
 endif()

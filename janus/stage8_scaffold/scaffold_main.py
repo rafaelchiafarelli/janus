@@ -46,20 +46,29 @@ _DESKTOP_TEMPLATE_BY_MODALITY: dict[InputModality, str] = {
 
 def render_main_c(
     modality: InputModality = "touch", render_mode: RenderMode = "blocking", target: str = "embedded_c",
+    mirror: bool = False,
 ) -> str:
     """Static per (target, modality, render_mode) — the documented boot
     sequence (driver init, render the active screen from the generated
     janus_app table) doesn't depend on any other per-app data. `desktop`
-    ignores `render_mode` (see _DESKTOP_TEMPLATE_BY_MODALITY)."""
+    ignores `render_mode` (see _DESKTOP_TEMPLATE_BY_MODALITY). `mirror`
+    (desktop only) picks the input-less mirror main instead — it ignores
+    `modality` too: a mirror never polls input."""
+    if mirror and target != "desktop":
+        raise ValueError(f"mirror mode is desktop-only, not target {target!r}")
+    if mirror:
+        return load_template("main_desktop_mirror.c.tmpl")
     if target == "desktop":
         return load_template(_DESKTOP_TEMPLATE_BY_MODALITY[modality])
     return load_template(_TEMPLATE_BY_MODALITY_AND_RENDER_MODE[(modality, render_mode)])
 
 
-def scaffold_main_c(app: App, path: str | Path, target: str = "embedded_c") -> bool:
+def scaffold_main_c(
+    app: App, path: str | Path, target: str = "embedded_c", mirror: bool = False,
+) -> bool:
     """Writes a starter main.c (for `target`, `app.input_modality` and
     `app.display.render_mode`, if `app.display` is set — `blocking`
     otherwise, matching today's behavior) only if `path` doesn't exist
     yet. Same once-only semantics as scaffold_actions_c."""
     render_mode = app.display.render_mode if app.display is not None else "blocking"
-    return write_if_missing(path, render_main_c(app.input_modality, render_mode, target))
+    return write_if_missing(path, render_main_c(app.input_modality, render_mode, target, mirror))

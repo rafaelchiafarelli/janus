@@ -60,9 +60,9 @@ tasks` (`epics` already carries the merged `windows_build` epic).
 
 | # | file | status | contract (one line) |
 |---|---|---|---|
-| 1 | `tasks/1-remote-state-api.md` | not started | `janus_remote.{h,c}` (`get`/`apply`) + the two small helpers it needs (`janus_focus_index`/`janus_focus_set_index`, `janus_box_set_expanded`); C tests. |
-| 2 | `tasks/2-mirror-scaffold.md` | not started | Mirror `main_desktop_mirror.c.tmpl` + `mirror_link.c` stub; `generate(mirror=)`; CMake scaffold lists the right input source. |
-| 3 | `tasks/3-janus-sh-mirror-flag.md` | not started | `janus.sh --mirror` (+ `janus.cli --mirror`), validation, shell test that builds and runs a mirror app headless. |
+| 1 | `tasks/1-remote-state-api-done.md` | ✅ done | `janus_remote.{h,c}` (`get`/`apply`) + the two small helpers it needs (`janus_focus_index`/`janus_focus_set_index`, `janus_box_set_expanded`); C tests. |
+| 2 | `tasks/2-mirror-scaffold-done.md` | ✅ done | Mirror `main_desktop_mirror.c.tmpl` + `mirror_link.c` stub; `generate(mirror=)`; CMake scaffold lists the right input source. |
+| 3 | `tasks/3-janus-sh-mirror-flag-done.md` | ✅ done | `janus.sh --mirror` (+ `janus.cli --mirror`), validation, shell test that builds and runs a mirror app headless. |
 
 ## Acceptance gate
 
