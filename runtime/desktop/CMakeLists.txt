@@ -11,7 +11,13 @@ set(JANUS_WARN_FLAGS
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-find_package(SDL2 REQUIRED)
+# The SDL2 driver is the only part of this tree that needs SDL2. Turning
+# it off lets the runtime + its mock-based tests build on a machine
+# without SDL2 installed (an app linking janus_desktop_driver needs it ON).
+option(JANUS_BUILD_DESKTOP_DRIVER "Build the SDL2 driver (needs SDL2)" ON)
+if(JANUS_BUILD_DESKTOP_DRIVER)
+    find_package(SDL2 REQUIRED)
+endif()
 
 # Same target name the embedded_c target's CMakeLists.txt defines — a
 # consumer's own target_link_libraries(x PRIVATE janus_runtime) doesn't
@@ -45,9 +51,11 @@ target_compile_options(janus_runtime PRIVATE ${JANUS_WARN_FLAGS})
 # janus_runtime + janus_host_mock instead. Same relationship
 # display_driver_stub.c has to embedded_c's own janus_runtime — a real
 # driver and the test mock are always alternatives, never both at once.
-add_library(janus_desktop_driver STATIC driver/janus_desktop_driver.c)
-target_link_libraries(janus_desktop_driver PUBLIC janus_runtime SDL2::SDL2)
-target_compile_options(janus_desktop_driver PRIVATE ${JANUS_WARN_FLAGS})
+if(JANUS_BUILD_DESKTOP_DRIVER)
+    add_library(janus_desktop_driver STATIC driver/janus_desktop_driver.c)
+    target_link_libraries(janus_desktop_driver PUBLIC janus_runtime SDL2::SDL2)
+    target_compile_options(janus_desktop_driver PRIVATE ${JANUS_WARN_FLAGS})
+endif()
 
 option(JANUS_RUNTIME_BUILD_TESTS "Build janus_runtime's own host-side tests" ON)
 if(JANUS_RUNTIME_BUILD_TESTS)
@@ -124,9 +132,11 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     # The real SDL2 driver, exercised headlessly: this executable alone
     # needs SDL_VIDEODRIVER=dummy (the mock-based tests above touch no
     # SDL2 state), so it's set per-test and a plain `ctest` just works.
-    add_executable(janus_desktop_driver_tests tests/test_desktop_driver.c)
-    target_link_libraries(janus_desktop_driver_tests PRIVATE janus_desktop_driver)
-    target_compile_options(janus_desktop_driver_tests PRIVATE ${JANUS_WARN_FLAGS})
+    if(JANUS_BUILD_DESKTOP_DRIVER)
+        add_executable(janus_desktop_driver_tests tests/test_desktop_driver.c)
+        target_link_libraries(janus_desktop_driver_tests PRIVATE janus_desktop_driver)
+        target_compile_options(janus_desktop_driver_tests PRIVATE ${JANUS_WARN_FLAGS})
+    endif()
 
     enable_testing()
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
@@ -140,7 +150,9 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_draw_tests COMMAND janus_draw_tests)
     add_test(NAME janus_render_async_tests COMMAND janus_render_async_tests)
     add_test(NAME janus_clear_screen_bg_tests COMMAND janus_clear_screen_bg_tests)
-    add_test(NAME janus_desktop_driver_tests COMMAND janus_desktop_driver_tests)
-    set_tests_properties(janus_desktop_driver_tests PROPERTIES
-        ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+    if(JANUS_BUILD_DESKTOP_DRIVER)
+        add_test(NAME janus_desktop_driver_tests COMMAND janus_desktop_driver_tests)
+        set_tests_properties(janus_desktop_driver_tests PROPERTIES
+            ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+    endif()
 endif()
