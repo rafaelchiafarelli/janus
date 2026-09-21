@@ -51,7 +51,7 @@ file(GLOB JANUS_GENERATED_SOURCES CONFIGURE_DEPENDS "${JANUS_GENERATED_DIR}/src/
 add_executable(janus_desktop_app
     main.c
     janus_actions.c
-    desktop_input.c
+    @INPUT_SOURCE@
     ${JANUS_GENERATED_SOURCES}
 )
 target_include_directories(janus_desktop_app PRIVATE "${JANUS_GENERATED_DIR}/include")
