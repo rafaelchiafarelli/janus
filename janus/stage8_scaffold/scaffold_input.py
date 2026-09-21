@@ -31,3 +31,9 @@ def scaffold_desktop_input_c(app: App, path: str | Path) -> bool:
     """Writes the default desktop input file for `app.input_modality`
     only if `path` doesn't exist yet."""
     return write_if_missing(path, render_desktop_input_c(app.input_modality))
+
+
+def scaffold_mirror_link_c(app: App, path: str | Path) -> bool:
+    """Mirror mode's replacement for `desktop_input.c`: the once-only
+    transport hook (`mirror_link_poll`). Same once-only semantics."""
+    return write_if_missing(path, load_template("mirror_link.c.tmpl"))
