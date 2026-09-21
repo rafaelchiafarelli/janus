@@ -460,13 +460,12 @@ static void test_switch_screen_erases_old_then_draws_new(void) {
  * rects, anchored at the origin — so it also covers the GAP between them
  * and any ragged right/bottom edge a per-widget fill would leave. */
 static void test_switch_screen_erase_covers_gaps_and_ragged_edges(void) {
-    static const janus_widget_desc_t s1_a = {
-        .kind = JANUS_WIDGET_LABEL, .id = "a", .geometry = { 0, 0, 10, 10 }, .bg_color = 0x0777,
+    /* initialisers written inline: copying other const objects into a
+     * static initializer is a GCC extension (MSVC C2099) */
+    static const janus_widget_desc_t s1_widgets[] = {
+        { .kind = JANUS_WIDGET_LABEL, .id = "a", .geometry = { 0, 0, 10, 10 }, .bg_color = 0x0777 },
+        { .kind = JANUS_WIDGET_LABEL, .id = "b", .geometry = { 0, 20, 40, 10 }, .bg_color = 0x0777 },
     };
-    static const janus_widget_desc_t s1_b = {
-        .kind = JANUS_WIDGET_LABEL, .id = "b", .geometry = { 0, 20, 40, 10 }, .bg_color = 0x0777,
-    };
-    static const janus_widget_desc_t s1_widgets[] = { s1_a, s1_b };
     static const janus_widget_desc_t s2_widget = {
         .kind = JANUS_WIDGET_LABEL, .id = "s2w", .geometry = { 0, 0, 4, 4 },
     };
