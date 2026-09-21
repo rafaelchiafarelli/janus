@@ -54,4 +54,16 @@ void janus_focus_move(janus_app_t *app, int16_t delta);
  * resolves the target and leaves switching to the caller. */
 janus_input_result_t janus_focus_activate(janus_app_t *app);
 
+/* The focused widget's position among `app`'s active screen's reachable
+ * focusable widgets, in janus_focus_move's traversal order; -1 if no
+ * widget is focused (including when the nav strip is). Together with
+ * janus_focus_set_index this is the stable, device-independent name for
+ * "what has focus" that janus_remote.h serializes. */
+int16_t janus_focus_index(const janus_app_t *app);
+
+/* Focuses the widget at that position (redrawing rings like
+ * janus_set_focus); a negative `index` clears widget focus. Returns false,
+ * changing nothing, if `index` is past the last reachable focusable widget. */
+bool janus_focus_set_index(janus_app_t *app, int16_t index);
+
 #endif /* JANUS_INPUT_FOCUS_H */

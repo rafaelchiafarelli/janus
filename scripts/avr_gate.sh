@@ -66,6 +66,7 @@ for src in "$GEN"/src/*.gen.c \
           "$RT"/src/janus_runtime.c "$RT"/src/janus_font.c \
           "$RT"/src/janus_input_touch.c "$RT"/src/janus_input_focus.c \
           "$RT"/src/janus_bound.c "$RT"/src/janus_format.c \
+          "$RT"/src/janus_remote.c \
           "$WORK/gate_main.c"; do
     obj="$WORK/$(basename "${src%.c}").o"
     avr-gcc "${CFLAGS[@]}" -c "$src" -o "$obj"
