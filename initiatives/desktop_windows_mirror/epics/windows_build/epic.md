@@ -35,7 +35,7 @@ all fully merged into `main`, nothing lost).
 | # | file | status | contract (one line) |
 |---|---|---|---|
 | 1 | `tasks/1-msvc-safe-warning-flags-done.md` | ✅ done | `JANUS_WARN_FLAGS` replaces every hard-coded `-Wall -Wextra` in the runtime, the desktop app template, and both examples. |
-| 2 | `tasks/2-portable-c-and-sdl-main.md` | not started | `test_runtime.c`'s non-constant static initializer fixed; `SDL_MAIN_HANDLED` in the driver test and the desktop `main` templates. |
+| 2 | `tasks/2-portable-c-and-sdl-main-done.md` | ✅ done | `test_runtime.c`'s non-constant static initializer fixed; `SDL_MAIN_HANDLED` in the driver test and the desktop `main` templates. |
 | 3 | `tasks/3-optional-desktop-driver.md` | not started | `JANUS_BUILD_DESKTOP_DRIVER` (default ON) gates SDL2, the driver library and its test. |
 
 ## Acceptance gate
