@@ -574,6 +574,11 @@ bool janus_box_is_expanded(const janus_widget_desc_t *box) {
     return janus_widget_load(box).initial_expanded;
 }
 
+void janus_box_set_expanded(const janus_widget_desc_t *box, bool expanded) {
+    janus_box_state_t *slot = box_state_find_or_register(box);
+    if (slot != NULL) slot->expanded = expanded;   /* table full: stays at initial_expanded, like janus_box_is_expanded */
+}
+
 /* Only one screen's widgets are ever live at once (Janus.md) — this is
  * how janus_toggle_box, whose spec'd signature takes only the box
  * pointer, still finds the right bound_struct for re-rendering any
