@@ -1438,6 +1438,19 @@ folder; unset or wrong fails with a clear message). It adds the vendored
 cmake re-run, never an edit — and links `janus_runtime` +
 `janus_desktop_driver` into `janus_desktop_app`.
 
+**Mirror mode (`janus.sh --mirror`, `mirror_mode` epic tasks 2–3).** For a
+window that should show what a physical device shows rather than take local
+input, `--mirror` (desktop target only; it needs `--scaffold-src`, and
+`janus.sh` refuses it without a `desktop` target rather than silently doing
+nothing) scaffolds `main_desktop_mirror.c.tmpl` — no input polling, no
+focus/activate/action calls — and a once-only `src/mirror_link.c` (the
+transport hook `mirror_link_poll`) **instead of** `desktop_input.c`; the app
+`CMakeLists.txt` lists whichever one was scaffolded. The mirror loop is
+`pump` → `mirror_link_poll` → `janus_remote_state_apply` (Stage 4, "Remote UI
+state") → `janus_render_screen_if_dirty`; the link also writes the bound
+values into the bindings struct. The app.yaml is unchanged and shared with
+the board.
+
 `examples/desktop_demo` is the worked example: `generate.sh` renders
 `examples/host_demo`'s own `app.yaml` for the `desktop` target (one spec,
 two targets), and `tests/test_desktop_demo.sh` proves the whole path —

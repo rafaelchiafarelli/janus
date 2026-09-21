@@ -159,7 +159,19 @@ def main(argv: list[str] | None = None) -> int:
             "runtime/embedded_c library into target_dir/runtime"
         ),
     )
+    parser.add_argument(
+        "--mirror",
+        action="store_true",
+        help=(
+            "desktop target only: scaffold the input-less mirror main.c plus a "
+            "mirror_link.c transport hook (in place of desktop_input.c), so the "
+            "window shows a device's UI state instead of taking local input. "
+            "Requires --scaffold-src"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.mirror and args.scaffold_src is None:
+        parser.error("--mirror only changes what --scaffold-src scaffolds; it needs --scaffold-src")
 
     # Generation is "log and keep going" for soft failures (an image
     # asset that won't decode, an oversized bitmap) — surface those on
@@ -169,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.app_yaml.is_file():
         parser.error(f"{args.app_yaml}: no such file")
 
-    written = generate(args.app_yaml, args.target_dir, args.scaffold_src)
+    written = generate(args.app_yaml, args.target_dir, args.scaffold_src, mirror=args.mirror)
     for path in written:
         print(f"wrote {path}")
     if not written:

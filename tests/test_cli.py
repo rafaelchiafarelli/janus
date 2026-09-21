@@ -148,5 +148,19 @@ class TestMain(unittest.TestCase):
         self.assertNotEqual(ctx.exception.code, 0)
 
 
+    def test_mirror_flag_scaffolds_the_mirror_link(self) -> None:
+        src = Path(self._tmp.name) / "src"
+        exit_code = main([str(FIXTURES / "app.yaml"), str(self.target_dir), "--scaffold-src", str(src), "--mirror"])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue((src / "desktop" / "mirror_link.c").exists())
+        self.assertFalse((src / "desktop" / "desktop_input.c").exists())
+
+    def test_mirror_without_scaffold_src_is_a_usage_error(self) -> None:
+        with self.assertRaises(SystemExit) as ctx:
+            main([str(FIXTURES / "app.yaml"), str(self.target_dir), "--mirror"])
+        self.assertNotEqual(ctx.exception.code, 0)
+        self.assertFalse(self.target_dir.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

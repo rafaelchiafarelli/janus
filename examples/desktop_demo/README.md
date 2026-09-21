@@ -22,3 +22,9 @@ Everything under `build/generated/` is regenerated every run.
 
 No display? `SDL_VIDEODRIVER=dummy ./build/app/janus_desktop_app` runs
 headless (that is how `tests/test_desktop_demo.sh` checks it).
+
+## Mirror mode
+
+To show what a *physical device* shows instead (PC input never changes the
+screen), generate with `--mirror` — see `architecture.md`, Stage 8 "Mirror
+mode". The demo itself stays the interactive one.
