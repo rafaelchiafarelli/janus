@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(janus_host_demo C)
 
+# Warning flags: GCC/Clang spelling everywhere except MSVC, where -Wextra is
+# a hard D8021 error, not a warning.
+set(JANUS_WARN_FLAGS
+    $<$<C_COMPILER_ID:MSVC>:/W3>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wall>
+    $<$<NOT:$<C_COMPILER_ID:MSVC>>:-Wextra>)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -33,7 +40,7 @@ set(COMMON_INCLUDES
 add_executable(host_demo host_main.c ${COMMON_SOURCES})
 target_include_directories(host_demo PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(host_demo PRIVATE janus_runtime)
-target_compile_options(host_demo PRIVATE -Wall -Wextra)
+target_compile_options(host_demo PRIVATE ${JANUS_WARN_FLAGS})
 
 # Links Stage 8's real, unmodified src/main.c against everything —
 # proves the actual scaffolded firmware entry point compiles and links.
@@ -42,4 +49,4 @@ target_compile_options(host_demo PRIVATE -Wall -Wextra)
 add_executable(host_demo_firmware_main src/main.c ${COMMON_SOURCES})
 target_include_directories(host_demo_firmware_main PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(host_demo_firmware_main PRIVATE janus_runtime)
-target_compile_options(host_demo_firmware_main PRIVATE -Wall -Wextra)
+target_compile_options(host_demo_firmware_main PRIVATE ${JANUS_WARN_FLAGS})
