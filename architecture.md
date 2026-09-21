@@ -1079,6 +1079,47 @@ the runtime and its mock-based tests build on a machine without SDL2
 (`windows_build` epic task 3). An app that links `janus_desktop_driver`
 needs it `ON`.
 
+**Remote UI state — mirroring a device (`janus_remote.h`, added 2026-09-20,
+`desktop_windows_mirror` initiative, `mirror_mode` epic).** A host can
+*mirror* a device's UI: the device is the single source of UI truth, the
+viewer applies what the device reports and never lets its own input
+change the screen. The transferable state is deliberately small:
+
+```c
+typedef struct {
+    uint16_t screen;          /* app->active_screen */
+    int16_t  focus;           /* focused widget's index among the active screen's
+                               * reachable focusable widgets, in janus_focus_move
+                               * order; -1 = none */
+    int16_t  nav_focus;       /* previewed nav-strip tab; -1 = none */
+    uint16_t boxes_expanded;  /* bit i = i-th box of the active screen's tree
+                               * (depth-first, independent of expansion) is open */
+} janus_remote_state_t;
+```
+
+Two focus fields because the runtime itself keeps two focus states
+(widget vs. nav strip); a *bit per box, by tree position*, because the
+runtime's own box table is keyed by descriptor pointer in first-use order,
+which is not a stable name across two devices. `janus_remote_state_get`
+(device side) snapshots it; `janus_remote_state_apply` (viewer side) sets the
+active screen's box states, does a full erase + redraw through
+`janus_switch_screen` (also when the screen is unchanged), then restores
+focus — a pure function of the state, so the mirror is pixel-comparable to
+the device. It fires **no** actions, navigation or toggles (it is not an
+input path), returns `false` and draws nothing when the state already
+matches (a host may apply on every telemetry tick without flicker) or is
+out of range (`screen` past the end, `focus`/`nav_focus` below −1, a nav tab
+the app lacks); a `focus` index past the last reachable widget still
+redraws, with nothing focused. **Bound values are not in the struct** — they
+live in the app's generated `janus_bindings.gen.h` struct, which the
+transport already carries; the viewer writes that struct and redraws with
+`janus_render_screen_if_dirty`. The API is its own translation unit
+(`janus_remote.c`), so an app that never calls it links none of it (checked
+by `scripts/avr_gate.sh`, which compiles it for AVR). Two small helpers
+support it: `janus_focus_index` / `janus_focus_set_index`
+(`janus_input_focus.h`, where the traversal order is private) and
+`janus_box_set_expanded` (`janus_runtime.h`, state only, no redraw).
+
 ---
 
 ## Stage 5 — Action dispatch
