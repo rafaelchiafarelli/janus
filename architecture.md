@@ -1073,6 +1073,12 @@ headlessly under `SDL_VIDEODRIVER=dummy` (no real display needed) — the
 driver's own tests (`runtime/desktop/tests/test_desktop_driver.c`,
 `desktop_sdl2_runtime` epic task 2) rely on this.
 
+`-DJANUS_BUILD_DESKTOP_DRIVER=OFF` (default `ON`) skips SDL2 entirely —
+no `find_package(SDL2)`, no `janus_desktop_driver`, no driver test — so
+the runtime and its mock-based tests build on a machine without SDL2
+(`windows_build` epic task 3). An app that links `janus_desktop_driver`
+needs it `ON`.
+
 ---
 
 ## Stage 5 — Action dispatch

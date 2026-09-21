@@ -75,6 +75,26 @@ class TestScaffoldedTreeBuilds(unittest.TestCase):
             )
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_runtime_builds_and_tests_without_sdl2_when_the_driver_is_off(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            generate(FIXTURES / "app.yaml", tmp / "gen", scaffold_src=tmp / "src")
+            runtime, build = tmp / "gen" / "desktop" / "runtime", tmp / "build"
+            for cmd in (
+                # SDL2 made unfindable: proves nothing reaches for it when the driver is off
+                ["cmake", "-S", str(runtime), "-B", str(build),
+                 "-DJANUS_BUILD_DESKTOP_DRIVER=OFF", "-DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON"],
+                ["cmake", "--build", str(build), "-j"],
+                ["ctest", "--test-dir", str(build), "--output-on-failure"],
+            ):
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            listed = subprocess.run(
+                ["ctest", "--test-dir", str(build), "-N"], capture_output=True, text=True
+            ).stdout
+            self.assertIn("janus_runtime_tests", listed)
+            self.assertNotIn("janus_desktop_driver_tests", listed)
+
     def test_unset_generated_dir_fails_with_a_clear_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
