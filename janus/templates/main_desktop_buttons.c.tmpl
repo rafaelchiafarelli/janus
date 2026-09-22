@@ -1,3 +1,6 @@
+/* Janus owns its entry point: keep SDL from rewriting `main` to `SDL_main`
+ * (Windows) and demanding SDL2main be linked. Must precede <SDL.h>. */
+#define SDL_MAIN_HANDLED
 #include <SDL.h>
 
 #include "janus_runtime.h"

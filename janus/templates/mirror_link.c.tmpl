@@ -1,0 +1,20 @@
+/* The mirror's transport hook. Scaffolded once by Janus, then yours.
+ *
+ * Called every loop iteration of the mirror main. Fill `*out` and return
+ * true when the device has reported a new UI state (screen / focus / open
+ * boxes — see janus_remote.h); return false when nothing new arrived.
+ *
+ * The bound values (what the widgets display) are NOT in that state: write
+ * them straight into the app's bindings struct (janus_bindings.gen.h)
+ * here, whenever they arrive — the main redraws whatever changed. Nothing
+ * you do in this file lets local input change the screen. */
+#include <stdbool.h>
+
+#include "janus_remote.h"
+
+bool mirror_link_poll(janus_app_t *app, janus_remote_state_t *out) {
+    (void)app;
+    (void)out;
+    /* TODO: receive from the device (serial / MAVLink / socket ...). */
+    return false;
+}

@@ -418,6 +418,11 @@ void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index);
  * so other modules (Stage 6's janus_input_touch.c) can hit-test against
  * live state without duplicating this table. */
 bool janus_box_is_expanded(const janus_widget_desc_t *box);
+/* Sets a box's expanded state *without* redrawing anything — janus_toggle_box
+ * is the user-facing "flip it and repaint" entry; this is the state-only
+ * half, for callers that repaint the whole screen right after (janus_remote.h's
+ * janus_remote_state_apply). */
+void janus_box_set_expanded(const janus_widget_desc_t *box, bool expanded);
 
 /* Stage 6: encoder/button focus. `janus_set_focus` draws `widget` in its
  * focused visual state and, if a different widget was previously
