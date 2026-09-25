@@ -21,6 +21,11 @@ STATUS_BAR_H = 20
 # is also set — status_bar epic, decision 4); every screen's own content
 # (its authored header row included) starts below both bands.
 NAV_BAR_H = 28
+# inset a `focus_ring: true` row keeps on every side of its children, so
+# the runtime's focus ring (drawn inside the row's rect) never covers
+# them. Must equal JANUS_FOCUS_RING_W in runtime/embedded_c/src/
+# janus_runtime.c — tests/test_layout.py checks the two stay in step.
+FOCUS_RING_PAD = 6
 # smallest per-tab cell width worth laying out — more tabs than the panel
 # can give this many px each is a parse-time error (no scrolling in v1).
 NAV_TAB_MIN_W = 24
@@ -273,14 +278,16 @@ def _layout_widget(
 
     direction = _direction_of(widget)
     header_h = _header_height(widget) if widget.kind == "box" else 0
+    pad = FOCUS_RING_PAD if widget.focus_ring else 0
 
-    body_avail_w = own_avail_w
-    body_avail_h = None if own_avail_h is None else own_avail_h - header_h
+    body_avail_w = None if own_avail_w is None else own_avail_w - 2 * pad
+    body_avail_h = None if own_avail_h is None else own_avail_h - header_h - 2 * pad
     main_avail = body_avail_h if direction == "column" else body_avail_w
 
     fill_sizes = _distribute_fill(widget, direction, main_avail, body_avail_w, body_avail_h)
 
-    cursor_x, cursor_y = x, y + header_h
+    body_x, body_y = x + pad, y + header_h + pad
+    cursor_x, cursor_y = body_x, body_y
     for i, child in enumerate(widget.children):
         if i > 0:
             if direction == "column":
@@ -312,12 +319,12 @@ def _layout_widget(
 
     if direction == "column":
         body_w = max((c.geometry.w for c in widget.children), default=0)
-        body_h = cursor_y - (y + header_h)
+        body_h = cursor_y - body_y
     else:
-        body_w = cursor_x - x
+        body_w = cursor_x - body_x
         body_h = max((c.geometry.h for c in widget.children), default=0)
 
-    w, h = body_w, header_h + body_h
+    w, h = body_w + 2 * pad, header_h + body_h + 2 * pad
     if widget.kind == "box":
         w = max(w, _summary_width(widget))
     if forced_w is not None:

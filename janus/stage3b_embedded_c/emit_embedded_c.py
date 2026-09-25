@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 
-from ..ir import App, DisplayConfig, RenderMode, Screen, Widget
+from ..ir import App, DisplayConfig, RenderMode, Screen, Widget, is_focusable
 from ..stage2_layout.layout import build_nav_bar, build_status_bar
 from .image_asset import ImageAssetError, load_rgb565
 
@@ -300,16 +300,8 @@ def screen_bound_messages(screen: Screen) -> list[str]:
 # _emit_widget below emits C in (that one is post-order, for forward
 # declarations). 255 (JANUS_FOCUS_NONE in the C header) marks "not
 # focusable" — fine for realistic screen sizes (a uint8_t sentinel).
-_STRUCTURAL_KINDS = {"column", "row", "radiogroup", "navlist"}
+# The focusable set itself is ir.is_focusable (shared with Stage 1).
 FOCUS_ORDER_NONE = 255
-
-
-def _is_focusable(widget: Widget) -> bool:
-    if widget.kind == "box":
-        return True
-    if widget.kind in _STRUCTURAL_KINDS:
-        return False
-    return widget.on_press is not None or widget.navigate is not None
 
 
 def _assign_focus_order(root: Widget) -> dict[int, int]:
@@ -317,7 +309,7 @@ def _assign_focus_order(root: Widget) -> dict[int, int]:
     counter = [0]
 
     def visit(w: Widget) -> None:
-        if _is_focusable(w):
+        if is_focusable(w):
             order[id(w)] = counter[0]
             counter[0] += 1
         for child in w.children:
@@ -325,6 +317,43 @@ def _assign_focus_order(root: Widget) -> dict[int, int]:
 
     visit(root)
     return order
+
+
+# `focus_ring: true` rows (Widget.focus_ring). Each ring row gets a
+# 1-based slot into the screen's `<sv>_focus_rings[]` table, in pre-order;
+# every focusable widget inside it carries that slot as `.focus_ring`.
+# A slot (1 byte per widget) rather than a pointer to the row descriptor
+# because the row lives in its parent's children array, which _emit_widget
+# emits *after* the children (post-order) — a pointer would need a forward
+# declaration of a static array, which isn't portable C.
+MAX_FOCUS_RINGS = 255
+
+
+def _assign_focus_rings(root: Widget) -> tuple[dict[int, int], list[Widget]]:
+    slots: dict[int, int] = {}
+    rows: list[Widget] = []
+
+    def mark(w: Widget, slot: int) -> None:
+        for child in w.children:
+            if is_focusable(child):
+                slots[id(child)] = slot
+            mark(child, slot)
+
+    def visit(w: Widget) -> None:
+        if w.focus_ring:
+            rows.append(w)
+            mark(w, len(rows))
+            return  # Stage 1 rejects nested ring rows
+        for child in w.children:
+            visit(child)
+
+    visit(root)
+    if len(rows) > MAX_FOCUS_RINGS:
+        raise ValueError(
+            f"{len(rows)} `focus_ring` rows on one screen — the runtime's slot is a "
+            f"uint8_t, at most {MAX_FOCUS_RINGS}"
+        )
+    return slots, rows
 
 
 def emit_actions_header(app: App) -> str:
@@ -348,6 +377,7 @@ def _widget_init(
     summary_count: int,
     screen_index_by_name: dict[str, int] | None,
     focus_order_map: dict[int, int],
+    focus_ring_map: dict[int, int],
     lines: list[str],
     sv: str,
     str_counter: list[int],
@@ -385,6 +415,10 @@ def _widget_init(
     )
     id_c = _emit_flash_string(lines, sv, str_counter, widget.id)
     focus_order_c = str(focus_order_map.get(id(widget), FOCUS_ORDER_NONE))
+    # Only emitted when set, so a screen with no ring row generates
+    # byte-identical to before (0 == "rings itself", a zero-init default).
+    focus_ring_slot = focus_ring_map.get(id(widget))
+    focus_ring_c = f".focus_ring = {focus_ring_slot}, " if focus_ring_slot else ""
     color_c = _color_c(widget.color, "JANUS_COLOR_DEFAULT_FG")
     bg_color_c = _color_c(widget.bg, "JANUS_COLOR_DEFAULT_BG")
     font_size_c = _FONT_SIZE_ENUM[widget.font_size]
@@ -400,7 +434,7 @@ def _widget_init(
         f".initial_expanded = {initial_expanded_c}, "
         f".bind = {{ {bind_c} }}, .action = {action_c}, "
         f".navigate_target = {navigate_target_c}, "
-        f".focus_order = {focus_order_c}, "
+        f".focus_order = {focus_order_c}, {focus_ring_c}"
         f".color = {color_c}, .bg_color = {bg_color_c}, "
         f".font_size = {font_size_c}, .font_scale = {widget.font_scale}, "
         f".children = {children_array_name}, .child_count = {child_count}, "
@@ -416,6 +450,7 @@ def _emit_widget(
     counter: list[int],
     screen_index_by_name: dict[str, int] | None,
     focus_order_map: dict[int, int],
+    focus_ring_map: dict[int, int],
     str_counter: list[int],
     image_pxs: list[str],
 ) -> str:
@@ -429,7 +464,7 @@ def _emit_widget(
     child_count = 0
     if widget.children:
         child_inits = [
-            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map,
+            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map, focus_ring_map,
                          str_counter, image_pxs)
             for c in widget.children
         ]
@@ -445,7 +480,7 @@ def _emit_widget(
     summary_count = 0
     if widget.summary:
         summary_inits = [
-            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map,
+            _emit_widget(c, lines, sv, counter, screen_index_by_name, focus_order_map, focus_ring_map,
                          str_counter, image_pxs)
             for c in widget.summary
         ]
@@ -459,7 +494,7 @@ def _emit_widget(
 
     return _widget_init(
         widget, children_array_name, child_count, summary_array_name, summary_count,
-        screen_index_by_name, focus_order_map, lines, sv, str_counter, image_pxs,
+        screen_index_by_name, focus_order_map, focus_ring_map, lines, sv, str_counter, image_pxs,
     )
 
 
@@ -473,9 +508,10 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
     str_counter = [0]
     image_pxs: list[str] = []
     focus_order_map = _assign_focus_order(screen.root)
+    focus_ring_map, focus_rings = _assign_focus_rings(screen.root)
 
     top_inits = [
-        _emit_widget(child, lines, sv, counter, screen_index_by_name, focus_order_map,
+        _emit_widget(child, lines, sv, counter, screen_index_by_name, focus_order_map, focus_ring_map,
                      str_counter, image_pxs)
         for child in screen.root.children
     ]
@@ -502,6 +538,19 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
     else:
         images_c = "    .resolve_images = NULL,\n    .image_far = NULL,\n"
 
+    if focus_rings:
+        rings_array = f"{sv}_focus_rings"
+        ring_inits = ",\n".join(
+            f"    {{ .rect = {_rect(r.geometry)}, .bg_color = {_color_c(r.bg, 'JANUS_COLOR_DEFAULT_BG')} }}"
+            for r in focus_rings
+        )
+        lines.append(
+            f"static const janus_focus_ring_t {rings_array}[] JANUS_PROGMEM = {{\n{ring_inits}\n}};"
+        )
+        rings_c = f"    .focus_rings = {rings_array},\n"
+    else:
+        rings_c = ""
+
     messages = screen_bound_messages(screen)
     if len(messages) > 1:
         raise ValueError(
@@ -521,6 +570,7 @@ def emit_screen(screen: Screen, screen_index_by_name: dict[str, int] | None = No
         f"    .bound_struct = {bound_struct_c},\n"
         f"    .bound_dirty = {bound_dirty_c},\n"
         f"{images_c}"
+        f"{rings_c}"
         f"}};"
     )
     return "\n\n".join(lines) + "\n"

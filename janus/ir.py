@@ -83,6 +83,16 @@ class Widget:
     # A field-bound `hidden` that toggles on-device is deliberately out
     # of scope here (that one needs a real baked rect + a runtime check).
     hidden: bool = False
+    # row only. When true, the row itself is the focus marker for every
+    # focusable widget inside it: whichever one holds encoder/button focus,
+    # the runtime draws the cyan focus ring around the *whole row* rather
+    # than around that widget (a menu-style highlight — a 24x12 toggle is
+    # too small to carry a ring of its own). Stage 2 insets the row's
+    # children by the ring's width (FOCUS_RING_PAD) so the ring never
+    # covers them; Stage 3b bakes the row's rect into the screen's
+    # focus-ring table (janus_focus_ring_t). Explicit opt-in, never
+    # inferred — a row without it lays out byte-identical to before.
+    focus_ring: bool = False
     # "#RRGGBB" hex, packed to RGB565 at Stage 3b emission time — not
     # authored on-device, same "push work to build time" spirit as
     # geometry. `color` is the ink/foreground/on-state fill; `bg` is the
@@ -113,6 +123,22 @@ class Widget:
     # filled in later by the layout pass; always empty coming out of the parser
     geometry: Optional[Rect] = None
     geometry_collapsed: Optional[Rect] = None
+
+
+# Containers that never take focus themselves (a box does — its header
+# toggles). Shared by Stage 1 (focus_ring validation) and Stage 3b
+# (_assign_focus_order), so both agree on what "focusable" means.
+STRUCTURAL_KINDS = {"column", "row", "radiogroup", "navlist"}
+
+
+def is_focusable(widget: "Widget") -> bool:
+    """Encoder/button focus stops on box headers and on any leaf with
+    `on_press`/`navigate` — the same set touch dispatches on."""
+    if widget.kind == "box":
+        return True
+    if widget.kind in STRUCTURAL_KINDS:
+        return False
+    return widget.on_press is not None or widget.navigate is not None
 
 
 @dataclass

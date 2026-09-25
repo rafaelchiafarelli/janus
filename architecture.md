@@ -871,6 +871,28 @@ box is the one case nothing does. `janus_set_focus` now does an explicit
 for this case — same fix `janus_toggle_box` already applied for the
 identical reason.
 
+**Focus-ring rows (fixes/000005, 2026-09-25).** Any leaf with `on_press`/
+`navigate` is focusable (`ir.is_focusable`), not just `button` — but only
+`draw_button`/`draw_box_header` ever drew a ring, so a focused `toggle`
+(the relay rows' case) showed nothing, and a 24x12 toggle is too small to
+carry a 6px inset ring anyway. A `row` authored `focus_ring: true` becomes
+the marker instead: Stage 2 insets its children by `FOCUS_RING_PAD`
+(== `JANUS_FOCUS_RING_W`, checked by `tests/test_focus_ring.py`) on every
+side, so the ring's band is pixels no child paints; Stage 3b bakes each
+ring row's rect + `bg` into a per-screen `JANUS_PROGMEM`
+`janus_focus_ring_t` table (`janus_screen_desc_t.focus_rings`) and stamps
+every focusable widget inside it with a 1-based `.focus_ring` slot (a slot,
+not a pointer to the row — the row sits in its parent's children array,
+emitted after the children, and a forward-declared static array isn't
+portable C). `janus_set_focus` draws `draw_focus_ring(ring.rect)` after
+the incoming widget's redraw and erases the outgoing slot's band (same
+concentric strips, in `JANUS_DISPLAY_BACKGROUND` if declared, else the
+row's `bg`) — skipped when focus moves within one row, so no flicker.
+`draw_button`/`draw_box_header` skip their own ring for a widget with a
+slot. Stage 1 rejects `focus_ring` on anything but a `row`, a ring row with
+nothing focusable inside, and nested ring rows. A focusable leaf *outside*
+a ring row other than `button` still draws no marker of its own.
+
 **Nav strip rendering (nav_tabs epic task 2).** `janus_render_nav_bar(app)`
 (internal `draw_nav_bar`) paints the app-level tab strip into its band:
 one `fill_rect` per `app->nav_tabs` cell (baked geometry, loaded pgm-safe

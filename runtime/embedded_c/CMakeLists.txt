@@ -72,6 +72,10 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     target_link_libraries(janus_input_focus_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_input_focus_tests PRIVATE ${JANUS_WARN_FLAGS})
 
+    add_executable(janus_focus_ring_tests tests/test_focus_ring.c)
+    target_link_libraries(janus_focus_ring_tests PRIVATE janus_runtime janus_host_mock)
+    target_compile_options(janus_focus_ring_tests PRIVATE ${JANUS_WARN_FLAGS})
+
     add_executable(janus_input_encoder_tests tests/test_input_encoder.c)
     target_link_libraries(janus_input_encoder_tests PRIVATE janus_runtime janus_host_mock)
     target_compile_options(janus_input_encoder_tests PRIVATE ${JANUS_WARN_FLAGS})
@@ -118,6 +122,19 @@ if(JANUS_RUNTIME_BUILD_TESTS)
         JANUS_DISPLAY_PANEL_W=48 JANUS_DISPLAY_PANEL_H=32)
     target_compile_options(janus_clear_screen_bg_tests PRIVATE ${JANUS_WARN_FLAGS})
 
+    # Same focus-ring tests, with display.background declared: the ring's
+    # band is then erased in the canvas colour, not the row's bg. Same
+    # recompile-with-macros reasoning as janus_clear_screen_bg_tests.
+    add_executable(janus_focus_ring_bg_tests
+        tests/test_focus_ring.c
+        src/janus_runtime.c src/janus_input_touch.c src/janus_input_focus.c
+        src/janus_font.c src/janus_bound.c src/janus_format.c
+        host_mock/mock_driver.c host_mock/mock_touch.c
+        host_mock/mock_encoder.c host_mock/mock_buttons.c)
+    target_include_directories(janus_focus_ring_bg_tests PRIVATE include host_mock)
+    target_compile_definitions(janus_focus_ring_bg_tests PRIVATE JANUS_DISPLAY_BACKGROUND=0x4321)
+    target_compile_options(janus_focus_ring_bg_tests PRIVATE ${JANUS_WARN_FLAGS})
+
     # janus_draw's helpers live in janus_runtime.o, which pulls the driver
     # contract — so this links the mock, same as janus_runtime_tests.
     add_executable(janus_remote_tests tests/test_remote.c)
@@ -132,6 +149,8 @@ if(JANUS_RUNTIME_BUILD_TESTS)
     add_test(NAME janus_runtime_tests COMMAND janus_runtime_tests)
     add_test(NAME janus_input_touch_tests COMMAND janus_input_touch_tests)
     add_test(NAME janus_input_focus_tests COMMAND janus_input_focus_tests)
+    add_test(NAME janus_focus_ring_tests COMMAND janus_focus_ring_tests)
+    add_test(NAME janus_focus_ring_bg_tests COMMAND janus_focus_ring_bg_tests)
     add_test(NAME janus_input_encoder_tests COMMAND janus_input_encoder_tests)
     add_test(NAME janus_input_buttons_tests COMMAND janus_input_buttons_tests)
     add_test(NAME janus_nav_focus_tests COMMAND janus_nav_focus_tests)
