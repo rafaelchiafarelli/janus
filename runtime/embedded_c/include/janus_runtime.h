@@ -144,6 +144,11 @@ typedef struct janus_widget_desc {
     janus_action_id_t action;          /* on_press only; JANUS_ACTION_ID_NONE otherwise */
     int16_t navigate_target;           /* navigate only; index into janus_app_t.screens, -1 otherwise */
     uint8_t focus_order;               /* encoder/button traversal order, or JANUS_FOCUS_NONE; touch ignores this */
+    uint8_t focus_ring;                /* 1-based slot into the screen's `focus_rings` table: while
+                                         * this widget holds focus, the ring is drawn around that
+                                         * `focus_ring: true` row instead of around the widget
+                                         * itself. 0 (the zero-init default) == ring the widget's
+                                         * own rect, as before. */
     uint16_t color;                    /* RGB565 ink/foreground/on-state fill — see JANUS_COLOR_DEFAULT_FG */
     uint16_t bg_color;                 /* RGB565 background/off-state fill — see JANUS_COLOR_DEFAULT_BG */
     janus_font_size_t font_size;       /* which janus_font.h table draw_string reads this widget's
@@ -180,6 +185,16 @@ typedef struct janus_widget_desc {
     bool image_error;
 } janus_widget_desc_t;
 
+/* One `focus_ring: true` row (Widget.focus_ring): the rect the focus ring
+ * is drawn inside, and the colour its band is erased with on unfocus when
+ * app.yaml declares no `display.background` (the row's own `bg`). Stage 2
+ * insets the row's children by the ring width, so the band never overlaps
+ * them. */
+typedef struct {
+    janus_rect_t rect;
+    uint16_t bg_color;
+} janus_focus_ring_t;
+
 typedef struct {
     const char *name;                  /* flash-resident (JANUS_PROGMEM) on AVR, same caveat as
                                          * janus_widget_desc_t.id above — runtime never reads it */
@@ -197,6 +212,9 @@ typedef struct {
      * for a screen that bakes no images. */
     void (*resolve_images)(void);
     const janus_farptr_t *image_far;
+    /* JANUS_PROGMEM table a widget's `focus_ring` slot indexes (1-based).
+     * NULL for a screen with no `focus_ring: true` row. */
+    const janus_focus_ring_t *focus_rings;
 } janus_screen_desc_t;
 
 /* One tab of the app-level nav strip (app.yaml `nav: { kind: tabs }`).
@@ -260,6 +278,12 @@ static inline janus_widget_desc_t janus_widget_load(const janus_widget_desc_t *w
 static inline janus_screen_desc_t janus_screen_load(const janus_screen_desc_t *screen) {
     janus_screen_desc_t out;
     JANUS_MEMCPY_P(&out, screen, sizeof(out));
+    return out;
+}
+
+static inline janus_focus_ring_t janus_focus_ring_load(const janus_focus_ring_t *ring) {
+    janus_focus_ring_t out;
+    JANUS_MEMCPY_P(&out, ring, sizeof(out));
     return out;
 }
 

@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, StatusConfig, Widget
+from ..ir import App, Binding, DisplayConfig, NavTarget, Screen, StatusConfig, Widget, is_focusable
 from ..stage2_layout.layout import NAV_TAB_MIN_W
 
 log = logging.getLogger("janus.parse")
@@ -157,11 +157,50 @@ def _validate_widget(widget: Widget) -> None:
             f"widgets take a source image file"
         )
     _validate_format_text(widget)
+    _validate_focus_ring(widget)
     for child in widget.summary:
         if child.kind in _CONTAINER_KINDS:
             raise ValueError(
                 f"box {widget.id!r}'s summary widget {child.id!r} is a container "
                 f"(kind={child.kind!r}) — summary only holds leaf widgets, no nesting"
+            )
+
+
+def _descendants(widget: Widget):
+    for child in widget.children:
+        yield child
+        yield from _descendants(child)
+
+
+def _validate_focus_ring(widget: Widget) -> None:
+    """`focus_ring: true` is a row-only opt-in (see Widget.focus_ring).
+    A ring row with nothing focusable inside would never light up — almost
+    certainly an authoring mistake, so it's an error rather than a silent
+    no-op. Nested ring rows are rejected too: which of the two rows a
+    focused widget should ring is a decision the YAML would have to make,
+    not one the generator should guess."""
+    if not isinstance(widget.focus_ring, bool):
+        raise ValueError(
+            f"widget {widget.id!r}'s `focus_ring` must be true or false, got {widget.focus_ring!r}"
+        )
+    if not widget.focus_ring:
+        return
+    if widget.kind != "row":
+        raise ValueError(
+            f"widget {widget.id!r} (kind={widget.kind!r}) has `focus_ring` — only `row` "
+            f"widgets can be a focus ring"
+        )
+    descendants = list(_descendants(widget))
+    if not any(is_focusable(d) for d in descendants):
+        raise ValueError(
+            f"row {widget.id!r} has `focus_ring: true` but nothing inside it is focusable "
+            f"(no box, and no widget with `on_press`/`navigate`) — the ring would never show"
+        )
+    for d in descendants:
+        if d.focus_ring:
+            raise ValueError(
+                f"row {widget.id!r} has `focus_ring: true` and so does row {d.id!r} inside "
+                f"it — focus rings can't nest"
             )
 
 
@@ -243,6 +282,7 @@ def _parse_widget(data: dict[str, Any], base_dir: Path | None = None) -> Widget:
         font_size=data.get("font_size", "large"),
         font_scale=data.get("font_scale", 1),
         hidden=data.get("hidden", False),
+        focus_ring=data.get("focus_ring", False),
         # A `hidden` child is parsed (so its own subtree is still
         # validated) and then dropped here — nothing past Stage 1 ever
         # sees it. A hidden container takes its whole subtree with it.

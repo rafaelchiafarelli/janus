@@ -519,7 +519,7 @@ static int16_t g_focused_nav_index = -1;
  * draw_<kind>() already painted; the ring does cover its outermost few px
  * of content while focused — a deliberate trade for a legible 4px marker
  * (see Janus.md). */
-static void draw_focus_ring(janus_rect_t r) {
+static void paint_focus_ring(janus_rect_t r, uint16_t shade, uint16_t ring) {
     if (r.w <= 0 || r.h <= 0) return;
     int16_t t = JANUS_FOCUS_RING_W;
     if (2 * t > r.w) t = (int16_t)(r.w / 2);
@@ -527,7 +527,7 @@ static void draw_focus_ring(janus_rect_t r) {
     if (t <= 0) return;
 
     for (int16_t i = 0; i < t; i++) {
-        uint16_t c = (i == 0) ? JANUS_COLOR_FOCUS_SHADE : JANUS_COLOR_FOCUS_RING;
+        uint16_t c = (i == 0) ? shade : ring;
         int16_t inner_w = (int16_t)(r.w - 2 * i);
         int16_t inner_h = (int16_t)(r.h - 2 * i);
         janus_rect_t top    = { (int16_t)(r.x + i), (int16_t)(r.y + i), inner_w, 1 };
@@ -539,6 +539,10 @@ static void draw_focus_ring(janus_rect_t r) {
         fill_rect(left, c);
         fill_rect(right, c);
     }
+}
+
+static void draw_focus_ring(janus_rect_t r) {
+    paint_focus_ring(r, JANUS_COLOR_FOCUS_SHADE, JANUS_COLOR_FOCUS_RING);
 }
 
 /* ------------------------------------------------------------ box state --
@@ -639,7 +643,7 @@ static void draw_button(const janus_widget_desc_t *w) {
     janus_widget_desc_t lw = janus_widget_load(w);
     fill_rect(lw.geometry, lw.bg_color);
     draw_string(lw.geometry, lw.static_text, lw.color, lw.bg_color, true, lw.font_size, lw.font_scale, true, false);
-    if (w == g_focused_widget) draw_focus_ring(lw.geometry);
+    if (w == g_focused_widget && lw.focus_ring == 0) draw_focus_ring(lw.geometry);
 }
 /* "missing texture" magenta — a `file:` was authored on an image widget
  * but Stage 3b couldn't find/decode it (widget.image_error). Janus-owned,
@@ -922,7 +926,7 @@ static void draw_box_header(const janus_widget_desc_t *box, const void *bound_st
             render_widget(&lb.summary_children[i], bound_struct, bound_dirty);
         }
     }
-    if (box == g_focused_widget) {
+    if (box == g_focused_widget && lb.focus_ring == 0) {
         draw_focus_ring(has_strip ? lb.geometry_collapsed : lb.geometry);
     }
 }
@@ -1246,14 +1250,42 @@ void janus_switch_screen_async_start(janus_app_t *app, uint16_t screen_index) {
 }
 #endif  /* JANUS_RENDER_NONBLOCKING */
 
+/* `focus_ring: true` rows (janus_focus_ring_t). A widget whose `focus_ring`
+ * slot is set is ringed around that row, not around its own rect —
+ * draw_button/draw_box_header skip their own ring for it. Stage 2 insets
+ * the row's children by JANUS_FOCUS_RING_W, so the ring lives in a band
+ * no child ever paints: janus_set_focus has to draw it and erase it
+ * explicitly, and a child's own redraw never disturbs it. */
+static bool load_focus_ring(uint8_t slot, janus_focus_ring_t *out) {
+    if (slot == 0 || g_current_screen == NULL) return false;
+    janus_screen_desc_t ls = janus_screen_load(g_current_screen);
+    if (ls.focus_rings == NULL) return false;
+    *out = janus_focus_ring_load(&ls.focus_rings[slot - 1]);
+    return true;
+}
+
+static void erase_focus_ring(uint8_t slot) {
+    janus_focus_ring_t ring;
+    if (!load_focus_ring(slot, &ring)) return;
+#if defined(JANUS_DISPLAY_BACKGROUND)
+    uint16_t erase = (uint16_t)JANUS_DISPLAY_BACKGROUND;   /* the band is canvas, same colour janus_clear_screen uses */
+#else
+    uint16_t erase = ring.bg_color;
+#endif
+    paint_focus_ring(ring.rect, erase, erase);
+}
+
 void janus_set_focus(const janus_widget_desc_t *widget) {
     const janus_widget_desc_t *previous = g_focused_widget;
     if (previous == widget) return;
 
     const void *bound_struct = g_current_screen != NULL ? janus_screen_load(g_current_screen).bound_struct : NULL;
     g_focused_widget = widget;
+    uint8_t next_ring = widget != NULL ? janus_widget_load(widget).focus_ring : 0;
     if (previous != NULL) {
         janus_widget_desc_t lp = janus_widget_load(previous);
+        /* Moving within the same ring row keeps the ring up — no erase, no flicker. */
+        if (lp.focus_ring != 0 && lp.focus_ring != next_ring) erase_focus_ring(lp.focus_ring);
         /* A box with no header strip rings its *full body* instead of a
          * header band (draw_box_header, has_strip == false) -- unlike every
          * other focusable widget, nothing in its normal redraw path repaints
@@ -1268,7 +1300,11 @@ void janus_set_focus(const janus_widget_desc_t *widget) {
         }
         render_widget(previous, bound_struct, NULL);
     }
-    if (widget != NULL) render_widget(widget, bound_struct, NULL);
+    if (widget != NULL) {
+        render_widget(widget, bound_struct, NULL);
+        janus_focus_ring_t ring;
+        if (load_focus_ring(next_ring, &ring)) draw_focus_ring(ring.rect);
+    }
 }
 
 const janus_widget_desc_t *janus_get_focus(void) {
