@@ -7,7 +7,7 @@ for the bug and the ArduinoIHM evidence.
 ## Tasks
 
 ```
-1-sweep-level-dirty-clear   test flags during the sweep, clear after it; tests; docs   (no deps)
+1-sweep-level-dirty-clear-done   test flags during the sweep, clear after it; tests; docs   (no deps)
 ```
 
 ## Acceptance gate

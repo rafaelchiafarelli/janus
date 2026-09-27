@@ -401,7 +401,12 @@ void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_st
 /* Dirty-aware variants (added 2026-09-05) — same traversal as
  * janus_render_screen/janus_render_widget, but a bound leaf is only
  * actually redrawn if its own field's dirty bit (bound_dirty +
- * bind.dirty_offset) is set; the bit is cleared right after that redraw.
+ * bind.dirty_offset) is set. janus_render_screen_if_dirty *tests* the bits
+ * during the sweep and clears them after it (shared_field_dirty,
+ * 2026-09-26), so every widget bound to a changed field repaints — an LED
+ * and the toggle that drives it can share one field. A bit of a field no
+ * widget on the screen shows is left set; a widget inside a collapsed box
+ * keeps its bit until the box is shown.
  * Firmware sets a field's bit (e.g. `pwm_dirty.ch0_frequency = true`)
  * whenever it writes a new value into the matching `bound_struct` field
  * — nothing here does value comparison, it only trusts what firmware
@@ -413,6 +418,22 @@ void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_st
  * collapse/focus state changing is its own reason to redraw regardless of
  * any field's dirty bit, and both use the force-draw (NULL bound_dirty)
  * path where every leaf still draws. */
+/* Deprecated (2026-09-26): janus_render_widget_if_dirty keeps the
+ * original rule — each widget tests *and clears* its field's bit as it
+ * draws — so of two widgets in the subtree bound to the same field, only
+ * the first repaints, and a widget outside the subtree on that field is
+ * never repainted by it. Use janus_render_screen_if_dirty instead. Define
+ * JANUS_NO_DEPRECATION_WARNINGS to silence the compiler warning. */
+#if defined(JANUS_NO_DEPRECATION_WARNINGS)
+#define JANUS_DEPRECATED(msg)
+#elif defined(__GNUC__) || defined(__clang__)
+#define JANUS_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#elif defined(_MSC_VER)
+#define JANUS_DEPRECATED(msg) __declspec(deprecated(msg))
+#else
+#define JANUS_DEPRECATED(msg)
+#endif
+JANUS_DEPRECATED("misses widgets sharing a field; use janus_render_screen_if_dirty")
 void janus_render_widget_if_dirty(const janus_widget_desc_t *widget, const void *bound_struct, void *bound_dirty);
 void janus_render_screen_if_dirty(const janus_screen_desc_t *screen);
 
