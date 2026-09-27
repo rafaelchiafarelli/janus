@@ -871,14 +871,23 @@ static void draw_vu(const janus_widget_desc_t *w, const void *bound_struct) {
  * `bound_dirty` (added 2026-09-05, threaded through both): NULL means
  * "force draw regardless" (today's behavior, unchanged — every existing
  * caller passes NULL); a real pointer means "skip a bound leaf whose
- * field's dirty bit isn't set" — see bind_consume_dirty below and
+ * field's dirty bit isn't set" — see bind_check_dirty below and
  * janus_render_widget_if_dirty/janus_render_screen_if_dirty. */
 static void render_widget(const janus_widget_desc_t *w, const void *bound_struct, void *bound_dirty);
 
-/* Checks (and, if set, clears) whether `bind`'s own field is marked dirty
- * in `bound_dirty` — same offsetof-into-a-generated-struct mechanism
- * janus_read_bound_value already uses for the *value* struct, just a bool
- * instead.
+/* A dirty flag belongs to a *field*, and several widgets can bind the same
+ * field (an LED next to the toggle that drives it). So a screen sweep only
+ * *tests* flags (g_dirty_test_only) and clears them afterwards in a second
+ * walk (clear_dirty_flags) — clearing on the first widget's redraw would
+ * leave every later widget on that field stale (shared_field_dirty,
+ * 2026-09-26, found on ArduinoIHM). The deprecated
+ * janus_render_widget_if_dirty keeps the old test-and-clear per widget. */
+static bool g_dirty_test_only = false;
+
+/* Checks (and, outside a screen sweep, clears) whether `bind`'s own field
+ * is marked dirty in `bound_dirty` — same offsetof-into-a-generated-struct
+ * mechanism janus_read_bound_value already uses for the *value* struct,
+ * just a bool instead.
  *
  * NULL bound_dirty is the force-draw path (janus_render_screen /
  * janus_render_widget) — always "yes, draw".
@@ -891,12 +900,12 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
  * flickering its unchanging label text every tick (found on ArduinoIHM
  * hardware, 2026-09-07). A bound leaf still draws only when its field's
  * bit is set. */
-static bool bind_consume_dirty(const janus_bind_t *bind, void *bound_dirty) {
+static bool bind_check_dirty(const janus_bind_t *bind, void *bound_dirty) {
     if (bound_dirty == NULL) return true;
     if (bind->field_type == JANUS_FIELD_NONE) return false;
     bool *flag = (bool *)((uint8_t *)bound_dirty + bind->dirty_offset);
     if (!*flag) return false;
-    *flag = false;
+    if (!g_dirty_test_only) *flag = false;
     return true;
 }
 
@@ -938,14 +947,14 @@ static void render_widget(const janus_widget_desc_t *w, const void *bound_struct
 
     /* every leaf kind below draws from *live* bound data (or none at
      * all) — this one check covers all of them, same rule regardless of
-     * kind: unbound or dirty -> draw (and clear the bit); clean -> skip. */
+     * kind: unbound or dirty -> draw; clean -> skip. */
     switch (lw.kind) {
         case JANUS_WIDGET_LABEL: case JANUS_WIDGET_HEADER: case JANUS_WIDGET_BUTTON:
         case JANUS_WIDGET_IMAGE: case JANUS_WIDGET_RADIOBUTTON: case JANUS_WIDGET_PROGRESS:
         case JANUS_WIDGET_GAUGE: case JANUS_WIDGET_CHECKBOX: case JANUS_WIDGET_LED:
         case JANUS_WIDGET_DIVIDER: case JANUS_WIDGET_TOGGLE: case JANUS_WIDGET_BADGE:
         case JANUS_WIDGET_SLIDER: case JANUS_WIDGET_VU:
-            if (!bind_consume_dirty(&lw.bind, bound_dirty)) return;
+            if (!bind_check_dirty(&lw.bind, bound_dirty)) return;
             break;
         default:
             break;
@@ -1019,11 +1028,53 @@ void janus_render_screen(const janus_screen_desc_t *screen) {
     }
 }
 
+/* Pass 2 of a screen sweep: clears the flag of every bound leaf that
+ * render_widget's pass 1 could have reached — the same walk (box summaries
+ * always, box children only while expanded, containers recurse), so a
+ * widget inside a collapsed box keeps its flag for when it's shown. */
+static void clear_dirty_flags(const janus_widget_desc_t *w, void *bound_dirty) {
+    janus_widget_desc_t lw = janus_widget_load(w);
+    bool walk_children;
+    switch (lw.kind) {
+        case JANUS_WIDGET_BOX:
+            for (uint16_t i = 0; i < lw.summary_child_count; i++) {
+                clear_dirty_flags(&lw.summary_children[i], bound_dirty);
+            }
+            walk_children = janus_box_is_expanded(w);
+            break;
+        case JANUS_WIDGET_COLUMN:
+        case JANUS_WIDGET_ROW:
+        case JANUS_WIDGET_RADIOGROUP:
+            walk_children = true;
+            break;
+        default:   /* every leaf kind render_widget dirty-checks */
+            if (lw.bind.field_type != JANUS_FIELD_NONE) {
+                *(bool *)((uint8_t *)bound_dirty + lw.bind.dirty_offset) = false;
+            }
+            return;
+    }
+    if (!walk_children) return;
+    for (uint16_t i = 0; i < lw.child_count; i++) {
+        clear_dirty_flags(&lw.children[i], bound_dirty);
+    }
+}
+
 void janus_render_screen_if_dirty(const janus_screen_desc_t *screen) {
     janus_screen_desc_t ls;
     enter_screen(screen, &ls);
+    if (ls.bound_dirty == NULL) {   /* nothing bound: same as before, nothing dirty-checked */
+        for (uint16_t i = 0; i < ls.widget_count; i++) {
+            render_widget(&ls.widgets[i], ls.bound_struct, NULL);
+        }
+        return;
+    }
+    g_dirty_test_only = true;
     for (uint16_t i = 0; i < ls.widget_count; i++) {
         render_widget(&ls.widgets[i], ls.bound_struct, ls.bound_dirty);
+    }
+    g_dirty_test_only = false;
+    for (uint16_t i = 0; i < ls.widget_count; i++) {
+        clear_dirty_flags(&ls.widgets[i], ls.bound_dirty);
     }
 }
 
