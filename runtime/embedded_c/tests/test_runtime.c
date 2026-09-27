@@ -14,6 +14,9 @@
  * those fixtures' expected counts account for the resulting tile split
  * instead of avoiding it.
  */
+/* Still exercises the deprecated janus_render_widget_if_dirty on purpose. */
+#define JANUS_NO_DEPRECATION_WARNINGS
+
 #include <stddef.h>
 #include <stdio.h>
 
@@ -363,6 +366,161 @@ static void test_render_screen_if_dirty_respects_the_bit(void) {
     mock_driver_reset();
     janus_render_screen(&screen);
     CHECK(mock_driver_log_count == 1);
+}
+
+/* ---- fixture 2d: one field, several widgets (shared_field_dirty,
+ * 2026-09-26). A dirty flag belongs to the field, so one
+ * janus_render_screen_if_dirty must repaint *every* widget bound to it —
+ * in either tree order — and only then clear the flag. Found on ArduinoIHM:
+ * an LED and the toggle driving it bound to one field, and whichever came
+ * second stayed stale. Widgets sit in disjoint rects so "did it draw" is
+ * "did any draw call start inside its rect". ---- */
+typedef struct { int on; int other; } shared_demo_t;
+typedef struct { bool on; bool other; } shared_demo_dirty_t;
+#define SHARED_BIND { \
+    .field_offset = offsetof(shared_demo_t, on), \
+    .dirty_offset = offsetof(shared_demo_dirty_t, on), \
+    .field_type = JANUS_FIELD_INT }
+
+static bool drew_inside(janus_rect_t r) {
+    for (uint16_t i = 0; i < mock_driver_log_count; i++) {
+        int16_t x = (int16_t)mock_driver_log[i].x, y = (int16_t)mock_driver_log[i].y;
+        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
+    }
+    return false;
+}
+
+static void check_shared_field_sweep(const janus_screen_desc_t *screen, shared_demo_dirty_t *dirty,
+                                     janus_rect_t first, janus_rect_t second) {
+    dirty->on = false;
+    mock_driver_reset();
+    janus_render_screen_if_dirty(screen);
+    CHECK(mock_driver_log_count == 0);        /* clean: neither draws */
+
+    dirty->on = true;
+    mock_driver_reset();
+    janus_render_screen_if_dirty(screen);
+    CHECK(drew_inside(first));
+    CHECK(drew_inside(second));               /* the bug: this one was skipped */
+    CHECK(dirty->on == false);                /* cleared once, after the sweep */
+
+    mock_driver_reset();
+    janus_render_screen_if_dirty(screen);
+    CHECK(mock_driver_log_count == 0);        /* clean again: nothing redraws */
+}
+
+static void test_shared_field_repaints_every_widget_led_first(void) {
+    static shared_demo_t data = { .on = 1 };
+    static shared_demo_dirty_t dirty;
+    static const janus_widget_desc_t kids[] = {
+        { .kind = JANUS_WIDGET_LED, .id = "led", .geometry = { 0, 0, 10, 10 }, .bind = SHARED_BIND },
+        { .kind = JANUS_WIDGET_TOGGLE, .id = "tog", .geometry = { 40, 0, 24, 12 }, .bind = SHARED_BIND },
+    };
+    static const janus_widget_desc_t row = {
+        .kind = JANUS_WIDGET_ROW, .id = "row", .geometry = { 0, 0, 64, 12 },
+        .children = kids, .child_count = 2,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "SharedA", .widgets = &row, .widget_count = 1,
+        .bound_struct = &data, .bound_dirty = &dirty,
+    };
+    check_shared_field_sweep(&screen, &dirty, kids[0].geometry, kids[1].geometry);
+}
+
+static void test_shared_field_repaints_every_widget_toggle_first(void) {
+    static shared_demo_t data = { .on = 0 };
+    static shared_demo_dirty_t dirty;
+    static const janus_widget_desc_t kids[] = {
+        { .kind = JANUS_WIDGET_TOGGLE, .id = "tog", .geometry = { 0, 0, 24, 12 }, .bind = SHARED_BIND },
+        { .kind = JANUS_WIDGET_LED, .id = "led", .geometry = { 40, 0, 10, 10 }, .bind = SHARED_BIND },
+    };
+    static const janus_widget_desc_t row = {
+        .kind = JANUS_WIDGET_ROW, .id = "row", .geometry = { 0, 0, 50, 12 },
+        .children = kids, .child_count = 2,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "SharedB", .widgets = &row, .widget_count = 1,
+        .bound_struct = &data, .bound_dirty = &dirty,
+    };
+    check_shared_field_sweep(&screen, &dirty, kids[0].geometry, kids[1].geometry);
+}
+
+/* A box's summary LED sharing its field with a toggle in the box's body.
+ * The box header itself repaints on every sweep (not dirty-checked), so
+ * this counts calls instead of looking at rects: the dirty sweep must add
+ * exactly the LED's and the toggle's own draw calls on top of the clean
+ * sweep's. */
+static void test_shared_field_across_box_summary_and_body(void) {
+    static shared_demo_t data = { .on = 1 };
+    static shared_demo_dirty_t dirty;
+    static const janus_widget_desc_t summary[] = {
+        { .kind = JANUS_WIDGET_LED, .id = "sled", .geometry = { 60, 2, 10, 10 }, .bind = SHARED_BIND },
+    };
+    static const janus_widget_desc_t body[] = {
+        { .kind = JANUS_WIDGET_TOGGLE, .id = "btog", .geometry = { 0, 20, 24, 12 }, .bind = SHARED_BIND },
+    };
+    static const janus_widget_desc_t box = {
+        .kind = JANUS_WIDGET_BOX, .id = "sbox",
+        .geometry = { 0, 0, 72, 34 }, .geometry_collapsed = { 0, 0, 72, 16 },
+        .initial_expanded = true,
+        .children = body, .child_count = 1,
+        .summary_children = summary, .summary_child_count = 1,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "SharedBox", .widgets = &box, .widget_count = 1,
+        .bound_struct = &data, .bound_dirty = &dirty,
+    };
+
+    mock_driver_reset();
+    janus_render_widget(&summary[0], &data);
+    uint16_t led_calls = mock_driver_log_count;
+    mock_driver_reset();
+    janus_render_widget(&body[0], &data);
+    uint16_t toggle_calls = mock_driver_log_count;
+
+    dirty.on = false;
+    mock_driver_reset();
+    janus_render_screen_if_dirty(&screen);
+    uint16_t clean_calls = mock_driver_log_count;   /* header strip only */
+
+    dirty.on = true;
+    mock_driver_reset();
+    janus_render_screen_if_dirty(&screen);
+    CHECK(mock_driver_log_count == clean_calls + led_calls + toggle_calls);
+    CHECK(dirty.on == false);
+}
+
+/* A widget inside a *collapsed* box isn't drawn by the sweep, so the clear
+ * pass skips it too: a field only it shows keeps its flag, still owed a
+ * repaint when the box opens. A visible widget's field is cleared as usual. */
+static void test_collapsed_box_child_keeps_its_flag(void) {
+    static shared_demo_t data = { .on = 1, .other = 1 };
+    static shared_demo_dirty_t dirty;
+    static const janus_widget_desc_t body[] = {
+        { .kind = JANUS_WIDGET_TOGGLE, .id = "ctog", .geometry = { 0, 20, 24, 12 },
+          .bind = { .field_offset = offsetof(shared_demo_t, other),
+                    .dirty_offset = offsetof(shared_demo_dirty_t, other),
+                    .field_type = JANUS_FIELD_INT } },
+    };
+    static const janus_widget_desc_t widgets[] = {
+        { .kind = JANUS_WIDGET_BOX, .id = "cbox",
+          .geometry = { 0, 0, 72, 34 }, .geometry_collapsed = { 0, 0, 72, 16 },
+          .initial_expanded = false, .children = body, .child_count = 1 },
+        { .kind = JANUS_WIDGET_LED, .id = "cled", .geometry = { 100, 0, 10, 10 }, .bind = SHARED_BIND },
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "Collapsed", .widgets = widgets, .widget_count = 2,
+        .bound_struct = &data, .bound_dirty = &dirty,
+    };
+
+    dirty.on = true;
+    dirty.other = true;
+    mock_driver_reset();
+    janus_render_screen_if_dirty(&screen);
+    CHECK(drew_inside(widgets[1].geometry));   /* visible LED repaints... */
+    CHECK(dirty.on == false);                  /* ...and its flag clears */
+    CHECK(!drew_inside(body[0].geometry));     /* hidden toggle doesn't draw... */
+    CHECK(dirty.other == true);                /* ...and keeps its flag */
 }
 
 /* ---- fixture 3a: collapsing a box must clear the vacated body area, not
@@ -1309,6 +1467,10 @@ int main(void) {
     test_unbound_widget_always_draws_via_if_dirty();
     test_unbound_widget_skipped_on_a_dirty_sweep();
     test_render_screen_if_dirty_respects_the_bit();
+    test_shared_field_repaints_every_widget_led_first();
+    test_shared_field_repaints_every_widget_toggle_first();
+    test_shared_field_across_box_summary_and_body();
+    test_collapsed_box_child_keeps_its_flag();
     test_box_collapse_and_toggle();
     test_toggle_box_clears_vacated_body_on_collapse();
     test_box_summary_renders_when_collapsed_and_expanded();
