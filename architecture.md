@@ -719,8 +719,18 @@ bool janus_box_is_expanded(const janus_widget_desc_t *box);          /* reads th
 void janus_render_widget(const janus_widget_desc_t *widget, const void *bound_struct);
 
 /* Dirty-aware variants (added 2026-09-05): same traversal, but a bound
- * leaf only actually redraws (and clears the bit) if its own field's
- * dirty flag is set. Per-*field*, not per-widget-instance — the dirty
+ * leaf only actually redraws if its own field's dirty flag is set.
+ * janus_render_screen_if_dirty *tests* the flags during the sweep and
+ * clears them in a second walk after it (shared_field_dirty, 2026-09-26):
+ * the flag belongs to the field, and several widgets can bind one field
+ * (an LED next to the toggle that drives it) — clearing on the first
+ * widget's redraw left every later one stale. The second walk mirrors the
+ * first (box children only while expanded), so a widget in a collapsed box
+ * keeps its field's flag; a flag no widget on the screen shows stays set.
+ * janus_render_widget_if_dirty is **deprecated**: it keeps the old
+ * test-and-clear per widget, so it misses a second widget on the same
+ * field (compiler warning unless JANUS_NO_DEPRECATION_WARNINGS). Per-*field*,
+ * not per-widget-instance — the dirty
  * flag lives in a Stage 3b-generated `{message}_dirty_t` companion to
  * `{message}_t` (`emit_bindings_struct.py`), one `bool` per bound field,
  * same names; `janus_bind_t.dirty_offset` is `offsetof()` into it, the
