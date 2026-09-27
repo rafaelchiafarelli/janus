@@ -807,6 +807,59 @@ static void test_toggle_renders_a_switch_tracking_state(void) {
     CHECK(rt_painted_colour(20, 8, 0x001F));       /* track shows the ON colour */
 }
 
+/* Authored knob colours (knob_off / knob_on, 2026-09-27): one gray track in
+ * both states (color == bg_color), a red knob when off and a green one when
+ * on — the ArduinoIHM switch. Same geometry as above. */
+static void test_toggle_authored_knob_colours(void) {
+    static const janus_widget_desc_t toggle = {
+        .kind = JANUS_WIDGET_TOGGLE, .id = "tk", .geometry = { 0, 0, 60, 16 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+        .color = 0xD69A, .bg_color = 0xD69A,
+        .knob_off_color = 0xF800, .knob_on_color = 0x07E0,
+        .knob_flags = JANUS_KNOB_OFF_SET | JANUS_KNOB_ON_SET,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ToggleKnob", .widgets = &toggle, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(rt_colour_in_xband(0xF800, 0, 20));      /* red knob, left */
+    CHECK(!rt_colour_in_xband(0x07E0, 0, 60));     /* no green anywhere */
+    CHECK(rt_painted_colour(30, 8, 0xD69A));       /* gray track */
+
+    g_demo.level = 1;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(rt_colour_in_xband(0x07E0, 40, 60));     /* green knob, right */
+    CHECK(!rt_colour_in_xband(0xF800, 0, 60));     /* no red anywhere */
+    CHECK(rt_painted_colour(30, 8, 0xD69A));       /* same gray track */
+}
+
+/* Only one state authored: the other keeps the lightened-track tint. */
+static void test_toggle_knob_colour_per_state_is_independent(void) {
+    static const janus_widget_desc_t toggle = {
+        .kind = JANUS_WIDGET_TOGGLE, .id = "tk1", .geometry = { 0, 0, 60, 16 },
+        .bind = { .field_offset = offsetof(demo_t, level), .field_type = JANUS_FIELD_INT },
+        .color = 0x001F, .bg_color = 0xF800,
+        .knob_on_color = 0x07E0, .knob_flags = JANUS_KNOB_ON_SET,
+    };
+    static const janus_screen_desc_t screen = {
+        .name = "ToggleKnob1", .widgets = &toggle, .widget_count = 1, .bound_struct = &g_demo,
+    };
+
+    g_demo.level = 0;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(rt_colour_in_xband(janus_rgb565_lerp(0xF800, 0xFFFF, 96), 0, 20));  /* default tint */
+
+    g_demo.level = 1;
+    mock_driver_reset();
+    janus_render_screen(&screen);
+    CHECK(rt_colour_in_xband(0x07E0, 40, 60));
+}
+
 static void test_toggle_render_is_async_safe(void) {
     static const janus_widget_desc_t toggle = {
         .kind = JANUS_WIDGET_TOGGLE, .id = "t", .geometry = { 0, 0, 60, 16 },
@@ -1484,6 +1537,8 @@ int main(void) {
     test_switch_screen_repaints_the_status_bar();
     test_divider_always_draws_unconditionally();
     test_toggle_renders_a_switch_tracking_state();
+    test_toggle_authored_knob_colours();
+    test_toggle_knob_colour_per_state_is_independent();
     test_toggle_render_is_async_safe();
     test_led_shaded_disc_per_state();
     test_led_render_is_async_safe();

@@ -182,6 +182,23 @@ def _color_c(hex_color: str | None, default_macro: str) -> str:
     return f"0x{_pack_rgb565(hex_color):04x}"
 
 
+def _knob_fields_c(widget: Widget) -> str:
+    """toggle's authored knob colours (Widget.knob_off/knob_on). Emitted
+    only when set, with a flag bit per state — every RGB565 value is a real
+    colour, so "unset" can't be a sentinel colour — and a toggle with
+    neither generates byte-identical to before."""
+    parts, flags = [], []
+    if widget.knob_off is not None:
+        parts.append(f".knob_off_color = {_color_c(widget.knob_off, '')}")
+        flags.append("JANUS_KNOB_OFF_SET")
+    if widget.knob_on is not None:
+        parts.append(f".knob_on_color = {_color_c(widget.knob_on, '')}")
+        flags.append("JANUS_KNOB_ON_SET")
+    if not parts:
+        return ""
+    return ", ".join(parts) + f", .knob_flags = {' | '.join(flags)}, "
+
+
 # Past this, baked image data is a big enough share of a classic-AVR's
 # 256 KiB flash to warrant an explicit "does it still link?" line in the
 # build log. Not fatal — same "log, don't stop" contract image_asset
@@ -425,6 +442,7 @@ def _widget_init(
     image_fields_c = _image_fields_c(widget, lines, id_c, image_pxs)
 
     text_is_format_c = "true" if widget.text_is_format else "false"
+    knob_c = _knob_fields_c(widget)
 
     return (
         f"{{ .kind = {_KIND_ENUM[widget.kind]}, .id = {id_c}, "
@@ -434,7 +452,7 @@ def _widget_init(
         f".initial_expanded = {initial_expanded_c}, "
         f".bind = {{ {bind_c} }}, .action = {action_c}, "
         f".navigate_target = {navigate_target_c}, "
-        f".focus_order = {focus_order_c}, {focus_ring_c}"
+        f".focus_order = {focus_order_c}, {focus_ring_c}{knob_c}"
         f".color = {color_c}, .bg_color = {bg_color_c}, "
         f".font_size = {font_size_c}, .font_scale = {widget.font_scale}, "
         f".children = {children_array_name}, .child_count = {child_count}, "

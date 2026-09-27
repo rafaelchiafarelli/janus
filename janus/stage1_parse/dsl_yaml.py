@@ -158,6 +158,11 @@ def _validate_widget(widget: Widget) -> None:
         )
     _validate_format_text(widget)
     _validate_focus_ring(widget)
+    if (widget.knob_off is not None or widget.knob_on is not None) and widget.kind != "toggle":
+        raise ValueError(
+            f"widget {widget.id!r} (kind={widget.kind!r}) has `knob_off`/`knob_on` — only "
+            f"`toggle` widgets have a knob"
+        )
     for child in widget.summary:
         if child.kind in _CONTAINER_KINDS:
             raise ValueError(
@@ -279,6 +284,8 @@ def _parse_widget(data: dict[str, Any], base_dir: Path | None = None) -> Widget:
         fill=data.get("fill", False),
         color=_parse_color(data.get("color")),
         bg=_parse_color(data.get("bg")),
+        knob_off=_parse_color(data.get("knob_off")),
+        knob_on=_parse_color(data.get("knob_on")),
         font_size=data.get("font_size", "large"),
         font_scale=data.get("font_scale", 1),
         hidden=data.get("hidden", False),
