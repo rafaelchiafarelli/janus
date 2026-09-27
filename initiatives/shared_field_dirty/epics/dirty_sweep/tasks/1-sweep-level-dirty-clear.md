@@ -1,6 +1,6 @@
 # Task 1: sweep-level-dirty-clear
 
-**Status:** planned -- open questions A and B below must be answered first
+**Status:** ready -- open questions A and B decided 2026-09-26 (see Decisions)
 **Branch:** `1-sweep-level-dirty-clear` (from `tasks`)
 **Depends on:** nothing
 
@@ -50,6 +50,19 @@ every leaf kind and reached through box `summary_children` too
   stale again. Options: don't clear at all in the widget-level call (the
   caller owns clearing), clear anyway (document the caveat), or deprecate
   it in favour of the screen-level call.
+
+## Decisions (Rafael, 2026-09-26)
+
+- **A -> two passes over the tree** (a variant not in the list above: no
+  codegen, no RAM scratch). `janus_render_screen_if_dirty` runs pass 1 =
+  today's traversal with flags *tested only*, then pass 2 = the same
+  traversal (same box-expanded rule, summaries included) clearing the flag
+  of every bound leaf it reaches. A flag of a field no widget on the screen
+  shows is left set (harmless).
+- **B -> deprecate `janus_render_widget_if_dirty`**, keeping today's
+  behaviour (per-widget test-and-clear, so the shared-field bug stays
+  within a subtree call). Documented as deprecated in favour of
+  `janus_render_screen_if_dirty`, with a compiler deprecation warning.
 
 ## Pre-work
 
