@@ -336,3 +336,22 @@ def _layout_widget(
     if widget.kind == "box":
         widget.geometry_collapsed = Rect(x=x, y=y, w=w, h=header_h)
         _layout_summary_row(widget, x, y, w, header_h)
+
+    if direction == "row" and widget.align not in (None, "top"):
+        inner_h = h - header_h - 2 * pad
+        for child in widget.children:
+            slack = max(inner_h - child.geometry.h, 0)   # an overflowing child stays top-aligned
+            dy = slack // 2 if widget.align == "center" else slack
+            if dy:
+                _shift_y(child, dy)
+
+
+def _shift_y(widget: Widget, dy: int) -> None:
+    """Moves an already laid-out widget and its whole subtree (children,
+    box summaries, box collapsed rect) down by `dy` — `align` runs after a
+    row's children are positioned, so nested geometry must move with them."""
+    for rect in (widget.geometry, widget.geometry_collapsed):
+        if rect is not None:
+            rect.y += dy
+    for child in widget.children + widget.summary:
+        _shift_y(child, dy)

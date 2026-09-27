@@ -93,6 +93,11 @@ class Widget:
     # focus-ring table (janus_focus_ring_t). Explicit opt-in, never
     # inferred — a row without it lays out byte-identical to before.
     focus_ring: bool = False
+    # Row-laid-out containers only (2026-09-27): where each child sits on
+    # the cross (vertical) axis inside the row's height — "top" (None, the
+    # default, today's behaviour), "center" or "bottom". Resolved by Stage 2
+    # at build time, like the rest of layout.
+    align: Optional[Literal["top", "center", "bottom"]] = None
     # "#RRGGBB" hex, packed to RGB565 at Stage 3b emission time — not
     # authored on-device, same "push work to build time" spirit as
     # geometry. `color` is the ink/foreground/on-state fill; `bg` is the
