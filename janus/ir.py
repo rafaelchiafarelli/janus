@@ -101,6 +101,12 @@ class Widget:
     # no color at all keep generating unchanged.
     color: Optional[str] = None
     bg: Optional[str] = None
+    # toggle only (2026-09-27): the knob's colour in each state, "#RRGGBB".
+    # Unset keeps the old knob, a lightened tint of that state's track
+    # (`bg` off, `color` on). For one track colour in both states, set
+    # `color` and `bg` to the same value.
+    knob_off: Optional[str] = None
+    knob_on: Optional[str] = None
     # Which runtime/embedded_c/include/janus_font.h table this widget's
     # text renders from ("large" == today's only size before this field
     # existed, so it's the default — see janus_font.h for why LARGE == 0

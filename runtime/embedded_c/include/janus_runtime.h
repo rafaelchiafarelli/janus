@@ -113,6 +113,10 @@ typedef struct {
  * (box headers + any leaf with on_press/navigate). */
 #define JANUS_FOCUS_NONE ((uint8_t)255)
 
+/* janus_widget_desc_t.knob_flags (toggle's authored knob_off/knob_on). */
+#define JANUS_KNOB_OFF_SET ((uint8_t)0x01)
+#define JANUS_KNOB_ON_SET  ((uint8_t)0x02)
+
 typedef struct janus_widget_desc {
     janus_widget_kind_t kind;
     const char *id;                    /* generated, flash-resident (JANUS_PROGMEM) on AVR — the
@@ -151,6 +155,10 @@ typedef struct janus_widget_desc {
                                          * own rect, as before. */
     uint16_t color;                    /* RGB565 ink/foreground/on-state fill — see JANUS_COLOR_DEFAULT_FG */
     uint16_t bg_color;                 /* RGB565 background/off-state fill — see JANUS_COLOR_DEFAULT_BG */
+    uint16_t knob_off_color;           /* toggle only: knob colour when off, if JANUS_KNOB_OFF_SET */
+    uint16_t knob_on_color;            /* toggle only: knob colour when on, if JANUS_KNOB_ON_SET */
+    uint8_t knob_flags;                /* JANUS_KNOB_*_SET bits; 0 (zero-init) == both knobs are the
+                                         * old lightened tint of that state's track */
     janus_font_size_t font_size;       /* which janus_font.h table draw_string reads this widget's
                                          * text from; meaningless on a widget that never draws text */
     uint8_t font_scale;                /* integer pixel-replication multiplier on top of font_size's

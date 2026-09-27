@@ -793,11 +793,16 @@ static void draw_toggle(const janus_widget_desc_t *w, const void *bound_struct) 
     int16_t pad = 1;
     uint16_t track = on ? lw.color : lw.bg_color;
 
+    /* knob: the authored per-state colour (knob_off/knob_on) when set,
+     * else a lightened tint of the track, as before. */
+    uint8_t knob_bit = on ? JANUS_KNOB_ON_SET : JANUS_KNOB_OFF_SET;
+    uint16_t knob = (lw.knob_flags & knob_bit) ? (on ? lw.knob_on_color : lw.knob_off_color)
+                                               : janus_rgb565_lerp(track, 0xffff, 96);
+
     janus_fill_rounded_rect(r, (int16_t)(r.h / 2), track);
     int16_t cx = on ? (int16_t)(r.x + r.w - kd / 2 - pad)
                     : (int16_t)(r.x + kd / 2 + pad);
-    janus_fill_circle(cx, (int16_t)(r.y + r.h / 2), (int16_t)(kd / 2 - pad),
-                      janus_rgb565_lerp(track, 0xffff, 96));
+    janus_fill_circle(cx, (int16_t)(r.y + r.h / 2), (int16_t)(kd / 2 - pad), knob);
 }
 
 static void draw_badge(const janus_widget_desc_t *w, const void *bound_struct) {
