@@ -158,6 +158,7 @@ def _validate_widget(widget: Widget) -> None:
         )
     _validate_format_text(widget)
     _validate_focus_ring(widget)
+    _validate_align(widget)
     if (widget.knob_off is not None or widget.knob_on is not None) and widget.kind != "toggle":
         raise ValueError(
             f"widget {widget.id!r} (kind={widget.kind!r}) has `knob_off`/`knob_on` — only "
@@ -207,6 +208,30 @@ def _validate_focus_ring(widget: Widget) -> None:
                 f"row {widget.id!r} has `focus_ring: true` and so does row {d.id!r} inside "
                 f"it — focus rings can't nest"
             )
+
+
+_VALID_ALIGNS = ("top", "center", "bottom")
+
+
+def _validate_align(widget: Widget) -> None:
+    """`align` places children on a row's cross (vertical) axis, so it only
+    means something on a container laid out as a row: a `row`, or a
+    container with `layout: row` (same rule as stage2's _direction_of)."""
+    if widget.align is None:
+        return
+    if widget.align not in _VALID_ALIGNS:
+        raise ValueError(
+            f"widget {widget.id!r} has invalid align {widget.align!r} — must be one of "
+            f"{list(_VALID_ALIGNS)}"
+        )
+    is_row = widget.kind in _CONTAINER_KINDS and (
+        widget.layout == "row" or (widget.layout is None and widget.kind == "row")
+    )
+    if not is_row:
+        raise ValueError(
+            f"widget {widget.id!r} (kind={widget.kind!r}) has `align` — only a `row`, or a "
+            f"container with `layout: row`, aligns its children vertically"
+        )
 
 
 def _validate_format_text(widget: Widget) -> None:
@@ -290,6 +315,7 @@ def _parse_widget(data: dict[str, Any], base_dir: Path | None = None) -> Widget:
         font_scale=data.get("font_scale", 1),
         hidden=data.get("hidden", False),
         focus_ring=data.get("focus_ring", False),
+        align=data.get("align"),
         # A `hidden` child is parsed (so its own subtree is still
         # validated) and then dropped here — nothing past Stage 1 ever
         # sees it. A hidden container takes its whole subtree with it.
